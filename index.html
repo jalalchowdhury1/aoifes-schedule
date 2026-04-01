@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Aoife's Weekly Schedule</title>
+<style>
+/* ── Colour tokens ─────────────────────────────────────── */
+:root {
+  --bg:        #0e0e11;
+  --bg-grid:   #131316;
+  --bg-panel:  #1a1a1e;
+  --bg-input:  #222226;
+  --line:      #222226;
+  --border:    #2e2e34;
+  --text:      #f0f0f5;
+  --text-sub:  #8f8fa0;
+  --text-muted:#444450;
+  --text-week: #6b6b7f;
+  --text-wkend:#60a5fa;
+}
+html.light-print {
+  --bg:        #f6f5f0;
+  --bg-grid:   #ffffff;
+  --bg-panel:  #f0efe9;
+  --bg-input:  #ffffff;
+  --line:      #e4e3dd;
+  --border:    #d0cfc8;
+  --text:      #111;
+  --text-sub:  #555;
+  --text-muted:#aaa;
+  --text-week: #777;
+  --text-wkend:#1a6fa0;
+}
+
+/* ── Event colour tokens (dark default) ────────────────── */
+.q  { --eb:#0D3D2A; --el:#1D9E75; --et:#9FE1CB; }
+.r  { --eb:#1E1849; --el:#7F77DD; --et:#CECBF6; }
+.h  { --eb:#3D1208; --el:#D85A30; --et:#F5C4B3; }
+.b  { --eb:#351D02; --el:#EF9F27; --et:#FAC775; }
+.a  { --eb:#3D1020; --el:#D4537E; --et:#F4C0D1; }
+.ot { --eb:#051E38; --el:#378ADD; --et:#B5D4F4; }
+
+/* ── Light-print event colour overrides ─────────────────── */
+html.light-print .q  { --eb:#B8F0D5; --el:#0F6E56; --et:#04342C; }
+html.light-print .r  { --eb:#D4D0F8; --el:#534AB7; --et:#26215C; }
+html.light-print .h  { --eb:#F8C8B0; --el:#993C1D; --et:#4A1B0C; }
+html.light-print .b  { --eb:#FAD89A; --el:#854F0B; --et:#412402; }
+html.light-print .a  { --eb:#F8C0D4; --el:#993556; --et:#4B1528; }
+html.light-print .ot { --eb:#BEDBF8; --el:#185FA5; --et:#042C53; }
+
+/* ── Legend pill colours (dark default) ─────────────────── */
+.pq  { background:#0D3D2A; color:#9FE1CB; border:0.5px solid #1D9E75; }
+.pr  { background:#1E1849; color:#CECBF6; border:0.5px solid #7F77DD; }
+.ph  { background:#3D1208; color:#F5C4B3; border:0.5px solid #D85A30; }
+.pb  { background:#351D02; color:#FAC775; border:0.5px solid #EF9F27; }
+.pa  { background:#3D1020; color:#F4C0D1; border:0.5px solid #D4537E; }
+.pot { background:#051E38; color:#B5D4F4; border:0.5px solid #378ADD; }
+
+/* ── Base styles ─────────────────────────────────────────── */
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  background:var(--bg); color:var(--text);
+  padding:14px 20px;
+}
+.top  { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px; }
+.title{ font-size:15px; font-weight:500; color:var(--text); }
+.controls{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.legend  { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:8px; }
+.hint    { font-size:11px; color:var(--text-muted); margin-bottom:8px; }
+.pill    { display:inline-block; border-radius:20px; padding:2px 10px; font-size:11px; font-weight:500; transition:opacity .15s; }
+.pill:hover{ opacity:.75; }
+.grid-outer { overflow-x:auto; border:0.5px solid var(--border); border-radius:10px; }
+#grid       { display:flex; background:var(--bg-grid); min-width:560px; }
+.panel      { margin-top:10px; padding:12px 14px; background:var(--bg-panel); border-radius:10px; border:0.5px solid var(--border); }
+button      { font-family:inherit; font-size:12px; padding:4px 12px; border:0.5px solid var(--border); border-radius:6px; background:var(--bg-input); color:var(--text); cursor:pointer; }
+button:hover{ opacity:.78; }
+input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px solid var(--border); border-radius:6px; background:var(--bg-input); color:var(--text); }
+.pbtn { background:#fff; color:#111; border-color:#ccc; font-weight:500; }
+.rbtn { background:#3f1010; color:#f87171; border-color:#7f1d1d; }
+
+/* ── Grid components ─────────────────────────────────────── */
+.ca  { position:relative; border-left:0.5px solid var(--line); }
+.hl  { position:absolute; left:0; right:0; pointer-events:none; border-top:0.5px solid var(--line); }
+.hl.hf { opacity:.35; border-top-style:dashed; }
+
+/* ── Event blocks ────────────────────────────────────────── */
+.evt {
+  position:absolute; left:2px; right:2px;
+  border-radius:6px; padding:3px 6px 8px;
+  overflow:hidden; z-index:5;
+  border-left:3px solid var(--el);
+  background:var(--eb);
+  user-select:none; -webkit-user-select:none;
+  touch-action:none; cursor:grab;
+}
+.evt:active{ cursor:grabbing; }
+.evt.ghost { opacity:.3; }
+.et { font-size:11px; font-weight:500; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; color:var(--et); }
+.en { font-size:9px; opacity:.75; margin-top:1px; pointer-events:none; color:var(--et); }
+.rh { position:absolute; bottom:0; left:0; right:0; height:7px; cursor:ns-resize; display:flex; align-items:center; justify-content:center; }
+.rh:after { content:''; width:18px; height:2px; border-radius:1px; background:var(--et); opacity:.25; display:block; }
+
+/* ── Saved flash ─────────────────────────────────────────── */
+.saved-flash { position:fixed; bottom:16px; right:16px; background:#f0f0f5; color:#111; font-size:11px; padding:6px 14px; border-radius:20px; opacity:0; transition:opacity .3s; pointer-events:none; font-family:inherit; z-index:500; }
+.saved-flash.show { opacity:1; }
+
+/* ── Print modal ─────────────────────────────────────────── */
+.pmb { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:900; align-items:center; justify-content:center; }
+.pmb.open { display:flex; }
+.pmd { background:#1a1a1e; border:0.5px solid #3f3f46; border-radius:14px; padding:24px; width:290px; text-align:center; }
+.pmd p    { color:#f0f0f5; font-size:14px; font-weight:500; margin-bottom:5px; }
+.pmd small{ color:#71717a; font-size:11px; display:block; margin-bottom:18px; line-height:1.5; }
+.pmd .opts{ display:flex; gap:8px; margin-bottom:8px; }
+.pmd .opts button { flex:1; padding:8px; font-size:13px; }
+.pmd .cancel { color:#71717a; border-color:transparent; background:transparent; width:100%; font-size:12px; }
+
+/* ── Print ───────────────────────────────────────────────── */
+@media print {
+  @page { size:letter landscape; margin:0.4in; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .no-print,.top,.legend,.hint,.panel,.saved-flash,.pmb { display:none !important; }
+  body { padding:0; background:var(--bg) !important; }
+  .grid-outer { border:none; overflow:visible; }
+  #grid { min-width:unset !important; background:var(--bg-grid) !important; }
+  html.light-print body,
+  html.light-print #grid,
+  html.light-print .grid-outer { background:#fff !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="saved-flash" id="flash">Saved</div>
+
+<div class="pmb" id="pmodal">
+  <div class="pmd">
+    <p>Choose print theme</p>
+    <small>Dark print requires "Background graphics"<br>enabled in Chrome's More Settings</small>
+    <div class="opts">
+      <button onclick="doPrint('dark')" style="background:#111;color:#fff;border-color:#333;">Dark</button>
+      <button onclick="doPrint('light')" class="pbtn">Light</button>
+    </div>
+    <button class="cancel" onclick="closePM()">Cancel</button>
+  </div>
+</div>
+
+<div class="top">
+  <span class="title">Aoife's weekly schedule</span>
+  <div class="controls no-print">
+    <span style="font-size:11px;color:var(--text-muted);">Sunday:</span>
+    <button id="sun-btn" onclick="toggleSun()">Regular</button>
+    <button onclick="openAdd()">+ Add event</button>
+    <button onclick="doReset()" class="rbtn">Reset</button>
+    <button class="pbtn" onclick="openPM()">Print / Save PDF</button>
+  </div>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<p class="hint no-print">Drag to move &middot; Drag bottom edge to resize &middot; Click to edit &mdash; saves automatically</p>
+
+<div class="grid-outer"><div id="grid"></div></div>
+<div id="panel"></div>
+
+<script>
+const SK   = 'aoife_v3';
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const S=9, E=17, SPH=66, PPH=78;
+let PH = SPH;
+
+const CATS = {
+  quran:   {label:"Quran",                               cls:"q",  bclr:"#1D9E75"},
+  ruhamah: {label:"Ruhama \u2014 ELA/Math",              cls:"r",  bclr:"#7F77DD"},
+  hala:    {label:"Miss Hala \u2014 Arabic/Islamic Studies",cls:"h",bclr:"#D85A30"},
+  barakot: {label:"Barrington trip",                     cls:"b",  bclr:"#EF9F27"},
+  art:     {label:"Art Class with Ayra",                 cls:"a",  bclr:"#D4537E"},
+  other:   {label:"Other",                               cls:"ot", bclr:"#378ADD"},
+};
+
+let _n=0; const uid=()=>`e${++_n}`;
+const catLabel=cat=>catLabels[cat]||CATS[cat]?.label||'Event';
+const evLabel=ev=>ev.name||catLabel(ev.cat);
+function fmt(h){
+  const hh=Math.floor(h),mm=Math.round((h-hh)*60),ap=hh>=12?"pm":"am";
+  const h12=hh>12?hh-12:hh===0?12:hh;
+  return mm?`${h12}:${String(mm).padStart(2,"0")}${ap}`:`${h12}${ap}`;
+}
+
+function defEvents(){
+  _n=0;
+  return [
+    ...[0,2,4].map(d=>({id:uid(),cat:"quran",  day:d,start:10,end:11,note:"",name:""})),
+    {id:uid(),cat:"ruhamah",day:0,start:11,end:13,note:"2-hr session",name:""},
+    {id:uid(),cat:"ruhamah",day:1,start:11,end:12,note:"",name:""},
+    {id:uid(),cat:"ruhamah",day:3,start:11,end:12,note:"",name:""},
+    {id:uid(),cat:"ruhamah",day:5,start:11,end:13,note:"2-hr session",name:""},
+    {id:uid(),cat:"ruhamah",day:6,start:11,end:13,note:"Regular Sun \u2014 every other week at 10am",name:""},
+    ...[1,2,3].map(d=>({id:uid(),cat:"hala",   day:d,start:14,end:16,note:"",name:""})),
+    {id:uid(),cat:"barakot",day:6,start:9,end:10,note:"Mostly Sundays",name:"Barrington trip"},
+  ];
+}
+
+// ── Persistence ───────────────────────────────────────────
+let ftimer=null;
+function save(){
+  try{
+    localStorage.setItem(SK,JSON.stringify({events,altSun,catLabels}));
+    const f=document.getElementById('flash');
+    f.classList.add('show'); clearTimeout(ftimer);
+    ftimer=setTimeout(()=>f.classList.remove('show'),1400);
+  }catch(e){}
+}
+function load(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch(e){return null;}}
+function doReset(){
+  if(!confirm('Reset to defaults? All changes will be cleared.'))return;
+  localStorage.removeItem(SK);
+  events=defEvents();altSun=false;selId=null;addMode=false;
+  document.getElementById('sun-btn').textContent='Regular';
+  render();
+}
+
+const saved=load();
+let events=saved?saved.events:defEvents();
+let altSun=saved?saved.altSun:false;
+let catLabels=saved?saved.catLabels||{}:{};
+if(events.length){const mx=Math.max(...events.map(e=>parseInt(e.id.replace('e',''))||0));if(mx>=_n)_n=mx+1;}
+
+let selId=null,addMode=false,ptr=null;
+let nw={cat:"other",day:0,start:10,end:11,note:"",name:""};
+
+// ── Print ─────────────────────────────────────────────────
+function openPM(){ document.getElementById('pmodal').classList.add('open'); }
+function closePM(){ document.getElementById('pmodal').classList.remove('open'); }
+function doPrint(theme){
+  closePM();
+  const h=document.documentElement;
+  theme==='light'?h.classList.add('light-print'):h.classList.remove('light-print');
+  setTimeout(()=>{ window.print(); setTimeout(()=>h.classList.remove('light-print'),500); },80);
+}
+function applyPPH(){ PH=PPH; render(); document.body.offsetHeight; }
+function applySPH(){ PH=SPH; render(); }
+window.onbeforeprint=applyPPH;
+window.onafterprint=applySPH;
+
+// ── Pointer drag / resize ─────────────────────────────────
+const snap=h=>Math.round(h*2)/2;
+function colRects(){ return DAYS.map((_,di)=>{const el=document.getElementById(`ca-${di}`);return el?el.getBoundingClientRect():null;}); }
+function dayAtX(x,rs){ for(let i=0;i<7;i++){const r=rs[i];if(r&&x>=r.left&&x<=r.right)return i;} return -1; }
+
+function onEvtDown(e,id){
+  if(e.target.classList.contains("rh"))return;
+  e.preventDefault();
+  const ev=events.find(x=>x.id===id);if(!ev)return;
+  const el=document.getElementById(`ev-${id}`),rect=el.getBoundingClientRect();
+  ptr={type:"move",id,offsetH:(e.clientY-rect.top)/PH,duration:ev.end-ev.start,
+       moved:false,startX:e.clientX,startY:e.clientY,rects:colRects()};
+  el.classList.add("ghost");
+  document.addEventListener("pointermove",onMove,{passive:false});
+  document.addEventListener("pointerup",onUp);
+}
+function onRhDown(e,id){
+  e.preventDefault();e.stopPropagation();
+  const ev=events.find(x=>x.id===id);if(!ev)return;
+  const col=document.getElementById(`ca-${ev.day}`);
+  ptr={type:"resize",id,colRect:col.getBoundingClientRect(),moved:false,startX:e.clientX,startY:e.clientY};
+  document.addEventListener("pointermove",onMove,{passive:false});
+  document.addEventListener("pointerup",onUp);
+}
+function onMove(e){
+  if(!ptr)return; e.preventDefault();
+  if(Math.abs(e.clientX-ptr.startX)>3||Math.abs(e.clientY-ptr.startY)>3)ptr.moved=true;
+  if(ptr.type==="move"){
+    const di=dayAtX(e.clientX,ptr.rects);if(di<0)return;
+    const r=ptr.rects[di];
+    const ns=Math.max(S,Math.min(E-ptr.duration,snap(S+(e.clientY-r.top)/PH-ptr.offsetH)));
+    events=events.map(x=>x.id===ptr.id?{...x,day:di,start:ns,end:ns+ptr.duration}:x);
+  }else{
+    const ev=events.find(x=>x.id===ptr.id);if(!ev)return;
+    const ne=Math.max(ev.start+0.5,Math.min(E,snap(S+(e.clientY-ptr.colRect.top)/PH)));
+    events=events.map(x=>x.id===ptr.id?{...x,end:ne}:x);
+  }
+  renderGrid();
+  document.getElementById(`ev-${ptr.id}`)?.classList.add("ghost");
+}
+function onUp(){
+  if(!ptr)return;
+  const{moved,id}=ptr;ptr=null;
+  document.removeEventListener("pointermove",onMove);
+  document.removeEventListener("pointerup",onUp);
+  if(!moved){selId=selId===id?null:id;addMode=false;}
+  render();save();
+}
+
+function toggleSun(){
+  altSun=!altSun;
+  events=events.map(ev=>{
+    if(ev.cat==="ruhamah"&&ev.day===6)
+      return altSun?{...ev,start:10,end:12,note:"Alt Sunday \u2014 Ruhamah at 10am"}
+                   :{...ev,start:11,end:13,note:"Regular Sun \u2014 every other week at 10am"};
+    return ev;
+  });
+  document.getElementById("sun-btn").textContent=altSun?"Alt Sunday":"Regular";
+  render();save();
+}
+
+function render(){ renderLegend(); renderGrid(); renderPanel(); }
+
+function renderLegend(){
+  const leg=document.getElementById('legend'); if(!leg)return;
+  const pcls={quran:'pq',ruhamah:'pr',hala:'ph',barakot:'pb',art:'pa',other:'pot'};
+  leg.innerHTML=Object.entries(CATS).map(([k,v])=>`
+    <span class="pill ${pcls[k]||'pot'}" title="Click to rename"
+      style="cursor:pointer;user-select:none;"
+      onclick="editCatLabel('${k}',this)">${catLabel(k)}</span>`
+  ).join('');
+}
+
+function editCatLabel(catKey, pillEl){
+  const cur=catLabel(catKey);
+  // Replace pill content with inline input
+  const pcls=pillEl.className;
+  pillEl.innerHTML='';
+  const inp=document.createElement('input');
+  inp.type='text'; inp.value=cur;
+  inp.style.cssText='font-size:11px;font-weight:500;border:none;background:transparent;color:inherit;outline:none;font-family:inherit;padding:0;min-width:40px;width:'+(Math.max(50,cur.length*7.5))+'px;';
+  pillEl.appendChild(inp);
+  inp.focus(); inp.select();
+  let committed=false;
+  function commit(){
+    if(committed)return; committed=true;
+    const val=inp.value.trim();
+    const def=CATS[catKey]?.label||'';
+    if(val&&val!==def) catLabels[catKey]=val;
+    else delete catLabels[catKey];
+    render(); save();
+  }
+  inp.addEventListener('blur',commit);
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();inp.blur();}
+    if(e.key==='Escape'){committed=true;renderLegend();}
+    // auto-resize as user types
+    inp.style.width=Math.max(50,inp.value.length*7.5)+'px';
+  });
+  inp.addEventListener('input',()=>{inp.style.width=Math.max(50,inp.value.length*7.5)+'px';});
+}
+
+function renderGrid(){
+  const gh=(E-S)*PH, grid=document.getElementById("grid");
+  let tc=`<div style="flex-shrink:0;width:40px;padding-top:28px;background:var(--bg-grid);">`;
+  for(let h=S;h<=E;h++) tc+=`<div style="height:${PH}px;"><span style="font-size:9px;color:var(--text-muted);">${fmt(h)}</span></div>`;
+  tc+=`</div>`;
+  const dc=DAYS.map((day,di)=>{
+    const isWE=di>=5;
+    let col=`<div style="flex:1;min-width:76px;background:var(--bg-grid);">`;
+    col+=`<div style="height:28px;display:flex;align-items:center;justify-content:center;">
+      <span style="font-size:11px;font-weight:${isWE?500:400};color:${isWE?"var(--text-wkend)":"var(--text-week)"};">${day}</span>
+    </div>`;
+    col+=`<div class="ca" id="ca-${di}" style="height:${gh}px;">`;
+    for(let i=0;i<=E-S;i++){
+      col+=`<div class="hl" style="top:${i*PH}px;"></div>`;
+      if(i<E-S) col+=`<div class="hl hf" style="top:${i*PH+PH/2}px;"></div>`;
+    }
+    events.filter(ev=>ev.day===di).forEach(ev=>{
+      const c=CATS[ev.cat]||CATS.other;
+      const top=(ev.start-S)*PH,height=(ev.end-ev.start)*PH,isSel=ev.id===selId;
+      col+=`<div class="evt ${c.cls}" id="ev-${ev.id}"
+        style="top:${top+1}px;height:${height-2}px;${isSel?`outline:2px solid ${c.bclr};outline-offset:1px;`:""}"
+        onpointerdown="onEvtDown(event,'${ev.id}')">
+        <div class="et">${evLabel(ev)}</div>
+        <div class="en">${fmt(ev.start)}&ndash;${fmt(ev.end)}</div>
+        ${ev.note&&height>46?`<div class="en" style="font-style:italic;white-space:normal;">${ev.note}</div>`:""}
+        ${height>22?`<div class="rh" onpointerdown="onRhDown(event,'${ev.id}')"></div>`:""}
+      </div>`;
+    });
+    col+=`</div></div>`;
+    return col;
+  }).join("");
+  grid.innerHTML=tc+dc;
+}
+
+function cOpts(sel){ return Object.entries(CATS).map(([k,v])=>`<option value="${k}"${sel===k?" selected":""}>${catLabel(k)}</option>`).join(""); }
+function dOpts(sel){ return DAYS.map((d,i)=>`<option value="${i}"${sel===i?" selected":""}>${d}</option>`).join(""); }
+
+function renderPanel(){
+  const panel=document.getElementById("panel");
+  if(addMode){
+    panel.innerHTML=`<div class="panel no-print">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="font-size:13px;font-weight:500;">Add event</span>
+        <button onclick="closeP()">&#x2715;</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="font-size:11px;color:var(--text-sub);">Custom name</label><br>
+          <input type="text" placeholder="leave blank for default" oninput="nw.name=this.value" style="width:100%;margin-top:3px;"></div>
+        <div><label style="font-size:11px;color:var(--text-sub);">Type</label><br>
+          <select onchange="nw.cat=this.value" style="width:100%;margin-top:3px;">${cOpts(nw.cat)}</select></div>
+        <div><label style="font-size:11px;color:var(--text-sub);">Day</label><br>
+          <select onchange="nw.day=+this.value" style="width:100%;margin-top:3px;">${dOpts(nw.day)}</select></div>
+        <div style="display:flex;gap:6px;">
+          <div style="flex:1;"><label style="font-size:11px;color:var(--text-sub);">Start</label><br>
+            <input type="number" min="${S}" max="${E}" step="0.5" value="${nw.start}" oninput="nw.start=+this.value" style="width:100%;margin-top:3px;"></div>
+          <div style="flex:1;"><label style="font-size:11px;color:var(--text-sub);">End</label><br>
+            <input type="number" min="${S}" max="${E}" step="0.5" value="${nw.end}" oninput="nw.end=+this.value" style="width:100%;margin-top:3px;"></div>
+        </div>
+      </div>
+      <div style="margin-top:8px;"><label style="font-size:11px;color:var(--text-sub);">Note (optional)</label><br>
+        <input type="text" placeholder="e.g. every other week" oninput="nw.note=this.value" style="width:100%;margin-top:3px;"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button onclick="saveNew()" style="flex:1;">Add event</button>
+        <button onclick="closeP()">Cancel</button>
+      </div></div>`;
+    return;
+  }
+  if(!selId){panel.innerHTML="";return;}
+  const ev=events.find(x=>x.id===selId);
+  if(!ev){panel.innerHTML="";return;}
+  panel.innerHTML=`<div class="panel no-print">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="font-size:13px;font-weight:500;">${evLabel(ev)}</span>
+      <button onclick="closeP()">&#x2715;</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div><label style="font-size:11px;color:var(--text-sub);">Custom name</label><br>
+        <input type="text" value="${evLabel(ev)}"
+          onchange="updName('${ev.id}',this.value)" style="width:100%;margin-top:3px;"></div>
+      <div><label style="font-size:11px;color:var(--text-sub);">Type</label><br>
+        <select onchange="updF('${ev.id}','cat',this.value)" style="width:100%;margin-top:3px;">${cOpts(ev.cat)}</select></div>
+      <div><label style="font-size:11px;color:var(--text-sub);">Day</label><br>
+        <select onchange="updF('${ev.id}','day',+this.value)" style="width:100%;margin-top:3px;">${dOpts(ev.day)}</select></div>
+      <div style="display:flex;gap:6px;">
+        <div style="flex:1;"><label style="font-size:11px;color:var(--text-sub);">Start</label><br>
+          <input type="number" min="${S}" max="${E}" step="0.5" value="${ev.start}"
+            onchange="updF('${ev.id}','start',+this.value)" style="width:100%;margin-top:3px;"></div>
+        <div style="flex:1;"><label style="font-size:11px;color:var(--text-sub);">End</label><br>
+          <input type="number" min="${S}" max="${E}" step="0.5" value="${ev.end}"
+            onchange="updF('${ev.id}','end',+this.value)" style="width:100%;margin-top:3px;"></div>
+      </div>
+    </div>
+    <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--text-sub);">Note</label><br>
+      <input type="text" value="${ev.note}" placeholder="optional note"
+        onchange="updF('${ev.id}','note',this.value)" style="width:100%;margin-top:3px;"></div>
+    <button onclick="delEvt('${ev.id}')" style="color:#f87171;border-color:#7f1d1d;background:#3f1010;">Delete event</button>
+  </div>`;
+}
+
+function updName(id,val){
+  const ev=events.find(x=>x.id===id);
+  const def=CATS[ev?.cat]?.label||'';
+  // If cleared or matches default label, remove custom name (revert to default)
+  updF(id,'name',(val.trim()===''||val.trim()===def)?'':val.trim());
+}
+function closeP(){ selId=null;addMode=false;render(); }
+function delEvt(id){ events=events.filter(x=>x.id!==id);selId=null;render();save(); }
+function updF(id,f,v){ events=events.map(x=>x.id===id?{...x,[f]:v}:x);render();save(); }
+function openAdd(){ selId=null;addMode=true;nw={cat:"other",day:0,start:10,end:11,note:"",name:""};render(); }
+function saveNew(){
+  if(nw.end<=nw.start){alert("End must be after start.");return;}
+  events=[...events,{...nw,id:uid()}];addMode=false;render();save();
+}
+
+if(altSun) document.getElementById('sun-btn').textContent='Alt Sunday';
+render();
+</script>
+</body>
+</html>
