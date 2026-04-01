@@ -56,6 +56,18 @@ html.light-print .ot { --eb:#BEDBF8; --el:#185FA5; --et:#042C53; }
 .pa  { background:#3D1020; color:#F4C0D1; border:0.5px solid #D4537E; }
 .pot { background:#051E38; color:#B5D4F4; border:0.5px solid #378ADD; }
 
+/* ── Portrait Overlay ────────────────────────────────────── */
+.portrait-overlay { display:none; position:fixed; inset:0; background:var(--bg); z-index:9999; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; }
+.portrait-overlay svg { width:64px; height:64px; margin-bottom:16px; fill:var(--text-muted); animation: rot 2s infinite ease-in-out; }
+@keyframes rot { 0% { transform:rotate(0deg); } 50% { transform:rotate(-90deg); } 100% { transform:rotate(-90deg); } }
+@media screen and (orientation:portrait) and (max-width:900px) {
+  #app-content { display:none !important; }
+  .portrait-overlay { display:flex; }
+}
+
+/* ── UI simplification ───────────────────────────────────── */
+.locked .hide-locked { display:none !important; }
+
 /* ── Base styles ─────────────────────────────────────────── */
 * { box-sizing:border-box; margin:0; padding:0; }
 body {
@@ -94,6 +106,7 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
   user-select:none; -webkit-user-select:none;
   touch-action:none; cursor:grab;
 }
+.locked .evt { cursor:default !important; pointer-events:none; }
 .evt:active{ cursor:grabbing; }
 .evt.ghost { opacity:.3; }
 .et { font-size:11px; font-weight:500; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; color:var(--et); }
@@ -131,6 +144,14 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
 </head>
 <body>
 
+<div class="portrait-overlay">
+  <svg viewBox="0 0 24 24"><path d="M16 1H8C6.9 1 6 1.9 6 3v18c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H8V5h8v14z"/></svg>
+  <p style="font-size:16px;font-weight:500;">Please rotate your device</p>
+  <p style="font-size:13px;color:var(--text-sub);margin-top:8px;">Landscape mode provides the best view of the schedule.</p>
+</div>
+
+<div id="app-content" class="locked">
+
 <div class="saved-flash" id="flash">Saved</div>
 
 <div class="pmb" id="pmodal">
@@ -146,8 +167,13 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
 </div>
 
 <div class="top">
-  <span class="title">Aoife's weekly schedule</span>
-  <div class="controls no-print">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span class="title">Aoife's weekly schedule</span>
+    <button id="lock-btn" onclick="toggleLock()" style="background:transparent;border:0.5px solid var(--border);padding:4px 8px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg> Unlock to Edit
+    </button>
+  </div>
+  <div class="controls no-print hide-locked">
     <span style="font-size:11px;color:var(--text-muted);">Sunday:</span>
     <button id="sun-btn" onclick="toggleSun()">Regular</button>
     <button onclick="openAdd()">+ Add event</button>
@@ -156,12 +182,14 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
   </div>
 </div>
 
-<div class="legend" id="legend"></div>
+<div class="legend hide-locked" id="legend"></div>
 
-<p class="hint no-print">Drag to move &middot; Drag bottom edge to resize &middot; Click to edit &mdash; saves automatically</p>
+<p class="hint no-print hide-locked">Drag to move &middot; Drag bottom edge to resize &middot; Click to edit &mdash; saves automatically</p>
 
 <div class="grid-outer"><div id="grid"></div></div>
-<div id="panel"></div>
+<div id="panel" class="hide-locked"></div>
+
+</div>
 
 <script>
 const SK   = 'aoife_v3';
@@ -226,7 +254,20 @@ let altSun=saved?saved.altSun:false;
 let catLabels=saved?saved.catLabels||{}:{};
 if(events.length){const mx=Math.max(...events.map(e=>parseInt(e.id.replace('e',''))||0));if(mx>=_n)_n=mx+1;}
 
-let selId=null,addMode=false,ptr=null;
+let selId=null,addMode=false,ptr=null,isLocked=true;
+
+function toggleLock(){
+  isLocked=!isLocked;
+  document.getElementById('app-content').className=isLocked?'locked':'';
+  const lb=document.getElementById('lock-btn');
+  lb.innerHTML=isLocked?
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg> Unlock to Edit' :
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg> Lock Schedule';
+  lb.style.background=isLocked?'transparent':'#2e2e34';
+  lb.style.color=isLocked?'var(--text-muted)':'var(--text)';
+  if(isLocked) closeP();
+  render();
+}
 let nw={cat:"other",day:0,start:10,end:11,note:"",name:""};
 
 // ── Print ─────────────────────────────────────────────────
@@ -366,11 +407,11 @@ function renderGrid(){
       const top=(ev.start-S)*PH,height=(ev.end-ev.start)*PH,isSel=ev.id===selId;
       col+=`<div class="evt ${c.cls}" id="ev-${ev.id}"
         style="top:${top+1}px;height:${height-2}px;${isSel?`outline:2px solid ${c.bclr};outline-offset:1px;`:""}"
-        onpointerdown="onEvtDown(event,'${ev.id}')">
+        ${!isLocked?`onpointerdown="onEvtDown(event,'${ev.id}')"`:""}>
         <div class="et">${evLabel(ev)}</div>
         <div class="en">${fmt(ev.start)}&ndash;${fmt(ev.end)}</div>
         ${ev.note&&height>46?`<div class="en" style="font-style:italic;white-space:normal;">${ev.note}</div>`:""}
-        ${height>22?`<div class="rh" onpointerdown="onRhDown(event,'${ev.id}')"></div>`:""}
+        ${!isLocked&&height>22?`<div class="rh" onpointerdown="onRhDown(event,'${ev.id}')"></div>`:""}
       </div>`;
     });
     col+=`</div></div>`;
