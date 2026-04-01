@@ -10,7 +10,7 @@ export default async function handler(request, response) {
     const res = await fetch(`${url}/set/aoifes_schedule`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify(request.body.data)
+      body: request.body.data
     });
     const data = await res.json();
     return response.status(200).json(data);

@@ -12,7 +12,11 @@ export default async function handler(request, response) {
     });
     const data = await res.json();
     if (data.result) {
-       return response.status(200).json(JSON.parse(data.result));
+       let parsed = data.result;
+       while(typeof parsed === 'string') {
+         try { parsed = JSON.parse(parsed); } catch(e) { break; }
+       }
+       return response.status(200).json(parsed);
     }
     return response.status(200).json({ error: "empty" });
   } catch(e) {
