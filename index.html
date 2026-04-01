@@ -130,7 +130,7 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
 
 /* ── Print ───────────────────────────────────────────────── */
 @media print {
-  @page { size:letter landscape; margin:0.4in; }
+  @page { size:letter landscape; margin:0.2in; }
   * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .no-print,.top,.legend,.hint,.panel,.saved-flash,.pmb,.portrait-overlay { display:none !important; }
   body { padding:0 !important; margin:0 !important; background:var(--bg) !important; width:100% !important; min-width:0 !important; max-width:100% !important; overflow-x:hidden !important; }
@@ -195,7 +195,7 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
 <script>
 const SK   = 'aoife_v3';
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
-const S=9, E=17, SPH=66, PPH=78;
+const S=9, E=17, SPH=66;
 let PH = SPH;
 
 const CATS = {
@@ -280,10 +280,6 @@ function doPrint(theme){
   theme==='light'?h.classList.add('light-print'):h.classList.remove('light-print');
   setTimeout(()=>{ window.print(); setTimeout(()=>h.classList.remove('light-print'),500); },80);
 }
-function applyPPH(){ PH=PPH; render(); document.body.offsetHeight; }
-function applySPH(){ PH=SPH; render(); }
-window.onbeforeprint=applyPPH;
-window.onafterprint=applySPH;
 
 // ── Pointer drag / resize ─────────────────────────────────
 const snap=h=>Math.round(h*2)/2;
