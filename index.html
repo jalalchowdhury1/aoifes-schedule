@@ -230,12 +230,49 @@ function defEvents(){
 
 // ── Persistence ───────────────────────────────────────────
 let ftimer=null;
+function flashSaved() {
+  const f=document.getElementById('flash');
+  f.classList.add('show'); clearTimeout(ftimer);
+  ftimer=setTimeout(()=>f.classList.remove('show'),1400);
+}
+
+async function fetchRemote() {
+  try {
+    const res = await fetch('/api/get');
+    const data = await res.json();
+    if(data && !data.error && data !== "empty") {
+      if(data.events) events = data.events;
+      if(typeof data.altSun !== 'undefined') altSun = data.altSun;
+      if(data.catLabels) catLabels = data.catLabels;
+      
+      let _mx = 0;
+      events.forEach(e => {
+        let n = parseInt(e.id.replace('e',''));
+        if(n > _mx) _mx = n;
+      });
+      _n = _mx + 1;
+
+      render();
+    }
+  } catch(e) {}
+}
+
+async function saveRemote(str) {
+  try {
+    await fetch('/api/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: str })
+    });
+  } catch(e) {}
+}
+
 function save(){
   try{
-    localStorage.setItem(SK,JSON.stringify({events,altSun,catLabels}));
-    const f=document.getElementById('flash');
-    f.classList.add('show'); clearTimeout(ftimer);
-    ftimer=setTimeout(()=>f.classList.remove('show'),1400);
+    const str = JSON.stringify({events,altSun,catLabels});
+    localStorage.setItem(SK,str);
+    saveRemote(str);
+    flashSaved();
   }catch(e){}
 }
 function load(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch(e){return null;}}
@@ -244,6 +281,7 @@ function doReset(){
   localStorage.removeItem(SK);
   events=defEvents();altSun=false;selId=null;addMode=false;
   document.getElementById('sun-btn').textContent='Regular';
+  saveRemote(JSON.stringify({events,altSun,catLabels}));
   render();
 }
 
@@ -252,6 +290,8 @@ let events=saved?saved.events:defEvents();
 let altSun=saved?saved.altSun:false;
 let catLabels=saved?saved.catLabels||{}:{};
 if(events.length){const mx=Math.max(...events.map(e=>parseInt(e.id.replace('e',''))||0));if(mx>=_n)_n=mx+1;}
+
+fetchRemote();
 
 let selId=null,addMode=false,ptr=null,isLocked=true;
 
