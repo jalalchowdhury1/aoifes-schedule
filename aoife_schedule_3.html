@@ -56,18 +56,6 @@ html.light-print .ot { --eb:#BEDBF8; --el:#185FA5; --et:#042C53; }
 .pa  { background:#3D1020; color:#F4C0D1; border:0.5px solid #D4537E; }
 .pot { background:#051E38; color:#B5D4F4; border:0.5px solid #378ADD; }
 
-/* ── Portrait Overlay ────────────────────────────────────── */
-.portrait-overlay { display:none; position:fixed; inset:0; background:var(--bg); z-index:9999; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; }
-.portrait-overlay svg { width:64px; height:64px; margin-bottom:16px; fill:var(--text-muted); animation: rot 2s infinite ease-in-out; }
-@keyframes rot { 0% { transform:rotate(0deg); } 50% { transform:rotate(-90deg); } 100% { transform:rotate(-90deg); } }
-@media screen and (orientation:portrait) and (max-width:900px) {
-  #app-content { display:none !important; }
-  .portrait-overlay { display:flex; }
-}
-
-/* ── UI simplification ───────────────────────────────────── */
-.locked .hide-locked { display:none !important; }
-
 /* ── Base styles ─────────────────────────────────────────── */
 * { box-sizing:border-box; margin:0; padding:0; }
 body {
@@ -106,7 +94,6 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
   user-select:none; -webkit-user-select:none;
   touch-action:none; cursor:grab;
 }
-.locked .evt { cursor:default !important; pointer-events:none; }
 .evt:active{ cursor:grabbing; }
 .evt.ghost { opacity:.3; }
 .et { font-size:11px; font-weight:500; line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; color:var(--et); }
@@ -132,24 +119,17 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
 @media print {
   @page { size:letter landscape; margin:0.4in; }
   * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-  .no-print,.top,.legend,.hint,.panel,.saved-flash,.pmb,.portrait-overlay { display:none !important; }
-  body { padding:28px 0 0 0; margin:0; background:var(--bg) !important; }
-  #app-content { display:block !important; }
-  .grid-outer { border:none; width:95% !important; margin:0 auto; overflow:visible; }
-  #grid { min-width:unset !important; width:100% !important; background:var(--bg-grid) !important; display:flex !important; flex-wrap:nowrap !important; }
-  html.light-print body, html.light-print #grid, html.light-print .grid-outer { background:#fff !important; }
+  .no-print,.top,.legend,.hint,.panel,.saved-flash,.pmb { display:none !important; }
+  body { padding:0; background:var(--bg) !important; }
+  .grid-outer { border:none; overflow:visible; }
+  #grid { min-width:unset !important; background:var(--bg-grid) !important; }
+  html.light-print body,
+  html.light-print #grid,
+  html.light-print .grid-outer { background:#fff !important; }
 }
 </style>
 </head>
 <body>
-
-<div class="portrait-overlay">
-  <svg viewBox="0 0 24 24"><path d="M16 1H8C6.9 1 6 1.9 6 3v18c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H8V5h8v14z"/></svg>
-  <p style="font-size:16px;font-weight:500;">Please rotate your device</p>
-  <p style="font-size:13px;color:var(--text-sub);margin-top:8px;">Landscape mode provides the best view of the schedule.</p>
-</div>
-
-<div id="app-content" class="locked">
 
 <div class="saved-flash" id="flash">Saved</div>
 
@@ -166,13 +146,8 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
 </div>
 
 <div class="top">
-  <div style="display:flex;align-items:center;gap:12px;">
-    <span class="title">Aoife's weekly schedule</span>
-    <button id="lock-btn" onclick="toggleLock()" style="background:transparent;border:0.5px solid var(--border);padding:4px 8px;font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg> Unlock to Edit
-    </button>
-  </div>
-  <div class="controls no-print hide-locked">
+  <span class="title">Aoife's weekly schedule</span>
+  <div class="controls no-print">
     <span style="font-size:11px;color:var(--text-muted);">Sunday:</span>
     <button id="sun-btn" onclick="toggleSun()">Regular</button>
     <button onclick="openAdd()">+ Add event</button>
@@ -181,14 +156,12 @@ input,select{ font-family:inherit; font-size:12px; padding:4px 8px; border:0.5px
   </div>
 </div>
 
-<div class="legend hide-locked" id="legend"></div>
+<div class="legend" id="legend"></div>
 
-<p class="hint no-print hide-locked">Drag to move &middot; Drag bottom edge to resize &middot; Click to edit &mdash; saves automatically</p>
+<p class="hint no-print">Drag to move &middot; Drag bottom edge to resize &middot; Click to edit &mdash; saves automatically</p>
 
 <div class="grid-outer"><div id="grid"></div></div>
-<div id="panel" class="hide-locked"></div>
-
-</div>
+<div id="panel"></div>
 
 <script>
 const SK   = 'aoife_v3';
@@ -230,49 +203,12 @@ function defEvents(){
 
 // ── Persistence ───────────────────────────────────────────
 let ftimer=null;
-function flashSaved() {
-  const f=document.getElementById('flash');
-  f.classList.add('show'); clearTimeout(ftimer);
-  ftimer=setTimeout(()=>f.classList.remove('show'),1400);
-}
-
-async function fetchRemote() {
-  try {
-    const res = await fetch('/api/get');
-    const data = await res.json();
-    if(data && !data.error && data !== "empty") {
-      if(data.events) events = data.events;
-      if(typeof data.altSun !== 'undefined') altSun = data.altSun;
-      if(data.catLabels) catLabels = data.catLabels;
-      
-      let _mx = 0;
-      events.forEach(e => {
-        let n = parseInt(e.id.replace('e',''));
-        if(n > _mx) _mx = n;
-      });
-      _n = _mx + 1;
-
-      render();
-    }
-  } catch(e) {}
-}
-
-async function saveRemote(str) {
-  try {
-    await fetch('/api/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: str })
-    });
-  } catch(e) {}
-}
-
 function save(){
   try{
-    const str = JSON.stringify({events,altSun,catLabels});
-    localStorage.setItem(SK,str);
-    saveRemote(str);
-    flashSaved();
+    localStorage.setItem(SK,JSON.stringify({events,altSun,catLabels}));
+    const f=document.getElementById('flash');
+    f.classList.add('show'); clearTimeout(ftimer);
+    ftimer=setTimeout(()=>f.classList.remove('show'),1400);
   }catch(e){}
 }
 function load(){try{const r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch(e){return null;}}
@@ -281,7 +217,6 @@ function doReset(){
   localStorage.removeItem(SK);
   events=defEvents();altSun=false;selId=null;addMode=false;
   document.getElementById('sun-btn').textContent='Regular';
-  saveRemote(JSON.stringify({events,altSun,catLabels}));
   render();
 }
 
@@ -291,22 +226,7 @@ let altSun=saved?saved.altSun:false;
 let catLabels=saved?saved.catLabels||{}:{};
 if(events.length){const mx=Math.max(...events.map(e=>parseInt(e.id.replace('e',''))||0));if(mx>=_n)_n=mx+1;}
 
-fetchRemote();
-
-let selId=null,addMode=false,ptr=null,isLocked=true;
-
-function toggleLock(){
-  isLocked=!isLocked;
-  document.getElementById('app-content').className=isLocked?'locked':'';
-  const lb=document.getElementById('lock-btn');
-  lb.innerHTML=isLocked?
-    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg> Unlock to Edit' :
-    '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg> Lock Schedule';
-  lb.style.background=isLocked?'transparent':'#2e2e34';
-  lb.style.color=isLocked?'var(--text-muted)':'var(--text)';
-  if(isLocked) closeP();
-  render();
-}
+let selId=null,addMode=false,ptr=null;
 let nw={cat:"other",day:0,start:10,end:11,note:"",name:""};
 
 // ── Print ─────────────────────────────────────────────────
@@ -429,7 +349,6 @@ function renderGrid(){
   const gh=(E-S)*PH, grid=document.getElementById("grid");
   let tc=`<div style="flex-shrink:0;width:40px;padding-top:28px;background:var(--bg-grid);">`;
   for(let h=S;h<=E;h++) tc+=`<div style="height:${PH}px;"><span style="font-size:9px;color:var(--text-muted);">${fmt(h)}</span></div>`;
-  tc+=`<div style="height:28px;"></div>`;
   tc+=`</div>`;
   const dc=DAYS.map((day,di)=>{
     const isWE=di>=5;
@@ -447,18 +366,14 @@ function renderGrid(){
       const top=(ev.start-S)*PH,height=(ev.end-ev.start)*PH,isSel=ev.id===selId;
       col+=`<div class="evt ${c.cls}" id="ev-${ev.id}"
         style="top:${top+1}px;height:${height-2}px;${isSel?`outline:2px solid ${c.bclr};outline-offset:1px;`:""}"
-        ${!isLocked?`onpointerdown="onEvtDown(event,'${ev.id}')"`:""}>
+        onpointerdown="onEvtDown(event,'${ev.id}')">
         <div class="et">${evLabel(ev)}</div>
         <div class="en">${fmt(ev.start)}&ndash;${fmt(ev.end)}</div>
         ${ev.note&&height>46?`<div class="en" style="font-style:italic;white-space:normal;">${ev.note}</div>`:""}
-        ${!isLocked&&height>22?`<div class="rh" onpointerdown="onRhDown(event,'${ev.id}')"></div>`:""}
+        ${height>22?`<div class="rh" onpointerdown="onRhDown(event,'${ev.id}')"></div>`:""}
       </div>`;
     });
-    col+=`</div>`;
-    col+=`<div style="height:28px;display:flex;align-items:center;justify-content:center;">
-      <span style="font-size:11px;font-weight:${isWE?500:400};color:${isWE?"var(--text-wkend)":"var(--text-week)"};">${day}</span>
-    </div>`;
-    col+=`</div>`;
+    col+=`</div></div>`;
     return col;
   }).join("");
   grid.innerHTML=tc+dc;
