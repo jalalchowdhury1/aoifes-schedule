@@ -1,0 +1,65 @@
+/* Theme tokens. html[data-theme] is set before first paint by an inline
+   script in index.html and toggled by js/theme.js. */
+:root {
+  --accent: #4f46e5;
+  --now: #ef4444;
+  --radius: 12px;
+}
+
+html[data-theme='light'] {
+  --bg: #f7f7f5;
+  --bg-grid: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-input: #ffffff;
+  --line: #ececea;
+  --border: #e0dfdb;
+  --text: #1b1b20;
+  --text-sub: #5f5f6b;
+  --text-muted: #a0a0aa;
+  --text-week: #71717d;
+  --text-wkend: #2563eb;
+  --today-col: #f4f4fb;
+  --accent-soft: #6366f1;
+  --shadow: 0 1px 3px rgba(20, 20, 25, .06), 0 4px 16px rgba(20, 20, 25, .05);
+  --backdrop: rgba(0, 0, 0, .25);
+  --danger-bg: #fee2e2;
+  --danger-border: #fecaca;
+  --danger-text: #b91c1c;
+}
+
+html[data-theme='dark'] {
+  --bg: #0e0e11;
+  --bg-grid: #131316;
+  --bg-panel: #1a1a1e;
+  --bg-input: #222226;
+  --line: #222226;
+  --border: #2e2e34;
+  --text: #f0f0f5;
+  --text-sub: #8f8fa0;
+  --text-muted: #55555f;
+  --text-week: #6b6b7f;
+  --text-wkend: #60a5fa;
+  --today-col: #16161c;
+  --accent-soft: #818cf8;
+  --shadow: none;
+  --backdrop: rgba(0, 0, 0, .55);
+  --danger-bg: #3f1010;
+  --danger-border: #7f1d1d;
+  --danger-text: #f87171;
+}
+
+/* Category tokens: --eb block fill, --el edge/accent, --et text.
+   Same six categories as v1; values tuned per theme for contrast. */
+html[data-theme='dark'] .q  { --eb: #0D3D2A; --el: #1D9E75; --et: #9FE1CB; }
+html[data-theme='dark'] .r  { --eb: #1E1849; --el: #7F77DD; --et: #CECBF6; }
+html[data-theme='dark'] .h  { --eb: #3D1208; --el: #D85A30; --et: #F5C4B3; }
+html[data-theme='dark'] .b  { --eb: #351D02; --el: #EF9F27; --et: #FAC775; }
+html[data-theme='dark'] .a  { --eb: #3D1020; --el: #D4537E; --et: #F4C0D1; }
+html[data-theme='dark'] .ot { --eb: #051E38; --el: #378ADD; --et: #B5D4F4; }
+
+html[data-theme='light'] .q  { --eb: #DEF4E8; --el: #12805F; --et: #0A4536; }
+html[data-theme='light'] .r  { --eb: #E4E1FB; --el: #5A50C4; --et: #2B2566; }
+html[data-theme='light'] .h  { --eb: #FBDCCE; --el: #B0431F; --et: #571F0D; }
+html[data-theme='light'] .b  { --eb: #FCE8C2; --el: #96590A; --et: #4A2902; }
+html[data-theme='light'] .a  { --eb: #FAD9E5; --el: #AB3A60; --et: #571830; }
+html[data-theme='light'] .ot { --eb: #D8E8FA; --el: #1D66B0; --et: #093159; }
