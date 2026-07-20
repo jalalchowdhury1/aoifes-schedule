@@ -14,10 +14,10 @@ const catOpts = sel => Object.keys(CATS).map(k =>
 const dayOpts = sel => DAYS.map((d, i) =>
   `<option value="${i}"${i === sel ? ' selected' : ''}>${d}</option>`).join('');
 
-export function openAdd() {
+export function openAdd(day = 0) {
   store.selId = null;
   store.addMode = true;
-  nw = { cat: 'other', day: 0, start: 10, end: 11, note: '', name: '' };
+  nw = { cat: 'other', day, start: 10, end: 11, note: '', name: '' };
   notify();
 }
 

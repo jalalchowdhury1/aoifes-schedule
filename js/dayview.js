@@ -75,3 +75,5 @@ export function renderDayView() {
 
   document.getElementById('dayview').innerHTML = `<div class="dv-flex">${tc}${col}</div>`;
 }
+
+export const getSelDay = () => selDay;
