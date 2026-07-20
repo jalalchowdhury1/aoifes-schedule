@@ -14,6 +14,7 @@ export const store = {
 };
 
 let _n = 0;
+let dirty = false;
 export const uid = () => `e${++_n}`;
 
 export const catLabel = k => store.catLabels[k] || CATS[k]?.label || 'Event';
@@ -36,7 +37,7 @@ export async function fetchRemote() {
   try {
     const res = await fetch('/api/get');
     const data = await res.json();
-    if (data && !data.error && data !== 'empty') {
+    if (!dirty && data && !data.error && data !== 'empty') {
       if (data.events) store.events = data.events;
       if (typeof data.altSun !== 'undefined') store.altSun = data.altSun;
       if (data.catLabels) store.catLabels = data.catLabels;
@@ -57,16 +58,14 @@ async function saveRemote(str) {
 }
 
 export function save() {
-  try {
-    const str = serialize(store);
-    localStorage.setItem(SK, str);
-    saveRemote(str);
-    document.dispatchEvent(new CustomEvent('aoife:saved'));
-  } catch (e) {}
+  const str = serialize(store);
+  try { localStorage.setItem(SK, str); } catch (e) {}
+  saveRemote(str);
+  try { document.dispatchEvent(new CustomEvent('aoife:saved')); } catch (e) {}
 }
 
 // Every mutation below re-renders and persists.
-const commit = () => { notify(); save(); };
+const commit = () => { dirty = true; notify(); save(); };
 
 export function updateEvent(id, patch) {
   store.events = store.events.map(x => (x.id === id ? { ...x, ...patch } : x));
@@ -99,12 +98,14 @@ export function renameCat(key, val) {
 
 export function resetToDefaults() {
   // v1 behavior: reset clears events + altSun but KEEPS catLabels renames.
-  try { localStorage.removeItem(SK); } catch (e) {}
+  dirty = true;
   store.events = defEvents();
   store.altSun = false;
   store.selId = null;
   store.addMode = false;
   _n = maxIdNum(store.events);
-  saveRemote(serialize(store));
+  const str = serialize(store);
+  try { localStorage.setItem(SK, str); } catch (e) {}
+  saveRemote(str);
   notify();
 }
