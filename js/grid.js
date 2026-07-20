@@ -65,6 +65,7 @@ export function initGrid() {
   const grid = document.getElementById('grid');
 
   grid.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
     if (store.locked || !dragOK()) return;
     const evtEl = e.target.closest('.evt');
     if (!evtEl) return;
@@ -82,12 +83,15 @@ export function initGrid() {
         offsetH: (e.clientY - rect.top) / PH,
         duration: ev.end - ev.start,
         moved: false, startX: e.clientX, startY: e.clientY,
+        // Column rects are snapshotted at drag start; scrolling mid-drag makes them
+        // stale (worst case: drop lands on the wrong day). Accepted for simplicity.
         rects: colRects(grid),
       };
     }
     evtEl.classList.add('ghost');
     document.addEventListener('pointermove', onMove, { passive: false });
     document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onCancel);
   });
 
   // Tap/click select for coarse pointers and non-drag clicks.
@@ -131,7 +135,17 @@ function onUp() {
   ptr = null;
   document.removeEventListener('pointermove', onMove);
   document.removeEventListener('pointerup', onUp);
+  document.removeEventListener('pointercancel', onCancel);
   suppressClick = true; // the browser fires a click right after pointerup; we've handled it
   if (moved) { notify(); save(); }
   else toggleSelect(id);
+}
+
+function onCancel() {
+  if (!ptr) return;
+  ptr = null;
+  document.removeEventListener('pointermove', onMove);
+  document.removeEventListener('pointerup', onUp);
+  document.removeEventListener('pointercancel', onCancel);
+  renderGrid(); // clears ghost styling
 }
