@@ -71,7 +71,11 @@ export function renderEditor() {
       if (nw.end <= nw.start) nw.end = Math.min(E, nw.start + 0.5);
       notify();
     };
-    box.querySelector('#ed-end').onchange = e => { nw.end = +e.target.value; };
+    box.querySelector('#ed-end').onchange = e => {
+      nw.end = +e.target.value;
+      if (nw.end <= nw.start) nw.start = Math.max(S, nw.end - 0.5);
+      notify();
+    };
     box.querySelector('#ed-add').onclick = () => {
       if (nw.end <= nw.start) { box.querySelector('#ed-err').classList.add('show'); return; }
       store.addMode = false;
@@ -114,7 +118,11 @@ export function renderLegend() {
 
 export function initLegend() {
   document.getElementById('legend').addEventListener('click', e => {
-    const pill = e.target.closest('.pill');
+    let pill = e.target.closest('.pill');
+    if (!pill) return;
+    // A blur-commit may have re-rendered the legend between mousedown and click,
+    // detaching the clicked node — re-resolve it in the live DOM by category.
+    if (!pill.isConnected) pill = document.querySelector(`#legend .pill[data-cat="${pill.dataset.cat}"]`);
     if (!pill || pill.querySelector('input')) return;
     const key = pill.dataset.cat;
     const cur = catLabel(key);
