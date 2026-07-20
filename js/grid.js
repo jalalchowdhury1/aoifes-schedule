@@ -32,7 +32,10 @@ export function renderGrid() {
   const canDrag = !store.locked && dragOK();
 
   let tc = `<div class="timecol" style="padding-top:30px;">`;
-  for (let h = S; h <= E; h++) tc += `<div style="height:${PH}px;"><span>${fmt(h)}</span></div>`;
+  // Last row (the 5pm label) gets label height only, not a full hour block —
+  // a full row makes the time column outgrow the day columns and pushes
+  // printing onto a blank second page.
+  for (let h = S; h <= E; h++) tc += `<div style="height:${h < E ? PH : 16}px;"><span>${fmt(h)}</span></div>`;
   tc += '</div>';
 
   const cols = DAYS.map((day, di) => {

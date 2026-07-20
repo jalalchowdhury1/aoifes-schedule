@@ -58,7 +58,7 @@ export function renderDayView() {
 
   const gh = (E - S) * DPH;
   let tc = `<div class="timecol" style="padding-top:12px;">`;
-  for (let h = S; h <= E; h++) tc += `<div style="height:${DPH}px;"><span>${fmt(h)}</span></div>`;
+  for (let h = S; h <= E; h++) tc += `<div style="height:${h < E ? DPH : 16}px;"><span>${fmt(h)}</span></div>`;
   tc += '</div>';
 
   let col = `<div class="daycol"><div class="ca" data-day="${selDay}" style="height:${gh}px;margin-top:12px;">`;
