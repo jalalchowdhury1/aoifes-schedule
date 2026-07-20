@@ -50,6 +50,11 @@ export function defEvents() {
 export const maxIdNum = events =>
   events.reduce((mx, e) => Math.max(mx, parseInt(String(e.id).replace('e', ''), 10) || 0), 0);
 
+export const isValidEvent = e =>
+  !!e && typeof e === 'object' && 'id' in e && 'cat' in e &&
+  typeof e.day === 'number' && typeof e.start === 'number' && typeof e.end === 'number';
+export const sanitizeEvents = events => (Array.isArray(events) ? events.filter(isValidEvent) : []);
+
 export const serialize = ({ events, altSun, catLabels }) =>
   JSON.stringify({ events, altSun, catLabels });
 

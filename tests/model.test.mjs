@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DAYS, S, E, SPH, PPH, CATS, fmt, snap, clampStart, clampEnd,
-  todayIndex, defEvents, maxIdNum, serialize, applyAltSun, esc,
+  todayIndex, defEvents, maxIdNum, serialize, applyAltSun, esc, sanitizeEvents,
 } from '../js/model.js';
 
 test('constants match the v1 contract', () => {
@@ -90,4 +90,12 @@ test('applyAltSun toggles the Sunday Ruhamah slot both ways', () => {
 
 test('esc neutralizes HTML metacharacters', () => {
   assert.equal(esc('<b>&"\'</b>'), '&lt;b&gt;&amp;&quot;&#39;&lt;/b&gt;');
+});
+
+test('sanitizeEvents drops malformed records and non-arrays', () => {
+  const good = defEvents();
+  const mixed = [{ id: 'e999' }, ...good, null, { id: 'e7', cat: 'other', day: 'x', start: 10, end: 11 }];
+  assert.deepEqual(sanitizeEvents(mixed), good);
+  assert.deepEqual(sanitizeEvents(undefined), []);
+  assert.deepEqual(sanitizeEvents('junk'), []);
 });

@@ -1,6 +1,6 @@
 // App state + persistence. Storage contract is v1's: localStorage key
 // 'aoife_v3' and KV via /api/get + /api/save. DO NOT change keys or shape.
-import { CATS, defEvents, maxIdNum, serialize, applyAltSun } from './model.js';
+import { CATS, defEvents, maxIdNum, serialize, applyAltSun, sanitizeEvents } from './model.js';
 
 const SK = 'aoife_v3';
 
@@ -27,7 +27,7 @@ export const notify = () => listeners.forEach(fn => fn());
 export function initState() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(SK)); } catch (e) {}
-  store.events = saved?.events || defEvents();
+  store.events = saved?.events ? sanitizeEvents(saved.events) : defEvents();
   store.altSun = saved?.altSun || false;
   store.catLabels = saved?.catLabels || {};
   _n = maxIdNum(store.events);
@@ -38,7 +38,7 @@ export async function fetchRemote() {
     const res = await fetch('/api/get');
     const data = await res.json();
     if (!dirty && data && !data.error && data !== 'empty') {
-      if (data.events) store.events = data.events;
+      if (data.events) store.events = sanitizeEvents(data.events);
       if (typeof data.altSun !== 'undefined') store.altSun = data.altSun;
       if (data.catLabels) store.catLabels = data.catLabels;
       _n = maxIdNum(store.events);
