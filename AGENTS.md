@@ -1,14 +1,17 @@
 # AGENTS.md — aoifes-schedule
 
-Single LLM source of truth for this repo. Human-facing docs (README, jalal*) are off-limits per convention.
+Single LLM source of truth for this repo. Human-facing docs (README, jalal*) are off-limits per convention. If something here is wrong, fix *this* file.
 
 ## What this is
 Aoife's weekly schedule web app, live at https://aoifes-schedule.vercel.app/.
-v2 (2026-07-20) rebuilt the front end: dark/light/auto theme, mobile day view
-with Day⇄Week toggle, refined-minimal design. Spec: docs/superpowers/specs/2026-07-20-schedule-v2-rebuild-design.md.
+A drag-and-droppable Mon–Sun, 9am–5pm timetable of recurring activities, editable
+after unlocking, with print/save-PDF. v2 (2026-07-20) fully rebuilt the front end:
+dark/light/auto theme, mobile day view with Day⇄Week toggle, refined-minimal design.
+Spec: docs/superpowers/specs/2026-07-20-schedule-v2-rebuild-design.md.
+Plan (with execution addendum): docs/superpowers/plans/2026-07-20-aoife-schedule-v2.md.
 
 ## Architecture
-Static vanilla app, no build step, no dependencies:
+Static vanilla app, no build step, no dependencies, no framework:
 - index.html — shell; inline script sets html[data-theme] pre-paint
 - css/tokens.css — all theme + category color tokens (light/dark)
 - css/app.css — layout/components incl. mobile day view + bottom sheet
@@ -21,7 +24,8 @@ Static vanilla app, no build step, no dependencies:
 - js/theme.js — auto/light/dark cycling
 - js/print.js — print modal; prints reuse screen theme tokens
 - api/get.js, api/save.js — Vercel functions -> Upstash KV. DO NOT TOUCH.
-- aoife_schedule_3.html — v1-era artifact, kept for history. DO NOT TOUCH.
+- aoife_schedule_3.html — v1-era standalone snapshot (localStorage-only, no lock,
+  no /api). Kept for history; it drifts from the live app by design. DO NOT TOUCH.
 
 ## Data contract (NEVER break)
 - KV key `aoifes_schedule`; localStorage `aoife_v3`
@@ -32,6 +36,19 @@ Static vanilla app, no build step, no dependencies:
 - Load-time sanitization: events missing id/cat or with non-numeric day/start/end
   are dropped by sanitizeEvents (the live KV blob once contained a corrupt stray
   {"id":"e999"} record; the next save after v2 loads permanently cleans it).
+- **The /api/save body is double-wrapped on purpose.** The client POSTs
+  {"data": "<json-string>"}; save.js forwards the inner string to Upstash SET, so
+  KV stores a JSON *string*. get.js unwraps repeatedly (while-typeof-string loop)
+  to handle historical double/triple-stringified values — deliberate defensive
+  code (commit 434f884); don't simplify it away without re-testing stored data.
+- **Single shared KV record, no auth.** Anyone who can reach /api/save overwrites
+  the one shared blob; the lock toggle is a UI guard, not security. Fine for the
+  intended private use — don't widen exposure without adding auth. v2 escapes all
+  user strings via esc() before innerHTML, so the old stored-XSS vector is closed.
+
+## Env vars (Vercel project settings — names only, never values; repo is public)
+api/*.js read `KV_REST_API_URL`/`KV_REST_API_TOKEN` with fallback to
+`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`. Secrets live only in Vercel.
 
 ## Tests
 `node --test` from the repo root (NOTE: `node --test tests/` breaks on Node 24 —
@@ -41,6 +58,14 @@ use the bare form). Pure model tests + a production-data contract test
 the contract test skips gracefully when the fixture is absent).
 
 ## Deploy
-Push to main -> Vercel auto-deploys. Local preview: `python3 -m http.server 8080`
-(the /api fetch fails locally by design; app runs on localStorage/defaults).
-Rollback: `git revert` the offending commits and push — KV data is unaffected.
+Push to main -> Vercel auto-deploys (no build command). Local preview:
+`python3 -m http.server 8080` (the /api fetch fails locally by design; app runs on
+localStorage/defaults). Rollback: `git revert` the offending commits and push —
+KV data is unaffected either way.
+
+## Print (most-loved feature — re-verify after any grid/sizing change)
+Two row-height modes: SPH=66 screen, PPH=78 print, swapped on beforeprint/afterprint
+(plus a matchMedia('print') fallback for iOS/WebView where afterprint may not fire).
+Print CSS is tuned to fit ONE letter-landscape page; dark print needs the browser's
+"Background graphics" enabled. Print always renders the full week grid, even when
+the screen shows the mobile day view.
