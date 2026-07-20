@@ -1704,3 +1704,23 @@ curl -s https://aoifes-schedule.vercel.app/api/get | head -c 200   # schedule da
 ```
 
 Open https://aoifes-schedule.vercel.app/ in a real browser: schedule shows the live KV data, theme toggle works, and on a phone the day view appears. If anything is broken: `git revert` the offending commits and push (restores v1 instantly; data is untouched either way).
+
+---
+
+## Addendum (added during execution)
+
+- **Task 10 scope expansion (approved):** the contract test discovered a corrupt
+  stray record `{"id":"e999"}` (no cat/day/start/end) in the live KV blob.
+  Resolution: `js/model.js` gained `isValidEvent`/`sanitizeEvents`, `js/state.js`
+  sanitizes events on both load paths (initState + fetchRemote), and
+  `tests/contract.test.mjs` round-trips production data after sanitization.
+  The stray record renders nowhere in v1 or v2 and is permanently dropped from
+  KV on the first v2 save.
+- **Environment note:** `node --test tests/` (directory arg) fails on Node 24;
+  all test steps use bare `node --test` instead.
+- **Post-plan review fixes applied during execution:** clampEnd upper-bound
+  hardening; WCAG contrast fixes to muted/week text tokens; theme-pref
+  sanitization + button guard; state save/fetch race guards + reset local
+  persistence; grid non-primary-button + pointercancel handling; legend rename
+  click race fix; symmetric add-form time auto-fix; add-event defaults to the
+  active mobile day tab; print restore via matchMedia fallback.
