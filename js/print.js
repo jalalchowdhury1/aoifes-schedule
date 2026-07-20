@@ -12,13 +12,17 @@ export function initPrint() {
   modal.querySelectorAll('[data-ptheme]').forEach(b =>
     b.addEventListener('click', () => doPrint(b.dataset.ptheme)));
 
-  // Also correct row height for direct Cmd/Ctrl+P prints.
-  window.addEventListener('beforeprint', () => { setPH(PPH); renderGrid(); });
-  window.addEventListener('afterprint', () => {
+  const restore = () => {
     setPH(SPH);
     renderGrid();
     applyTheme(); // restore the user's screen theme if doPrint changed it
-  });
+  };
+  // Also correct row height for direct Cmd/Ctrl+P prints.
+  window.addEventListener('beforeprint', () => { setPH(PPH); renderGrid(); });
+  // afterprint doesn't fire in some iOS/WebView contexts; matchMedia('print')
+  // is a second, independent restore trigger (restore is idempotent).
+  window.addEventListener('afterprint', restore);
+  matchMedia('print').addEventListener('change', e => { if (!e.matches) restore(); });
 }
 
 function doPrint(theme) {
