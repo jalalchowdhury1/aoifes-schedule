@@ -58,6 +58,7 @@ async function saveRemote(str) {
 }
 
 export function save() {
+  dirty = true;
   const str = serialize(store);
   try { localStorage.setItem(SK, str); } catch (e) {}
   saveRemote(str);
