@@ -52,6 +52,14 @@ test('defEvents matches the v1 default schedule', () => {
   assert.equal(evs.filter(e => e.cat === 'ruhamah').length, 5);
   assert.equal(evs.filter(e => e.cat === 'hala').length, 3);
   assert.equal(evs.filter(e => e.cat === 'barakot').length, 1);
+
+  assert.deepEqual(evs.filter(e => e.cat === 'quran').map(e => [e.day, e.start, e.end]), [[0, 10, 11], [2, 10, 11], [4, 10, 11]]);
+  assert.deepEqual(evs.filter(e => e.cat === 'hala').map(e => [e.day, e.start, e.end]), [[1, 14, 16], [2, 14, 16], [3, 14, 16]]);
+  const sun = evs.find(e => e.cat === 'ruhamah' && e.day === 6);
+  assert.deepEqual([sun.start, sun.end, sun.note], [11, 13, 'Regular Sun — every other week at 10am']);
+  const bara = evs.find(e => e.cat === 'barakot');
+  assert.deepEqual([bara.day, bara.start, bara.end, bara.note, bara.name], [6, 9, 10, 'Mostly Sundays', 'Barrington trip']);
+  assert.deepEqual(evs.map(e => e.id), ['e1','e2','e3','e4','e5','e6','e7','e8','e9','e10','e11','e12']);
 });
 
 test('maxIdNum finds the highest numeric id', () => {

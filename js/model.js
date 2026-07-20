@@ -24,7 +24,7 @@ export function fmt(h) {
 
 export const snap = h => Math.round(h * 2) / 2;
 export const clampStart = (start, dur) => Math.max(S, Math.min(E - dur, start));
-export const clampEnd = (start, end) => Math.max(start + 0.5, Math.min(E, end));
+export const clampEnd = (start, end) => Math.min(E, Math.max(start + 0.5, end));
 
 // JS Date.getDay() (Sun=0) -> Mon-first index (Mon=0 ... Sun=6)
 export const todayIndex = jsDay => (jsDay + 6) % 7;
