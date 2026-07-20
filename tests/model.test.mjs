@@ -10,7 +10,7 @@ test('constants match the v1 contract', () => {
   assert.equal(S, 9);
   assert.equal(E, 17);
   assert.equal(SPH, 66);
-  assert.equal(PPH, 78);
+  assert.equal(PPH, 72);
   assert.deepEqual(Object.keys(CATS), ['quran', 'ruhamah', 'hala', 'barakot', 'art', 'other']);
 });
 

@@ -5,7 +5,7 @@ export const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const S = 9;      // grid start hour (9am)
 export const E = 17;     // grid end hour (5pm)
 export const SPH = 66;   // screen pixels per hour
-export const PPH = 78;   // print pixels per hour
+export const PPH = 72;   // print pixels per hour (644px total — fits letter AND A4 landscape with headroom for up to ~110% print scale)
 
 export const CATS = {
   quran:   { label: 'Quran',                                  cls: 'q'  },

@@ -5,7 +5,7 @@
   .top, .legend, .hint, .mobilebar, .dayview, #editor, .editor-backdrop,
   .pmb, .saved-flash, .no-print { display: none !important; }
 
-  body { padding: 28px 0 0; margin: 0; background: var(--bg) !important; }
+  body { padding: 8px 0 0; margin: 0; background: var(--bg) !important; }
 
   /* Always print the full week grid, even if the screen shows mobile day view. */
   .grid-outer {
