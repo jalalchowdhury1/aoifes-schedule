@@ -2,6 +2,7 @@ import { initTheme } from './theme.js';
 import { store, initState, fetchRemote, onChange, toggleAltSun, resetToDefaults } from './state.js';
 import { renderGrid, initGrid, isDragging, dragOK } from './grid.js';
 import { renderEditor, renderLegend, initLegend, initEditor, openAdd } from './editor.js';
+import { renderDayView, initDayView } from './dayview.js';
 
 const LOCK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>';
 const UNLOCK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h2c0-1.66 1.34-3 3-3s3 1.34 3 3v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>';
@@ -20,6 +21,7 @@ export function render() {
   syncChrome();
   renderLegend();
   renderGrid();
+  renderDayView();
   renderEditor();
 }
 
@@ -28,6 +30,7 @@ initTheme();
 initGrid();
 initLegend();
 initEditor();
+initDayView();
 onChange(render);
 
 document.getElementById('lock-btn').addEventListener('click', () => {
@@ -52,4 +55,4 @@ document.addEventListener('aoife:saved', () => {
 render();
 fetchRemote();
 
-setInterval(() => { if (!isDragging()) renderGrid(); }, 60000);
+setInterval(() => { if (!isDragging()) { renderGrid(); renderDayView(); } }, 60000);
