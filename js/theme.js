@@ -24,10 +24,14 @@ export function applyTheme() {
 }
 
 export function initTheme() {
-  try { pref = localStorage.getItem(TK) || 'auto'; } catch (e) {}
+  try {
+    const saved = localStorage.getItem(TK);
+    pref = ['auto', 'light', 'dark'].includes(saved) ? saved : 'auto';
+  } catch (e) {}
   mq.addEventListener('change', () => { if (pref === 'auto') applyTheme(); });
-  document.getElementById('theme-btn').addEventListener('click', () => {
-    pref = { auto: 'light', light: 'dark', dark: 'auto' }[pref];
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.addEventListener('click', () => {
+    pref = { auto: 'light', light: 'dark', dark: 'auto' }[pref] || 'auto';
     try { localStorage.setItem(TK, pref); } catch (e) {}
     applyTheme();
   });
