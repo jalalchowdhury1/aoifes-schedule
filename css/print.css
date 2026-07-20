@@ -1,1 +1,17 @@
-/* Print styles arrive in the print task. */
+@media print {
+  @page { size: letter landscape; margin: 0.4in; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  .top, .legend, .hint, .mobilebar, .dayview, #editor, .editor-backdrop,
+  .pmb, .saved-flash, .no-print { display: none !important; }
+
+  body { padding: 28px 0 0; margin: 0; background: var(--bg) !important; }
+
+  /* Always print the full week grid, even if the screen shows mobile day view. */
+  .grid-outer {
+    display: block !important;
+    border: none; box-shadow: none;
+    width: 95% !important; margin: 0 auto; overflow: visible;
+  }
+  #grid { min-width: unset !important; width: 100% !important; }
+}
