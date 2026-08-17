@@ -6,6 +6,7 @@ import { onChange } from '../state.js';
 import { renderToday } from './today.js';
 import { renderYear } from './year.js';
 import { renderSubjects } from './subjects.js';
+import { applyOverlay } from './overlay.js';
 
 const TK = 'aoife_ptab';
 const TABS = [
@@ -32,6 +33,7 @@ function renderViews() {
   if (tab === 'today') renderToday();
   else if (tab === 'year') renderYear();
   else if (tab === 'subjects') renderSubjects();
+  applyOverlay();
 }
 
 export function initPlanner() {
