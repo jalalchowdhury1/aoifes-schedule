@@ -70,3 +70,104 @@ export function sanitizePlan(raw) {
 }
 
 export const serializePlan = p => JSON.stringify(p);
+
+// ── Weekly capacity: how many sessions this activity expects in a week ──
+export function weekCapacity(act, weekStart, weeks, cycle) {
+  const wt = weekType(weeks, weekStart);
+  if (wt === 'off') return 0;
+  const r = act.rhythm || {};
+  let base = 0;
+  if (r.kind === 'daily') base = 7;
+  else if (r.kind === 'weekly') base = r.perWeek || 1;
+  else if (r.kind === 'cycle') base = isOnWeek(cycle, weekStart) ? (r.perOnWeek ?? 1) : (r.perOffWeek ?? 2.5);
+  if (wt === 'light') return base * 0.5;
+  if (wt === 'travel') {
+    const t = act.travel || { mode: 'pause' };
+    if (t.mode === 'continue') return base;
+    if (t.mode === 'reduced') return base * (t.factor ?? 0.5);
+    return 0;
+  }
+  return base;
+}
+
+// Walk weeks forward until remaining sessions are covered. null = can't project.
+export function projectFinish(act, fromDate, plan, horizon = 300) {
+  const remaining = actRemaining(act);
+  if (actTotal(act) === 0) return null;              // unknown counts (waiting for books)
+  if (remaining === 0) return { date: fromDate, weeks: 0, done: true };
+  let acc = 0, w = mondayOf(fromDate);
+  for (let i = 0; i < horizon; i++) {
+    acc += weekCapacity(act, w, plan.weeks, plan.parentCycle);
+    if (acc >= remaining) return { date: addDays(w, 6), weeks: i + 1 };
+    w = addDays(w, 7);
+  }
+  return null;
+}
+
+// Minimum sessions per 2-week cycle to hit the goal (counting non-blocked weeks).
+export function requiredPerCycle(act, fromDate, plan) {
+  if (!act.goal?.finishBy) return null;
+  const remaining = actRemaining(act);
+  let usable = 0, w = mondayOf(fromDate);
+  while (w <= act.goal.finishBy) {
+    if (weekCapacity(act, w, plan.weeks, plan.parentCycle) > 0) usable++;
+    w = addDays(w, 7);
+  }
+  if (!usable) return null;
+  return remaining / (usable / 2);
+}
+
+// ── Cycle stats (7-on/7-off activities) ─────────────────────
+export function cycleBounds(cycle, dateStr) {
+  const k = Math.floor(weeksBetween(cycle.anchorMonday, dateStr) / 2);
+  const start = addDays(cycle.anchorMonday, k * 14);
+  return { start, end: addDays(start, 13) };
+}
+
+const countDone = (log, actId, from, to) =>
+  log.filter(e => e.activityId === actId && e.status === 'done' && e.date >= from && e.date <= to).length;
+
+export function cycleStats(act, dateStr, cycle, log) {
+  const { start, end } = cycleBounds(cycle, dateStr);
+  const r = act.rhythm || {};
+  const targetMin = (r.perOnWeek ?? 1) + Math.floor(r.perOffWeek ?? 2.5);
+  const targetMax = (r.perOnWeek ?? 1) + Math.ceil(r.perOffWeek ?? 2.5);
+  const done = countDone(log, act.id, start, end);
+  const prev = cycleBounds(cycle, addDays(start, -1));
+  const prevDone = countDone(log, act.id, prev.start, prev.end);
+  return {
+    start, end, done, targetMin, targetMax,
+    behind: dateStr >= end && done < targetMin,
+    prevBehind: prevDone < targetMin && weeksBetween(cycle.anchorMonday, dateStr) >= 2,
+  };
+}
+
+// ── Target-count stats (Jiu Jitsu) ──────────────────────────
+export function targetStats(act, plan, log, dateStr) {
+  const { start, end } = plan.year;
+  let total = 0, elapsed = 0, w = mondayOf(start);
+  while (w <= end) {
+    if (weekType(plan.weeks, w) !== 'travel' && weekType(plan.weeks, w) !== 'off') {
+      total++;
+      if (w <= dateStr) elapsed++;
+    }
+    w = addDays(w, 7);
+  }
+  const done = log.filter(e => e.activityId === act.id && e.status === 'done').length;
+  const expected = total ? Math.floor((act.target || 0) * (elapsed / total)) : 0;
+  return { done, target: act.target || 0, expected, behind: Math.max(0, expected - done) };
+}
+
+// ── Clash detection over template events ────────────────────
+export const findClashes = (events, slot) =>
+  events.filter(e => e.day === slot.day && e.start < slot.end && e.end > slot.start);
+
+export function freeSlots(events, day, dur, count = 3) {
+  const out = [];
+  for (let s = 9; s <= 17 - dur && out.length < count; s += 0.5)
+    if (!findClashes(events, { day, start: s, end: s + dur }).length) out.push(s);
+  return out;
+}
+
+export const doneOn = (log, actId, dateStr) =>
+  log.some(e => e.activityId === actId && e.date === dateStr && e.status === 'done');
