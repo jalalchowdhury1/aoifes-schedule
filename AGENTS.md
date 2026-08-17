@@ -26,6 +26,18 @@ Static vanilla app, no build step, no dependencies, no framework:
 - api/get.js, api/save.js — Vercel functions -> Upstash KV. DO NOT TOUCH.
 - aoife_schedule_3.html — v1-era standalone snapshot (localStorage-only, no lock,
   no /api). Kept for history; it drifts from the live app by design. DO NOT TOUCH.
+- js/plan/model.js — PURE planner model: dates/weeks/cycle math, session sequences, capacities, projections, stats, clash, sanitize
+- js/plan/state.js — planner store, localStorage aoife_plan_v1, /api/plan-* I/O, mutations
+- js/plan/seed.js — PURE: the initial aoife_plan blob (honest as of 2026-08-16)
+- js/plan/tabs.js — tab navigation + boot; lazy view mounting
+- js/plan/today.js — Today view
+- js/plan/year.js — Year view
+- js/plan/subjects.js — Subjects view
+- js/plan/overlay.js — read-only week-grid decorations + clash banner
+- api/plan-get.js — GET aoife_plan (or ?prev=1 for undo copy)
+- api/plan-save.js — copy current -> aoife_plan_prev, then SET new
+- css/plan.css — all planner styles (tokens.css vars reused)
+- scripts/planner-backup.sh — nightly Drive snapshot of both KV blobs
 
 ## Data contract (NEVER break)
 - KV key `aoifes_schedule`; localStorage `aoife_v3`
@@ -45,6 +57,31 @@ Static vanilla app, no build step, no dependencies, no framework:
   the one shared blob; the lock toggle is a UI guard, not security. Fine for the
   intended private use — don't widen exposure without adding auth. v2 escapes all
   user strings via esc() before innerHTML, so the old stored-XSS vector is closed.
+
+## Planner data contract (additive — the section above is still frozen)
+- KV key `aoife_plan` (+ `aoife_plan_prev` one-step undo, written by plan-save);
+  localStorage `aoife_plan_v1`; same double-wrap POST convention as /api/save.
+- Shape: {version, year, parentCycle{anchorMonday,confirmed}, weeks{monday:{type,label}},
+  activities[{id,type,status,cls,onGrid,slots,rhythm,travel,goal,target,note,chain[
+  {id,name,pattern:'simple'|'tb-wb',firstUnit,lastUnit,lessons,tests,done,titles}]}],
+  overrides[{date,action,...}], log[{date,activityId|eventId,status,...}]}
+- `sanitizePlan` (js/plan/model.js) drops malformed records on both load paths and
+  preserves unknown fields (forward-compatible).
+- Claude sessions may edit this blob directly via the endpoints (bulk-load
+  curricula, replan trips, generate progress reports). Restore procedure:
+  GET /api/plan-get?prev=1 (undo) or a dated file from Drive
+  "Aoife Planner Backups", then POST it back via /api/plan-save.
+- Rollback tags: v2-pre-planner (before any planner code) and planner-v1 (first planner release).
+
+## Planner open items (2026-08-17)
+- LoE Foundations D true span (121-140 vs 121-160) — check the physical book.
+- Geography curriculum name + 36 unit titles — Claude bulk-loads once provided.
+- Dimensions G3 lesson/test counts when the books arrive.
+- Science enrollment decision + Hala Tuesday overlap resolution.
+- Jiu Jitsu enrollment + real target (20/yr is a placeholder).
+- 7-on/7-off anchor parity — flip in Settings (Year view) once confirmed;
+  parentCycle.confirmed stays false until then.
+- Family sign-off of the spec (built overnight on explicit authorization).
 
 ## Env vars (Vercel project settings — names only, never values; repo is public)
 api/*.js read `KV_REST_API_URL`/`KV_REST_API_TOKEN` with fallback to

@@ -1838,3 +1838,7 @@ Second review round; approved-to-ship with these folded in as one commit.
   or Subjects views.
 
 - **Test count 33 → 34**: added `sanitizePlan` drops a chain entry lacking id.
+
+Shipped as a single deploy at planner-v1; spec §7's per-phase tags were collapsed
+into one release tag because the phase boundaries were only shippable after the
+P1 review fixes.
