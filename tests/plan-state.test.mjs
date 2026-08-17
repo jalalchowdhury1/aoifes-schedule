@@ -53,7 +53,7 @@ test('initPlan sanitizes the seed: v2 invariants on every load path', () => {
   initPlan();
   assert.deepEqual(plan.data.periods, []);
   assert.equal(plan.data.parentCycle.dutyStart, '2026-08-11');
-  assert.deepEqual(Object.keys(plan.data.weeks), []);   // DEPRECATED shim, gone in Task B/C
+  assert.equal('weeks' in plan.data, false);            // shim removed (Task C)
 });
 
 // ── time-away period mutations ──────────────────────────────

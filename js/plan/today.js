@@ -1,14 +1,40 @@
-// Today view: date header, timed blocks for the real date (template + planner
-// slots + overrides), one-tap statuses, daily no-slot checklist, tomorrow strip.
+// Today view: date header, away-day banner, timed blocks for the real date
+// (template + planner slots + overrides), one-tap statuses, daily no-slot
+// checklist, tomorrow strip.
 import { DAYS, fmt, esc, CATS } from '../model.js';
 import { store, catLabel, evLabel } from '../state.js';
 import {
-  todayStr, addDays, dayIdx, mondayOf, weekType, isOnWeek, nextSession,
+  todayStr, addDays, dayIdx, isWorkDay, dayStatus, daysBetween, nextSession,
   currentCur, cycleStats, doneOn, actTotal, okCls,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
+const AWAY_ICON = { travel: '✈', off: '⏸' };
+
+// The icon is drawn from the period's TYPE, so strip any the family typed
+// into the label themselves ("Dhaka ✈" renders as "✈ Dhaka", not doubled)
+// — mirrors year.js's perName.
+const awayLabel = st => {
+  const l = String(st.label || '').replace(/[✈⏸]/g, '').trim();
+  return l || (st.type === 'off' ? 'Off' : 'Time away');
+};
+
+// "in 5 days" under two weeks out, "in 3 wks" beyond. Pure so it's testable
+// without a DOM.
+export function fmtUntil(days) {
+  if (days < 14) return `in ${days} day${days === 1 ? '' : 's'}`;
+  const wks = Math.round(days / 7);
+  return `in ${wks} wk${wks === 1 ? '' : 's'}`;
+}
+
+// A daily (no-time-slot) activity shows on a normal day; on a travel-type
+// away day only if it doesn't pause for travel; never on an off-type day.
+export function dailyVisible(act, status) {
+  if (!status.away) return true;
+  if (status.type === 'off') return false;
+  return (act.travel?.mode || 'pause') !== 'pause';
+}
 
 function timedFor(dateStr) {
   const d = dayIdx(dateStr);
@@ -42,14 +68,12 @@ const statusOf = (dateStr, it) => plan.data.log.find(e => e.date === dateStr &&
 
 function chips(dateStr) {
   const p = plan.data;
-  const wt = weekType(p.weeks, dateStr);
-  const wkLabel = p.weeks[mondayOf(dateStr)]?.label;
   const c = [];
-  c.push(`<span class="pchip">${wt === 'teaching' ? 'Teaching week' : esc((wkLabel || wt) + ' week')}</span>`);
   if (p.activities.some(a => a.status === 'active' && a.rhythm?.kind === 'cycle'))
-    c.push(`<span class="pchip">${isOnWeek(p.parentCycle, dateStr) ? 'Mama work week' : 'Mama home week'}${p.parentCycle.confirmed ? '' : ' ?'}</span>`);
-  const next = Object.keys(p.weeks).filter(k => k > dateStr && p.weeks[k].type === 'travel').sort()[0];
-  if (next) c.push(`<span class="pchip">✈ ${esc(p.weeks[next].label || 'travel')} in ${Math.max(1, Math.round((new Date(next) - new Date(dateStr)) / 604800000))} wks</span>`);
+    c.push(`<span class="pchip">${isWorkDay(p.parentCycle, dateStr) ? 'Mama: work day' : 'Mama: home day'}</span>`);
+  const next = p.periods.find(pd => pd.start > dateStr);       // periods are kept sorted by start
+  if (next) c.push(`<span class="pchip">${AWAY_ICON[next.type] || '✈'} ${esc(awayLabel(next))} ${
+    fmtUntil(daysBetween(dateStr, next.start))}</span>`);
   return c.join('');
 }
 
@@ -58,22 +82,30 @@ export function renderToday() {
   if (!el || !plan.data) return;
   const today = todayStr();
   const d = new Date();
-  const items = timedFor(today);
+  const status = dayStatus(plan.data.periods, today);
 
   let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}</div></div>`;
 
-  for (const it of items) {
-    const st = statusOf(today, it);
-    h += `<div class="tblock ${it.cls}${st ? ' st-' + st : ''}" data-key="${esc(it.key)}">
-      <div class="trow"><span class="tnm">${esc(it.name)}</span><span class="ttm">${fmt(it.start)}–${fmt(it.end)}</span></div>
-      ${it.note ? `<div class="tnote">${esc(it.note)}</div>` : ''}
-      <div class="tbtns">${ST.map(([k, lbl]) =>
-        `<button type="button" class="tbtn${st === k ? ' sel' : ''}" data-st="${k}">${lbl}</button>`).join('')}</div>
-    </div>`;
+  let items = [];
+  if (status.away) {
+    h += `<div class="pcard abanner"><div class="phead">${AWAY_ICON[status.type] || '✈'} ${
+      esc(awayLabel(status))} · day ${status.dayN} of ${status.total}</div></div>`;
+  } else {
+    items = timedFor(today);
+    for (const it of items) {
+      const st = statusOf(today, it);
+      h += `<div class="tblock ${it.cls}${st ? ' st-' + st : ''}" data-key="${esc(it.key)}">
+        <div class="trow"><span class="tnm">${esc(it.name)}</span><span class="ttm">${fmt(it.start)}–${fmt(it.end)}</span></div>
+        ${it.note ? `<div class="tnote">${esc(it.note)}</div>` : ''}
+        <div class="tbtns">${ST.map(([k, lbl]) =>
+          `<button type="button" class="tbtn${st === k ? ' sel' : ''}" data-st="${k}">${lbl}</button>`).join('')}</div>
+      </div>`;
+    }
+    if (!items.length) h += `<div class="pcard pmeta">No scheduled blocks today.</div>`;
   }
-  if (!items.length) h += `<div class="pcard pmeta">No scheduled blocks today.</div>`;
 
-  const dailies = plan.data.activities.filter(a => a.status === 'active' && a.type === 'paced' && !a.onGrid);
+  const dailies = plan.data.activities.filter(a =>
+    a.status === 'active' && a.type === 'paced' && !a.onGrid && dailyVisible(a, status));
   if (dailies.length) {
     h += `<div class="psec">Daily · no time slot</div>`;
     for (const a of dailies) {
@@ -92,8 +124,14 @@ export function renderToday() {
     }
   }
 
-  const tmw = timedFor(addDays(today, 1));
-  if (tmw.length) h += `<div class="tmwrow">Tomorrow: ${tmw.map(t => `${esc(t.name)} ${fmt(t.start)}`).join(' · ')}</div>`;
+  const tomorrow = addDays(today, 1);
+  const tst = dayStatus(plan.data.periods, tomorrow);
+  if (tst.away) {
+    h += `<div class="tmwrow">Tomorrow: ${AWAY_ICON[tst.type] || '✈'} ${esc(awayLabel(tst))}</div>`;
+  } else {
+    const tmw = timedFor(tomorrow);
+    if (tmw.length) h += `<div class="tmwrow">Tomorrow: ${tmw.map(t => `${esc(t.name)} ${fmt(t.start)}`).join(' · ')}</div>`;
+  }
 
   el.innerHTML = h;
   el.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', e => {

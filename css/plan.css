@@ -89,6 +89,9 @@
 .dtx small { display: block; color: var(--text-muted); font-size: 10.5px; }
 .tmwrow { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px;
           font-size: 11px; color: var(--text-muted); }
+/* Away-day banner: same activity-neutral .pcard look, a hair more emphasis
+   (centered, faint tint) so it reads as the headline for the day. */
+.abanner { text-align: center; background: var(--bg-input); }
 
 /* ── Subjects ── */
 .scard.dim { opacity: .65; }

@@ -14,11 +14,6 @@ export const weeksBetween = (a, b) =>
 // Round, don't floor: a DST boundary makes a "day" 23 or 25 hours long.
 export const daysBetween = (a, b) => Math.round((s2d(b) - s2d(a)) / 86400000);
 
-// DEPRECATED — removed in Task B. The `weeks` map is gone from the data model
-// (see `periods` below); year.js/today.js still call this until they are rewritten.
-export const WEEK_TYPES = ['teaching', 'travel', 'light', 'off'];
-export const weekType = (weeks, dateStr) => weeks?.[mondayOf(dateStr)]?.type || 'teaching';
-
 // Monday parity of the 2-week parent cycle (which weeks are "work weeks").
 export const isOnWeek = (cycle, dateStr) =>
   ((weeksBetween(cycle.anchorMonday, dateStr) % 2) + 2) % 2 === 0;
@@ -32,7 +27,7 @@ export const isWorkDay = (cycle, dateStr) =>
 
 // ── Time-away periods (day-precise; replaces the week map) ──
 export const PERIOD_TYPES = ['travel', 'off'];
-const asPeriods = x => (Array.isArray(x) ? x : []);           // legacy weeks map -> none
+const asPeriods = x => (Array.isArray(x) ? x : []);           // guard: non-array/missing -> none
 export const byPeriodStart = (a, b) =>
   a.start < b.start ? -1 : a.start > b.start ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 export const sortPeriods = list => list.sort(byPeriodStart);
@@ -151,12 +146,6 @@ export function sanitizePlan(raw) {
     if (!seen.has(p.id)) { seen.add(p.id); periods.push(p); }   // id is identity: no duplicates
   out.periods = sortPeriods(periods);
   delete out.weeks;
-  // DEPRECATED SHIM — delete in Task B/C. `weeks` is no longer part of the data
-  // (not an own enumerable key, never serialized), but year.js/today.js still
-  // read `plan.weeks[…]` / Object.keys(plan.weeks) directly and would throw on
-  // every render against `undefined`. Hand them an inert empty map until then.
-  Object.defineProperty(out, 'weeks',
-    { value: {}, enumerable: false, writable: true, configurable: true });
   out.activities = (Array.isArray(r.activities) ? r.activities : [])
     .filter(a => a && typeof a === 'object' && a.id && a.type)
     .map(a => {
@@ -178,9 +167,8 @@ export function sanitizePlan(raw) {
 export const serializePlan = p => JSON.stringify(p);
 
 // ── Weekly capacity: how many sessions this activity expects in a week ──
-// `periods` is the day-precise time-away list. DEPRECATED SHIM (removed in
-// Task B): a legacy weeks map (plain object) is accepted and read as "no time
-// away", so year.js keeps rendering until it is rewritten.
+// `periods` is the day-precise time-away list — always an array (sanitizePlan
+// guarantees it on both load paths); every caller in the app passes plan.periods.
 export function weekCapacity(act, weekStart, periods, cycle) {
   const r = act.rhythm || {};
   let base = 0;
@@ -188,7 +176,7 @@ export function weekCapacity(act, weekStart, periods, cycle) {
   else if (r.kind === 'weekly') base = r.perWeek || 1;
   else if (r.kind === 'cycle') base = isOnWeek(cycle, weekStart) ? (r.perOnWeek ?? 1) : (r.perOffWeek ?? 2.5);
   if (!base) return 0;
-  return base * effectiveDaysInWeek(act, weekStart, asPeriods(periods)) / 7;
+  return base * effectiveDaysInWeek(act, weekStart, periods) / 7;
 }
 
 // Walk weeks forward until remaining sessions are covered. null = can't project.

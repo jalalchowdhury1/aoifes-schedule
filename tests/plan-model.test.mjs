@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addDays, dayIdx, mondayOf, weeksBetween, daysBetween, weekType, isOnWeek, isWorkDay,
+  addDays, dayIdx, mondayOf, weeksBetween, daysBetween, isOnWeek, isWorkDay,
   sessionsCount, nextSession, actTotal, actDone, actRemaining,
   dayAway, dayStatus, awayDaysInWeek, effectiveDaysInWeek,
   sanitizePlan, serializePlan,
@@ -20,14 +20,6 @@ test('date helpers: Mon-first indexing and week math', () => {
   assert.equal(daysBetween('2026-11-01', '2026-11-02'), 1);   // DST fall-back night
   assert.equal(daysBetween('2027-03-14', '2027-03-15'), 1);   // DST spring-forward
   assert.equal(daysBetween('2026-08-25', '2026-08-11'), -14);
-});
-
-test('weekType (DEPRECATED shim) defaults to teaching, reads a legacy weeks map', () => {
-  const weeks = { '2027-01-04': { type: 'travel', label: 'Dhaka' } };
-  assert.equal(weekType(weeks, '2027-01-07'), 'travel'); // Thu of that week
-  assert.equal(weekType(weeks, '2026-12-30'), 'teaching');
-  assert.equal(weekType({}, '2027-01-07'), 'teaching');
-  assert.equal(weekType(undefined, '2027-01-07'), 'teaching');
 });
 
 test('isOnWeek: anchor week is a work week, alternating', () => {
@@ -194,13 +186,14 @@ test('sanitizePlan: legacy weeks map migrates to 7-day periods and the key is go
   assert.equal(sanitizePlan(JSON.parse(serializePlan(p))).periods.length, 3);
 });
 
-test('DEPRECATED weeks shim keeps the un-rewritten views alive (delete in Task B/C)', () => {
-  // year.js/today.js still read plan.weeks directly; sanitize hands them an
-  // inert empty map so nothing throws between Task A and Tasks B/C.
+test('sanitizePlan output has no weeks property at all — own or shimmed (Task C)', () => {
+  // The Task A/B inert-empty-map shim (kept alive for year.js/today.js until
+  // they were rewritten) is gone: `weeks` must not exist on the plan by any
+  // means (own enumerable key, non-enumerable shim, or 'in' lookup).
   const p = sanitizePlan({ weeks: { '2027-01-04': { type: 'travel', label: 'Dhaka' } } });
-  assert.equal(p.weeks['2027-01-04']?.label, undefined);
-  assert.deepEqual(Object.keys(p.weeks), []);
-  assert.equal(weekType(p.weeks, '2027-01-07'), 'teaching');
+  assert.equal('weeks' in p, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(p, 'weeks'), false);
+  assert.equal(p.weeks, undefined);
 });
 
 test('sanitizePlan: parentCycle.dutyStart ISO-validated with a 2026-08-11 default', () => {
@@ -248,7 +241,9 @@ test('weekCapacity: rhythms × away days', () => {
   assert.equal(weekCapacity(geo, '2026-08-17', [], CYC), 1);
   assert.equal(weekCapacity(geo, '2026-08-17',
     [{ id: 'o', start: '2026-08-17', end: '2026-08-23', type: 'off' }], CYC), 0);
-  // DEPRECATED shim: a legacy weeks map (plain object) is read as "no periods".
+  // Malformed periods (not an array) are read as "no time away" — dayAway's
+  // own defensive guard, not a legacy-weeks-map shim (that's gone; every
+  // caller in the app passes plan.periods, a real array).
   assert.equal(weekCapacity(SM, '2026-08-17', {}, CYC), 7);
   assert.equal(weekCapacity(SM, '2026-08-17', undefined, CYC), 7);
 });
