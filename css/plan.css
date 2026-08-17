@@ -105,24 +105,94 @@
 .sctl-l { font-size: 11px; color: var(--text-sub); display: flex; gap: 5px; align-items: center; margin: 0; }
 .sctl-l select { width: auto; font-size: 12px; padding: 4px 6px; }
 
-/* ── Year ── */
+/* ── Year (v2: view-only tracks + time-away list + sheet) ── */
 .ytracks { position: relative; }
+/* The today line is absolutely positioned inside .ytw, which spans exactly the
+   same box as the week grids — so its left % lands on the right week. The
+   padding-top reserves the row where the "today" tag sits. */
+.ytw { position: relative; padding-top: 13px; }
+.ynow { position: absolute; top: 13px; bottom: 0; left: calc(100% * var(--tp, 0) / 100);
+        border-left: 1.5px dashed var(--now); pointer-events: none; }
+.ynow i { position: absolute; top: -13px; left: 2px; font-style: normal;
+          font-size: 8.5px; font-weight: 700; letter-spacing: .04em; color: var(--now); }
 .track { margin-bottom: 12px; }
 .track .tl { display: flex; justify-content: space-between; align-items: baseline;
              font-size: 11.5px; margin-bottom: 4px; }
 .track .tl b { font-size: 12px; }
 .track .tl small { color: var(--text-muted); font-size: 10px; }
 .tgrid { display: grid; grid-template-columns: repeat(var(--n, 52), 1fr); gap: 1px; }
-.tgrid i { height: 14px; border-radius: 2px; background: var(--bg-input); cursor: pointer; }
-.tgrid i.plan { background: var(--eb, var(--bg-input)); }
-.tgrid i.fill { background: var(--el, var(--accent-soft)); }
-.tgrid i.trip { background: repeating-linear-gradient(135deg, var(--border) 0 2px, transparent 2px 4px); }
-.tgrid i.offw { background: transparent; border: 1px dashed var(--border); }
-.ytracks::after { content: ''; position: absolute; top: 44px; bottom: 34px; left: calc(14px + (100% - 28px) * var(--tp) / 100);
-                  border-left: 1.5px dashed var(--now); pointer-events: none; }
-.yaxis { display: grid; grid-template-columns: repeat(12, 1fr); font-size: 9px;
-         color: var(--text-muted); letter-spacing: .05em; margin-top: 4px; }
-#yflip { font-size: 11px; padding: 4px 10px; }
+/* background-COLOR, never the shorthand: an away week layers a hatch
+   background-image on top of the progress colour below it. */
+.tgrid i { height: 14px; border-radius: 2px; background-color: var(--bg-input);
+           cursor: pointer; touch-action: manipulation; }
+.tgrid i.plan { background-color: var(--eb, var(--bg-input)); }
+.tgrid i.fill { background-color: var(--el, var(--accent-soft)); }
+/* Away shading: full-height hatch for a whole week away, half-height for a
+   partial one. `off` hatches darker AND denser than travel, so the two stay
+   apart in both themes — --border is nearly invisible on --bg-input in dark,
+   which is why the light hatch is --text-muted rather than the border colour. */
+.tgrid i.trip, .yl.trip { background-image: repeating-linear-gradient(135deg, var(--text-muted) 0 1.5px, transparent 1.5px 4px); }
+.tgrid i.offw, .yl.offw { background-image: repeating-linear-gradient(135deg, var(--text-sub) 0 2px, transparent 2px 3.5px); }
+.tgrid i.trip-part { background-image: repeating-linear-gradient(135deg, var(--text-muted) 0 1.5px, transparent 1.5px 4px); }
+.tgrid i.offw-part { background-image: repeating-linear-gradient(135deg, var(--text-sub) 0 2px, transparent 2px 3.5px); }
+.tgrid i.trip-part, .tgrid i.offw-part { background-size: 100% 50%;
+           background-repeat: no-repeat; background-position: bottom; }
+/* Red is the today line's colour, so the selected week uses plain ink. */
+.tgrid i.sel { outline: 1.5px solid var(--text); outline-offset: 0; }
+.yaxis { display: grid; grid-template-columns: repeat(var(--n, 52), 1fr); font-size: 9px;
+         color: var(--text-muted); letter-spacing: .05em; margin-top: 4px; overflow: hidden; }
+/* A short month (the part-months at either end of the year) gets clipped
+   rather than allowed to run into its neighbour. */
+.yaxis span { overflow: hidden; white-space: nowrap; padding-right: 3px; }
+.yleg { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: center;
+        margin-top: 8px; font-size: 10px; color: var(--text-muted); }
+.yleg span { display: inline-flex; align-items: center; gap: 4px; }
+.yl { display: inline-block; width: 13px; height: 10px; border-radius: 2px;
+      background-color: var(--bg-input); }
+.yl.fill { background-color: var(--accent-soft); }
+.yl.plan { background-color: var(--bg-input); border: 1px solid var(--border); }
+.ycoll { line-height: 1.5; }
+
+/* Week info card (read-only) */
+.ycard .tnm { font-size: 13px; }
+.ycls { border: none; background: transparent; color: var(--text-muted);
+        font-size: 13px; padding: 2px 6px; line-height: 1; }
+
+/* Time-away list */
+.yrow { display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+        padding: 9px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.yaway .yrow:last-of-type { border-bottom: none; }
+.yrow-t { font-size: 12.5px; font-weight: 600; }
+.yrow-d { font-size: 11px; color: var(--text-sub); white-space: nowrap; }
+.ybtn-add { width: 100%; margin-top: 9px; padding: 9px; font-size: 12.5px; }
+.yfoot { line-height: 1.5; }
+
+/* Add/edit sheet — a card on desktop, a bottom sheet on phones */
+.ysh-bd { position: fixed; inset: 0; background: var(--backdrop); z-index: 80; }
+.ysh { position: relative; z-index: 90; background: var(--bg-panel);
+       border: 1px solid var(--border); border-radius: var(--radius);
+       box-shadow: var(--shadow); padding: 14px; margin-bottom: 10px; }
+.ysh-h { font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.ysh-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ysh-row { margin-top: 10px; }
+.ysh-radios { display: flex; gap: 8px; }
+.ysh-rad { flex: 1; margin: 0; display: flex; align-items: center; gap: 7px;
+           font-size: 12.5px; color: var(--text); background: var(--bg-input);
+           border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; }
+.ysh-rad input { width: auto; }
+.ysh-help { font-size: 10.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.45; }
+.ysh-imp { font-size: 11.5px; color: var(--text-sub); line-height: 1.65; }
+.yimp b { color: var(--text); font-weight: 600; }
+.yimp small { color: var(--text-muted); }
+.ysh-btns { display: flex; gap: 8px; margin-top: 12px; }
+.ysh-btns button { flex: 1; padding: 9px 6px; }
+@media (max-width: 699px) {
+  .ysh { position: fixed; left: 0; right: 0; bottom: 0; margin: 0;
+         border-radius: 16px 16px 0 0; border-bottom: none;
+         padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+         max-height: 84vh; overflow-y: auto; animation: ysh-up .22s ease; }
+  @keyframes ysh-up { from { transform: translateY(30%); opacity: .5; } to { transform: none; opacity: 1; } }
+}
 
 /* ── Week-grid overlay ── */
 .ov-dot { position: absolute; top: 3px; right: 4px; font-size: 9px; font-weight: 700;

@@ -11,8 +11,8 @@ import {
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 globalThis.document = { dispatchEvent: () => {} };
-const { plan, initPlan, togglePaced, addPeriod, updatePeriod, deletePeriod,
-        setWeekType, flipAnchor } = await import('../js/plan/state.js');
+const S = await import('../js/plan/state.js');
+const { plan, initPlan, togglePaced, addPeriod, updatePeriod, deletePeriod } = S;
 
 const curOf = (p, actId, curId) =>
   p.activities.find(a => a.id === actId).chain.find(c => c.id === curId);
@@ -100,12 +100,11 @@ test('period mutations reject junk instead of poisoning the plan', () => {
   assert.deepEqual(plan.data.periods, []);
 });
 
-test('DEPRECATED setWeekType / flipAnchor are inert no-ops (removed in Task B)', () => {
-  initPlan();
-  const before = snap(plan.data);
-  setWeekType('2027-01-04', 'travel', 'Dhaka');
-  flipAnchor();
-  assert.deepEqual(snap(plan.data), before);
+// Week marking and the anchor flip are gone with the Year page rewrite (Task B).
+// Guard the removal: a stray re-export would mean a view can still mutate weeks.
+test('setWeekType / flipAnchor are gone from the store', () => {
+  assert.equal('setWeekType' in S, false);
+  assert.equal('flipAnchor' in S, false);
 });
 
 // ── togglePaced mutation invariants (I1) ────────────────────

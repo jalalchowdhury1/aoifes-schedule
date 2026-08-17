@@ -138,12 +138,6 @@ export function deletePeriod(id) {
   commit();
 }
 
-// DEPRECATED — removed in Task B. year.js still imports these two (a missing
-// export is a load-time SyntaxError, which would take the whole app down), but
-// week marking and the anchor flip are gone from the model: inert no-ops.
-export function setWeekType() {}
-export function flipAnchor() {}
-
 export function setActivityStatus(id, status) {
   const act = getActivity(id);
   if (act) { act.status = status; commit(); }
