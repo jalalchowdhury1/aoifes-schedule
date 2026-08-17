@@ -69,3 +69,18 @@
 .dtx small { display: block; color: var(--text-muted); font-size: 10.5px; }
 .tmwrow { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px;
           font-size: 11px; color: var(--text-muted); }
+
+/* ── Subjects ── */
+.scard.dim { opacity: .65; }
+.sdot { display: inline-block; width: 9px; height: 9px; border-radius: 99px;
+        background: var(--el, var(--border)); margin-right: 7px; }
+.smeta { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.sline { font-size: 11.5px; color: var(--text-sub); margin-top: 4px; }
+.sbar { height: 5px; border-radius: 4px; background: var(--eb, var(--bg-input));
+        margin-top: 7px; position: relative; overflow: hidden; }
+.sbar i { position: absolute; inset: 0 auto 0 0; background: var(--el, var(--accent-soft)); border-radius: 4px; }
+.sdet { margin-top: 8px; }
+.sdet summary { font-size: 11px; color: var(--text-muted); cursor: pointer; }
+.sctl { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+.sctl-l { font-size: 11px; color: var(--text-sub); display: flex; gap: 5px; align-items: center; margin: 0; }
+.sctl-l select { width: auto; font-size: 12px; padding: 4px 6px; }
