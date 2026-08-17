@@ -19,6 +19,7 @@
 </script>
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/plan.css">
 <link rel="stylesheet" href="css/print.css">
 </head>
 <body>
@@ -39,6 +40,8 @@
     </div>
   </header>
 
+  <nav id="ptabs" class="no-print" aria-label="Planner views"></nav>
+
   <div id="legend" class="legend hide-locked"></div>
   <p class="hint no-print hide-locked">Drag to move &middot; Drag bottom edge to resize &middot; Click to edit &mdash; saves automatically</p>
 
@@ -50,6 +53,10 @@
   <div id="dayview" class="dayview"></div>
 
   <div class="grid-outer"><div id="grid"></div></div>
+
+  <div id="view-today" class="pview no-print"></div>
+  <div id="view-year" class="pview no-print"></div>
+  <div id="view-subjects" class="pview no-print"></div>
 
   <div id="editor-backdrop" class="editor-backdrop no-print"></div>
   <div id="editor" class="hide-locked no-print"></div>

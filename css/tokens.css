@@ -63,3 +63,14 @@ html[data-theme='light'] .h  { --eb: #FBDCCE; --el: #B0431F; --et: #571F0D; }
 html[data-theme='light'] .b  { --eb: #FCE8C2; --el: #96590A; --et: #4A2902; }
 html[data-theme='light'] .a  { --eb: #FAD9E5; --el: #AB3A60; --et: #571830; }
 html[data-theme='light'] .ot { --eb: #D8E8FA; --el: #1D66B0; --et: #093159; }
+
+/* Planner-only category tokens (geography teal, science blue, jiu-jitsu steel).
+   The six template categories above are the v1 contract — these are additive. */
+html[data-theme='dark'] .g  { --eb: #0B3A34; --el: #2BB3A0; --et: #A8E6DC; }
+html[data-theme='dark'] .s  { --eb: #051E38; --el: #378ADD; --et: #B5D4F4; }
+html[data-theme='dark'] .j  { --eb: #23262F; --el: #8A93A8; --et: #D4D9E4; }
+html[data-theme='light'] .g { --eb: #D2F0EC; --el: #0E7C6E; --et: #073F38; }
+html[data-theme='light'] .s { --eb: #D8E8FA; --el: #1D66B0; --et: #093159; }
+html[data-theme='light'] .j { --eb: #E5E7EE; --el: #5B6478; --et: #262C3A; }
+html[data-theme='dark']  { --ok: #4ade80; --ok-bg: #0d3320; --warn: #fbbf24; --warn-bg: #38290a; }
+html[data-theme='light'] { --ok: #16a34a; --ok-bg: #dcfce7; --warn: #b45309; --warn-bg: #fef3c7; }
