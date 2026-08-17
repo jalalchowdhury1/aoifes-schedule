@@ -2,8 +2,8 @@
 import { esc } from '../model.js';
 import { catLabel } from '../state.js';
 import {
-  todayStr, actTotal, actDone, actRemaining, currentCur, nextSession,
-  projectFinish, requiredPerCycle, cycleStats, targetStats,
+  todayStr, actTotal, actDone, currentCur, nextSession,
+  projectFinish, requiredPerCycle, targetStats,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode } from './state.js';
 

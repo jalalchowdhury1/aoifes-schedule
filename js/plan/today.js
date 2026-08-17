@@ -10,24 +10,28 @@ import { plan, togglePaced, logTimed } from './state.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
 
+// `cls` lands unescaped in a class attribute, so it is whitelisted, not escaped.
+const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
+const okCls = x => (CLS.has(x) ? x : 'ot');
+
 function timedFor(dateStr) {
   const d = dayIdx(dateStr);
   const items = [];
   for (const ev of store.events.filter(e => e.day === d))
-    items.push({ key: `ev:${ev.id}`, eventId: ev.id, cls: CATS[ev.cat]?.cls || 'ot',
+    items.push({ key: `ev:${ev.id}`, eventId: ev.id, cls: okCls(CATS[ev.cat]?.cls),
                  name: evLabel(ev) || catLabel(ev.cat), start: ev.start, end: ev.end, note: ev.note });
   for (const a of plan.data.activities.filter(a => a.status === 'active' && a.onGrid))
     for (const s of a.slots || [])
       if (s.day === d) {
         const cur = currentCur(a);
-        items.push({ key: `act:${a.id}`, activityId: a.id, cls: a.cls || 'ot',
+        items.push({ key: `act:${a.id}`, activityId: a.id, cls: okCls(a.cls),
                      name: a.name, start: s.start, end: s.end,
                      note: cur && nextSession(cur) ? nextSession(cur).label : '' });
       }
   for (const [i, o] of plan.data.overrides.entries())
     if (o.date === dateStr && o.action === 'add') {
       const a = plan.data.activities.find(x => x.id === o.activityId);
-      items.push({ key: `ov:${i}`, activityId: o.activityId, cls: a?.cls || 'ot',
+      items.push({ key: `ov:${i}`, activityId: o.activityId, cls: okCls(a?.cls),
                    name: (a?.name || 'Extra') + ' · makeup', start: o.start, end: o.end, note: o.note || '' });
     }
   const skips = new Set(plan.data.overrides

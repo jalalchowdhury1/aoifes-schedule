@@ -63,6 +63,6 @@ export function seedPlan() {
         cls: 'j', onGrid: false, note: 'Revisit ~Sept 2027', chain: [] },
     ],
     overrides: [],
-    log: [{ date: '2026-08-16', activityId: 'loe', unit: 101, status: 'done' }],
+    log: [{ date: '2026-08-16', activityId: 'loe', curriculum: 'loe-c', session: 20, status: 'done' }],
   };
 }

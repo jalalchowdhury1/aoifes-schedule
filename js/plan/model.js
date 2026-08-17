@@ -44,28 +44,37 @@ export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.
 export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
+// Every date that a week-walk loop compares against MUST be a real ISO date,
+// or `while (w <= badDate)` never terminates. Guard them all here.
+export const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const isISO = s => typeof s === 'string' && ISO.test(s);
+
 export function sanitizePlan(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const out = { ...r };
   out.version = typeof r.version === 'number' ? r.version : 1;
-  out.year = r.year && r.year.start && r.year.end
+  out.year = r.year && isISO(r.year.start) && isISO(r.year.end)
     ? r.year : { label: '2026-27', start: '2026-08-17', end: '2027-08-31' };
-  out.parentCycle = r.parentCycle && r.parentCycle.anchorMonday
+  out.parentCycle = r.parentCycle && isISO(r.parentCycle.anchorMonday)
     ? r.parentCycle : { pattern: '7on7off', anchorMonday: '2026-08-17', confirmed: false };
   out.weeks = {};
   if (r.weeks && typeof r.weeks === 'object')
     for (const [k, v] of Object.entries(r.weeks))
-      if (/^\d{4}-\d{2}-\d{2}$/.test(k) && v && WEEK_TYPES.includes(v.type))
+      if (isISO(k) && v && WEEK_TYPES.includes(v.type))
         out.weeks[k] = { type: v.type, ...(v.label ? { label: String(v.label) } : {}) };
   out.activities = (Array.isArray(r.activities) ? r.activities : [])
     .filter(a => a && typeof a === 'object' && a.id && a.type)
-    .map(a => ({ ...a, chain: Array.isArray(a.chain)
-        ? a.chain.filter(c => c && c.pattern).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
-        : [] }));
+    .map(a => {
+      const o = { ...a, chain: Array.isArray(a.chain)
+          ? a.chain.filter(c => c && c.pattern).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
+          : [] };
+      if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
+      return o;
+    });
   out.log = (Array.isArray(r.log) ? r.log : [])
-    .filter(e => e && e.date && e.status && (e.activityId || e.eventId));
+    .filter(e => e && isISO(e.date) && e.status && (e.activityId || e.eventId));
   out.overrides = (Array.isArray(r.overrides) ? r.overrides : [])
-    .filter(o => o && o.date && o.action);
+    .filter(o => o && isISO(o.date) && o.action);
   return out;
 }
 
@@ -104,12 +113,17 @@ export function projectFinish(act, fromDate, plan, horizon = 300) {
   return null;
 }
 
+// Hard stop for every week-walk loop (~11.5 years). Belt-and-braces alongside
+// sanitizePlan's ISO guards: an unsanitized/hand-built plan must never hang the UI.
+const WALK_CAP = 600;
+
 // Minimum sessions per 2-week cycle to hit the goal (counting non-blocked weeks).
 export function requiredPerCycle(act, fromDate, plan) {
   if (!act.goal?.finishBy) return null;
   const remaining = actRemaining(act);
-  let usable = 0, w = mondayOf(fromDate);
+  let usable = 0, w = mondayOf(fromDate), n = 0;
   while (w <= act.goal.finishBy) {
+    if (n++ >= WALK_CAP) break;                      // behave as if the walk ended
     if (weekCapacity(act, w, plan.weeks, plan.parentCycle) > 0) usable++;
     w = addDays(w, 7);
   }
@@ -130,8 +144,8 @@ const countDone = (log, actId, from, to) =>
 export function cycleStats(act, dateStr, cycle, log) {
   const { start, end } = cycleBounds(cycle, dateStr);
   const r = act.rhythm || {};
-  const targetMin = (r.perOnWeek ?? 1) + Math.floor(r.perOffWeek ?? 2.5);
-  const targetMax = (r.perOnWeek ?? 1) + Math.ceil(r.perOffWeek ?? 2.5);
+  const targetMin = Number(r.perOnWeek ?? 1) + Math.floor(Number(r.perOffWeek ?? 2.5));
+  const targetMax = Number(r.perOnWeek ?? 1) + Math.ceil(Number(r.perOffWeek ?? 2.5));
   const done = countDone(log, act.id, start, end);
   const prev = cycleBounds(cycle, addDays(start, -1));
   const prevDone = countDone(log, act.id, prev.start, prev.end);
@@ -145,8 +159,9 @@ export function cycleStats(act, dateStr, cycle, log) {
 // ── Target-count stats (Jiu Jitsu) ──────────────────────────
 export function targetStats(act, plan, log, dateStr) {
   const { start, end } = plan.year;
-  let total = 0, elapsed = 0, w = mondayOf(start);
+  let total = 0, elapsed = 0, w = mondayOf(start), n = 0;
   while (w <= end) {
+    if (n++ >= WALK_CAP) break;                      // behave as if the walk ended
     if (weekType(plan.weeks, w) !== 'travel' && weekType(plan.weeks, w) !== 'off') {
       total++;
       if (w <= dateStr) elapsed++;

@@ -1,6 +1,6 @@
 // Planner store + persistence. Mirrors ../state.js philosophy.
 // localStorage 'aoife_plan_v1'; KV via /api/plan-get + /api/plan-save.
-import { sanitizePlan, serializePlan, currentCur, sessionsCount, todayStr, addDays, mondayOf } from './model.js';
+import { sanitizePlan, serializePlan, currentCur, todayStr, addDays, mondayOf } from './model.js';
 import { seedPlan } from './seed.js';
 
 const PK = 'aoife_plan_v1';
@@ -50,22 +50,30 @@ export const getActivity = id => plan.data.activities.find(a => a.id === id);
 
 // Toggle a paced activity's "did it today" check. Checking advances the chain;
 // unchecking the same day rolls it back (mis-tap fix).
+// INVARIANT: check → uncheck is the identity in every state, including an
+// exhausted chain. That holds because the log entry records WHICH curriculum
+// was advanced, and the uncheck decrements exactly that one — never "the last
+// curriculum with progress". currentCur() only returns a curriculum that can
+// still advance (done < sessionsCount, and sessionsCount > 0), so when it is
+// null nothing advances and the entry is written without a `curriculum` field,
+// making the uncheck a pure log splice.
 export function togglePaced(actId, date = todayStr()) {
   const act = getActivity(actId);
   if (!act) return;
   const i = plan.data.log.findIndex(e =>
     e.activityId === actId && e.date === date && e.status === 'done' && !e.eventId);
   if (i >= 0) {
+    const entry = plan.data.log[i];
     plan.data.log.splice(i, 1);
-    const cur = [...(act.chain || [])].reverse().find(c => (c.done || 0) > 0);
-    if (cur) cur.done--;
+    if (entry.curriculum) {
+      const cur = (act.chain || []).find(c => c.id === entry.curriculum);
+      if (cur && (cur.done || 0) > 0) cur.done--;
+    }
   } else {
-    const cur = currentCur(act) || (act.chain || [])[0];
+    const cur = currentCur(act);
     plan.data.log.push({ date, activityId: actId, status: 'done',
       ...(cur ? { curriculum: cur.id, session: cur.done || 0 } : {}) });
-    if (cur && ((cur.done || 0) < sessionsCount(cur) || sessionsCount(cur) === 0)) {
-      cur.done = (cur.done || 0) + 1;
-    }
+    if (cur) cur.done = (cur.done || 0) + 1;
   }
   commit();
 }

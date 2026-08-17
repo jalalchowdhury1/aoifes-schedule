@@ -246,8 +246,8 @@ Existing tests must stay green. New pure-model tests pin the real family scenari
   pace; cycle target missed → behind; anchor flip inverts week types.
 - **Clash:** Science Tue 14.5–15.5 vs Hala Tue 14–15 → conflict + suggestions
   exclude occupied slots.
-- **Target pace:** JJ 8 done at week 10 of a 44-teaching-week year with 20 target
-  → 1 behind, makeup suggestion produced.
+- **Target pace:** JJ 3 done at ~week 11 of 48 teaching weeks, target 20 →
+  expected ≈ 4 (20 × 11/48), so behind by ≥ 1; makeup suggestion produced.
 - **Sanitize:** malformed activities/log entries dropped; round-trip stability;
   unknown future fields preserved (forward compatibility).
 - **Contract:** old `aoifes_schedule` shape untouched (existing fixture test);

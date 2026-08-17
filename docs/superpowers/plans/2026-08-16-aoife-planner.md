@@ -188,28 +188,37 @@ export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.
 export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
+// Every date that a week-walk loop compares against MUST be a real ISO date,
+// or `while (w <= badDate)` never terminates. Guard them all here.
+export const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const isISO = s => typeof s === 'string' && ISO.test(s);
+
 export function sanitizePlan(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const out = { ...r };
   out.version = typeof r.version === 'number' ? r.version : 1;
-  out.year = r.year && r.year.start && r.year.end
+  out.year = r.year && isISO(r.year.start) && isISO(r.year.end)
     ? r.year : { label: '2026-27', start: '2026-08-17', end: '2027-08-31' };
-  out.parentCycle = r.parentCycle && r.parentCycle.anchorMonday
+  out.parentCycle = r.parentCycle && isISO(r.parentCycle.anchorMonday)
     ? r.parentCycle : { pattern: '7on7off', anchorMonday: '2026-08-17', confirmed: false };
   out.weeks = {};
   if (r.weeks && typeof r.weeks === 'object')
     for (const [k, v] of Object.entries(r.weeks))
-      if (/^\d{4}-\d{2}-\d{2}$/.test(k) && v && WEEK_TYPES.includes(v.type))
+      if (isISO(k) && v && WEEK_TYPES.includes(v.type))
         out.weeks[k] = { type: v.type, ...(v.label ? { label: String(v.label) } : {}) };
   out.activities = (Array.isArray(r.activities) ? r.activities : [])
     .filter(a => a && typeof a === 'object' && a.id && a.type)
-    .map(a => ({ ...a, chain: Array.isArray(a.chain)
-        ? a.chain.filter(c => c && c.pattern).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
-        : [] }));
+    .map(a => {
+      const o = { ...a, chain: Array.isArray(a.chain)
+          ? a.chain.filter(c => c && c.pattern).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
+          : [] };
+      if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
+      return o;
+    });
   out.log = (Array.isArray(r.log) ? r.log : [])
-    .filter(e => e && e.date && e.status && (e.activityId || e.eventId));
+    .filter(e => e && isISO(e.date) && e.status && (e.activityId || e.eventId));
   out.overrides = (Array.isArray(r.overrides) ? r.overrides : [])
-    .filter(o => o && o.date && o.action);
+    .filter(o => o && isISO(o.date) && o.action);
   return out;
 }
 
@@ -383,12 +392,17 @@ export function projectFinish(act, fromDate, plan, horizon = 300) {
   return null;
 }
 
+// Hard stop for every week-walk loop (~11.5 years). Belt-and-braces alongside
+// sanitizePlan's ISO guards: an unsanitized/hand-built plan must never hang the UI.
+const WALK_CAP = 600;
+
 // Minimum sessions per 2-week cycle to hit the goal (counting non-blocked weeks).
 export function requiredPerCycle(act, fromDate, plan) {
   if (!act.goal?.finishBy) return null;
   const remaining = actRemaining(act);
-  let usable = 0, w = mondayOf(fromDate);
+  let usable = 0, w = mondayOf(fromDate), n = 0;
   while (w <= act.goal.finishBy) {
+    if (n++ >= WALK_CAP) break;                      // behave as if the walk ended
     if (weekCapacity(act, w, plan.weeks, plan.parentCycle) > 0) usable++;
     w = addDays(w, 7);
   }
@@ -409,8 +423,8 @@ const countDone = (log, actId, from, to) =>
 export function cycleStats(act, dateStr, cycle, log) {
   const { start, end } = cycleBounds(cycle, dateStr);
   const r = act.rhythm || {};
-  const targetMin = (r.perOnWeek ?? 1) + Math.floor(r.perOffWeek ?? 2.5);
-  const targetMax = (r.perOnWeek ?? 1) + Math.ceil(r.perOffWeek ?? 2.5);
+  const targetMin = Number(r.perOnWeek ?? 1) + Math.floor(Number(r.perOffWeek ?? 2.5));
+  const targetMax = Number(r.perOnWeek ?? 1) + Math.ceil(Number(r.perOffWeek ?? 2.5));
   const done = countDone(log, act.id, start, end);
   const prev = cycleBounds(cycle, addDays(start, -1));
   const prevDone = countDone(log, act.id, prev.start, prev.end);
@@ -424,8 +438,9 @@ export function cycleStats(act, dateStr, cycle, log) {
 // ── Target-count stats (Jiu Jitsu) ──────────────────────────
 export function targetStats(act, plan, log, dateStr) {
   const { start, end } = plan.year;
-  let total = 0, elapsed = 0, w = mondayOf(start);
+  let total = 0, elapsed = 0, w = mondayOf(start), n = 0;
   while (w <= end) {
+    if (n++ >= WALK_CAP) break;                      // behave as if the walk ended
     if (weekType(plan.weeks, w) !== 'travel' && weekType(plan.weeks, w) !== 'off') {
       total++;
       if (w <= dateStr) elapsed++;
@@ -679,7 +694,7 @@ export function seedPlan() {
         cls: 'j', onGrid: false, note: 'Revisit ~Sept 2027', chain: [] },
     ],
     overrides: [],
-    log: [{ date: '2026-08-16', activityId: 'loe', unit: 101, status: 'done' }],
+    log: [{ date: '2026-08-16', activityId: 'loe', curriculum: 'loe-c', session: 20, status: 'done' }],
   };
 }
 ```
@@ -689,7 +704,7 @@ export function seedPlan() {
 ```js
 // Planner store + persistence. Mirrors ../state.js philosophy.
 // localStorage 'aoife_plan_v1'; KV via /api/plan-get + /api/plan-save.
-import { sanitizePlan, serializePlan, currentCur, sessionsCount, todayStr, addDays, mondayOf } from './model.js';
+import { sanitizePlan, serializePlan, currentCur, todayStr, addDays, mondayOf } from './model.js';
 import { seedPlan } from './seed.js';
 
 const PK = 'aoife_plan_v1';
@@ -739,22 +754,30 @@ export const getActivity = id => plan.data.activities.find(a => a.id === id);
 
 // Toggle a paced activity's "did it today" check. Checking advances the chain;
 // unchecking the same day rolls it back (mis-tap fix).
+// INVARIANT: check → uncheck is the identity in every state, including an
+// exhausted chain. That holds because the log entry records WHICH curriculum
+// was advanced, and the uncheck decrements exactly that one — never "the last
+// curriculum with progress". currentCur() only returns a curriculum that can
+// still advance (done < sessionsCount, and sessionsCount > 0), so when it is
+// null nothing advances and the entry is written without a `curriculum` field,
+// making the uncheck a pure log splice.
 export function togglePaced(actId, date = todayStr()) {
   const act = getActivity(actId);
   if (!act) return;
   const i = plan.data.log.findIndex(e =>
     e.activityId === actId && e.date === date && e.status === 'done' && !e.eventId);
   if (i >= 0) {
+    const entry = plan.data.log[i];
     plan.data.log.splice(i, 1);
-    const cur = [...(act.chain || [])].reverse().find(c => (c.done || 0) > 0);
-    if (cur) cur.done--;
+    if (entry.curriculum) {
+      const cur = (act.chain || []).find(c => c.id === entry.curriculum);
+      if (cur && (cur.done || 0) > 0) cur.done--;
+    }
   } else {
-    const cur = currentCur(act) || (act.chain || [])[0];
+    const cur = currentCur(act);
     plan.data.log.push({ date, activityId: actId, status: 'done',
       ...(cur ? { curriculum: cur.id, session: cur.done || 0 } : {}) });
-    if (cur && ((cur.done || 0) < sessionsCount(cur) || sessionsCount(cur) === 0)) {
-      cur.done = (cur.done || 0) + 1;
-    }
+    if (cur) cur.done = (cur.done || 0) + 1;
   }
   commit();
 }
@@ -866,8 +889,9 @@ Edit C — immediately after the `<div class="grid-outer">...</div>` line, add:
 
 ```js
 // Planner tab navigation. The Week tab shows the untouched v2 app; other tabs
-// hide the schedule chrome and show a planner view. Print always prints the
-// week grid (print.css hides .pview/#ptabs via .no-print).
+// hide the schedule chrome and show a planner view. Print safety is guaranteed
+// by plan.css's own @media print block (hide planner UI, force .grid-outer
+// visible), not by .no-print alone — so printing from any tab yields the week grid.
 import { initPlan, fetchPlanRemote, onPlanChange } from './state.js';
 import { onChange } from '../state.js';
 import { renderToday } from './today.js';
@@ -920,7 +944,11 @@ export function initPlanner() {
 - [ ] **Step 4: Create `css/plan.css`** (shell now; view styles arrive with their views)
 
 ```css
-/* Planner styles. Reuses tokens.css variables; never overrides schedule rules. */
+/* Planner styles. Reuses tokens.css variables; never overrides schedule rules.
+   Print safety is guaranteed by this file's own @media print block (hide the
+   planner UI, force .grid-outer visible), NOT by .no-print alone — print.css
+   stays frozen and its low-specificity .grid-outer rule cannot beat the
+   per-tab hide rules below. */
 
 /* ── Tabs ── */
 #ptabs { display: flex; gap: 4px; margin-bottom: 10px; background: var(--bg-panel);
@@ -934,16 +962,20 @@ export function initPlanner() {
 #app[data-ptab='today'] #view-today,
 #app[data-ptab='year'] #view-year,
 #app[data-ptab='subjects'] #view-subjects { display: block; max-width: 560px; }
-#app:not([data-ptab='week']) .grid-outer,
-#app:not([data-ptab='week']) .mobilebar,
-#app:not([data-ptab='week']) .dayview,
-#app:not([data-ptab='week']) .legend,
-#app:not([data-ptab='week']) .hint,
-#app:not([data-ptab='week']) .controls .ctl-label,
-#app:not([data-ptab='week']) #sun-btn,
-#app:not([data-ptab='week']) #add-btn,
-#app:not([data-ptab='week']) #reset-btn,
-#app:not([data-ptab='week']) #editor { display: none !important; }
+/* Fail-OPEN: the hide rules are enumerated positively, one per planner tab.
+   If the planner JS never runs, #app carries no data-ptab and NOTHING here
+   matches — the classic schedule stays fully visible. Never use
+   #app:not([data-ptab='week']) here: that fails closed (blank page). */
+#app[data-ptab='today'] .grid-outer, #app[data-ptab='year'] .grid-outer, #app[data-ptab='subjects'] .grid-outer,
+#app[data-ptab='today'] .mobilebar, #app[data-ptab='year'] .mobilebar, #app[data-ptab='subjects'] .mobilebar,
+#app[data-ptab='today'] .dayview, #app[data-ptab='year'] .dayview, #app[data-ptab='subjects'] .dayview,
+#app[data-ptab='today'] .legend, #app[data-ptab='year'] .legend, #app[data-ptab='subjects'] .legend,
+#app[data-ptab='today'] .hint, #app[data-ptab='year'] .hint, #app[data-ptab='subjects'] .hint,
+#app[data-ptab='today'] .controls .ctl-label, #app[data-ptab='year'] .controls .ctl-label, #app[data-ptab='subjects'] .controls .ctl-label,
+#app[data-ptab='today'] #sun-btn, #app[data-ptab='year'] #sun-btn, #app[data-ptab='subjects'] #sun-btn,
+#app[data-ptab='today'] #add-btn, #app[data-ptab='year'] #add-btn, #app[data-ptab='subjects'] #add-btn,
+#app[data-ptab='today'] #reset-btn, #app[data-ptab='year'] #reset-btn, #app[data-ptab='subjects'] #reset-btn,
+#app[data-ptab='today'] #editor, #app[data-ptab='year'] #editor, #app[data-ptab='subjects'] #editor { display: none !important; }
 
 @media (max-width: 699px) {
   #ptabs { position: fixed; left: 10px; right: 10px; max-width: none;
@@ -952,7 +984,17 @@ export function initPlanner() {
   body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
 
-@media print { #ptabs, .pview { display: none !important; } }
+/* Print safety lives HERE, not in print.css. The tab hide rules above carry
+   #app + [data-ptab] specificity, so print.css's plain `.grid-outer` rule can
+   never out-rank them (specificity beats source order among !important decls).
+   These selectors match that specificity and come later in this file, so the
+   week grid is forced back on whichever planner tab is open. */
+@media print {
+  #ptabs, .pview { display: none !important; }
+  #app[data-ptab='today'] .grid-outer,
+  #app[data-ptab='year'] .grid-outer,
+  #app[data-ptab='subjects'] .grid-outer { display: block !important; }
+}
 
 /* ── Shared planner bits ── */
 .pcard { background: var(--bg-panel); border: 1px solid var(--border);
@@ -997,7 +1039,11 @@ tabs render empty containers until then; Week remains default on desktop.)
 
 Run: `python3 -m http.server 8080` then open http://localhost:8080 —
 tab bar renders; Week tab is pixel-identical to before; Today/Year/Subjects show
-empty views; print preview still shows only the week grid.
+empty views. PRINT CHECK — do it the strict way: **switch to the Today tab, then
+print — the full week grid must still appear** (printing from the Week tab
+proves nothing; the C1 regression only shows on a planner tab). Repeat from Year
+and Subjects. Also confirm fail-open: strip `data-ptab` off `#app` in devtools →
+the classic schedule must still be visible on screen.
 Run: `node --test 2>&1 | tail -3` → 0 fail.
 
 - [ ] **Step 8: Commit**
@@ -1030,24 +1076,28 @@ import { plan, togglePaced, logTimed } from './state.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
 
+// `cls` lands unescaped in a class attribute, so it is whitelisted, not escaped.
+const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
+const okCls = x => (CLS.has(x) ? x : 'ot');
+
 function timedFor(dateStr) {
   const d = dayIdx(dateStr);
   const items = [];
   for (const ev of store.events.filter(e => e.day === d))
-    items.push({ key: `ev:${ev.id}`, eventId: ev.id, cls: CATS[ev.cat]?.cls || 'ot',
+    items.push({ key: `ev:${ev.id}`, eventId: ev.id, cls: okCls(CATS[ev.cat]?.cls),
                  name: evLabel(ev) || catLabel(ev.cat), start: ev.start, end: ev.end, note: ev.note });
   for (const a of plan.data.activities.filter(a => a.status === 'active' && a.onGrid))
     for (const s of a.slots || [])
       if (s.day === d) {
         const cur = currentCur(a);
-        items.push({ key: `act:${a.id}`, activityId: a.id, cls: a.cls || 'ot',
+        items.push({ key: `act:${a.id}`, activityId: a.id, cls: okCls(a.cls),
                      name: a.name, start: s.start, end: s.end,
                      note: cur && nextSession(cur) ? nextSession(cur).label : '' });
       }
   for (const [i, o] of plan.data.overrides.entries())
     if (o.date === dateStr && o.action === 'add') {
       const a = plan.data.activities.find(x => x.id === o.activityId);
-      items.push({ key: `ov:${i}`, activityId: o.activityId, cls: a?.cls || 'ot',
+      items.push({ key: `ov:${i}`, activityId: o.activityId, cls: okCls(a?.cls),
                    name: (a?.name || 'Extra') + ' · makeup', start: o.start, end: o.end, note: o.note || '' });
     }
   const skips = new Set(plan.data.overrides
@@ -1161,7 +1211,9 @@ export function renderToday() {
 `python3 -m http.server 8080` → Today tab shows the real current day's template
 blocks, tapping ✓ marks + persists to localStorage (KV fetch fails locally by
 design); LoE row shows "Lesson 102" with cycle line; tapping it checks/unchecks
-and Lesson number advances/rolls back. Week tab + print unchanged.
+and Lesson number advances/rolls back **to exactly where it started**. Week tab
+unchanged. PRINT CHECK the strict way: **switch to the Today tab, then print —
+the full week grid must still appear.**
 Run: `node --test 2>&1 | tail -3` → 0 fail.
 
 - [ ] **Step 4: Commit**
@@ -1186,8 +1238,8 @@ git commit -m "feat(planner): Today view — timed statuses, daily checklist, to
 import { esc } from '../model.js';
 import { catLabel } from '../state.js';
 import {
-  todayStr, actTotal, actDone, actRemaining, currentCur, nextSession,
-  projectFinish, requiredPerCycle, cycleStats, targetStats,
+  todayStr, actTotal, actDone, currentCur, nextSession,
+  projectFinish, requiredPerCycle, targetStats,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode } from './state.js';
 
@@ -1365,7 +1417,7 @@ export function renderYear() {
 
   let h = `<div class="pcard"><div class="phead">${esc(p.year.label)} · year-round</div>
     <div class="pmeta"><span class="pchip">tap a week to cycle: teaching → travel → off → light</span></div></div>
-    <div class="pcard ytracks" style="--tp:${todayPct}%">`;
+    <div class="pcard ytracks" style="--tp:${todayPct}">`;   // UNITLESS — plan.css does the /100 and the % itself
   for (const a of [...rows, core]) h += trackFor(a, wks, today);
   h += `<div class="yaxis">${['S','O','N','D','J','F','M','A','M','J','J','A'].map(m => `<span>${m}</span>`).join('')}</div></div>`;
 
@@ -1444,7 +1496,7 @@ registration order in a Set is insertion order, and `initPlanner()` runs after
 // Read-only decorations on the classic week grid: today-status dots and a
 // clash banner. Never mutates events; only appends elements into rendered DOM.
 import { todayIndex, fmt, esc, DAYS } from '../model.js';
-import { store } from '../state.js';
+import { store, catLabel } from '../state.js';
 import { todayStr, findClashes } from './model.js';
 import { plan } from './state.js';
 
@@ -1484,7 +1536,7 @@ function renderClashBanner() {
     for (const s of a.slots || []) {
       const hits = findClashes(store.events, s);
       for (const h of hits)
-        msgs.push(`<b>⚠ ${esc(a.name)}</b> ${DAYS[s.day]} ${fmt(s.start)}–${fmt(s.end)} overlaps ${esc(h.name || h.cat)} ${fmt(h.start)}–${fmt(h.end)}`);
+        msgs.push(`<b>⚠ ${esc(a.name)}</b> ${DAYS[s.day]} ${fmt(s.start)}–${fmt(s.end)} overlaps ${esc(h.name || catLabel(h.cat))} ${fmt(h.start)}–${fmt(h.end)}`);
     }
   }
   bar.innerHTML = msgs.length ? `<div class="ov-clash-in">${msgs.join('<br>')}</div>` : '';
@@ -1503,6 +1555,7 @@ In `renderViews()`, add as the last line: `applyOverlay();`
 .ov-dot { position: absolute; top: 3px; right: 4px; font-size: 9px; font-weight: 700;
           z-index: 6; pointer-events: none; color: var(--et); }
 .ov-dot.ov-done { color: var(--ok); }
+.ov-dot.ov-partial { color: var(--warn); }
 .ov-dot.ov-missed { color: var(--danger-text); }
 #ov-clash:empty { display: none; }
 .ov-clash-in { background: var(--danger-bg); border: 1px solid var(--danger-border);
@@ -1653,3 +1706,82 @@ check all tabs, mark a test status and confirm it round-trips, then un-mark it.
   between `togglePaced`/`logTimed` (writers) and `statusOf`/`doneOn`/`cycleStats`
   (readers).
 
+## Execution addendum (2026-08-17)
+
+Everything above is the plan as executed for Tasks 1–9. These are the deltas
+between the plan text and the code that actually shipped. The code blocks above
+have already been patched to match; this list records *why*.
+
+**Fixed during execution**
+
+- **`year.js` `--tp` is unitless.** The plan wrote `style="--tp:${todayPct}%"`,
+  but `plan.css` computes `left: calc(14px + (100% - 28px) * var(--tp) / 100)`.
+  A `%` in the variable makes that `% / 100`, which is invalid and drops the
+  today-line entirely. Shipped as `style="--tp:${todayPct}"`.
+
+**Phase-1 code review fixes (single commit, this date)**
+
+- **C2 — fail-open CSS (`css/plan.css`).** The hide block used
+  `#app:not([data-ptab='week'])`, which matches when `#app` has *no*
+  `data-ptab` at all. If the planner JS ever fails to load, that state is the
+  default — so a broken planner blanked the whole schedule. Replaced with 30
+  enumerated positive selectors (3 planner tabs × 10 targets). Verified: with
+  no `data-ptab`, computed `.grid-outer` display is `block` (was `none`).
+
+- **C1 — blank print from a non-Week tab (`css/plan.css`).** Among `!important`
+  declarations, specificity beats source order, so `print.css`'s frozen
+  `.grid-outer { display:block !important }` (0,1,0) could never beat the hide
+  rules (1,2,0) — printing from Today/Year/Subjects produced a page with no
+  grid. Fixed inside `plan.css`'s own `@media print` block with equal-specificity
+  `#app[data-ptab='…'] .grid-outer { display:block !important }` placed later in
+  the file. `css/print.css` stayed frozen. The false "print.css handles it via
+  .no-print" comments in `plan.css` and `js/plan/tabs.js` were corrected.
+
+- **I1 — uncheck corrupted progress (`js/plan/state.js`, `js/plan/seed.js`).**
+  The uncheck branch decremented "the last curriculum with any progress" rather
+  than the one the log entry recorded, so unchecking after a chain rollover
+  stole a session from the wrong book; and the check branch recorded a
+  `curriculum` even when the chain was exhausted and nothing advanced, so
+  unchecking then drove a counter negative. Now the entry records the curriculum
+  only when `currentCur()` actually advances, and the uncheck decrements exactly
+  that id. Invariant: **check → uncheck is the identity in every state.** The
+  seeded log entry moved from the stale `unit: 101` to
+  `curriculum: 'loe-c', session: 20` to match what the writer emits.
+
+- **I2 — infinite loops on malformed dates (`js/plan/model.js`).**
+  `while (w <= act.goal.finishBy)` never terminates when `finishBy` is not an
+  ISO date (every `'YYYY-MM-DD'` string sorts below `'zzz'`). `sanitizePlan` now
+  ISO-validates `year.start`/`year.end`, `parentCycle.anchorMonday`, each
+  activity's `goal.finishBy` (deleting an invalid `goal`), and every log/override
+  date (dropping bad rows). `requiredPerCycle` and `targetStats` also carry a
+  hard 600-iteration cap so an unsanitized, hand-built plan cannot hang the UI.
+
+- **I3 — unescaped class token (`js/plan/today.js`, `js/plan/model.js`).**
+  `cls` is interpolated raw into a `class="…"` attribute. It is now whitelisted
+  against the nine known tokens (`q r h b a ot g s j`) on all three paths
+  (template events, planner slots, overrides), falling back to `ot`. Related:
+  `cycleStats` coerces `perOnWeek`/`perOffWeek` with `Number()` so a
+  string-typed rhythm value can't turn the cycle target into `"1" + 2` = `"12"`.
+
+- **I4 — mutation tests (`tests/plan-state.test.mjs`).** `state.js` had no test
+  coverage because it touches `localStorage`/`fetch`/`document` at import time.
+  The test file now stubs those three globals and then `await import()`s
+  `state.js`, adding five tests: `togglePaced` invertibility mid-chain,
+  decrement-the-logged-curriculum after a chain rollover, exhausted-chain
+  round-trip, `sanitizePlan` date guards, and loop-cap termination.
+  **28 → 33 tests, all passing under bare `node --test`.**
+
+- **Polish.** Removed two unused imports from `js/plan/subjects.js`
+  (`actRemaining`, `cycleStats`); the clash banner now says "Quran" instead of
+  the raw cat key via `catLabel(h.cat)`; added the missing
+  `.ov-dot.ov-partial { color: var(--warn); }` rule.
+
+**Residual, deliberately not changed**
+
+- `js/plan/subjects.js` and `js/plan/year.js` also interpolate `a.cls` into a
+  class attribute. They are fed only from `plan.data.activities`, which no UI
+  path lets a user author, so this is not reachable today — but if activity
+  creation ever ships, route those through the same `okCls()` whitelist.
+- `js/plan/year.js`'s `yearWeeks()` walks `while (w <= end)` without a cap. It
+  reads `plan.data.year`, which `sanitizePlan` now guarantees is ISO on both
+  load paths, so the cap would be dead code.

@@ -1,6 +1,7 @@
 // Planner tab navigation. The Week tab shows the untouched v2 app; other tabs
-// hide the schedule chrome and show a planner view. Print always prints the
-// week grid (print.css hides .pview/#ptabs via .no-print).
+// hide the schedule chrome and show a planner view. Print safety is guaranteed
+// by plan.css's own @media print block (hide planner UI, force .grid-outer
+// visible), not by .no-print alone — so printing from any tab yields the week grid.
 import { initPlan, fetchPlanRemote, onPlanChange } from './state.js';
 import { onChange } from '../state.js';
 import { renderToday } from './today.js';

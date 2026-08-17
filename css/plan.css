@@ -1,4 +1,8 @@
-/* Planner styles. Reuses tokens.css variables; never overrides schedule rules. */
+/* Planner styles. Reuses tokens.css variables; never overrides schedule rules.
+   Print safety is guaranteed by this file's own @media print block (hide the
+   planner UI, force .grid-outer visible), NOT by .no-print alone — print.css
+   stays frozen and its low-specificity .grid-outer rule cannot beat the
+   per-tab hide rules below. */
 
 /* ── Tabs ── */
 #ptabs { display: flex; gap: 4px; margin-bottom: 10px; background: var(--bg-panel);
@@ -12,16 +16,20 @@
 #app[data-ptab='today'] #view-today,
 #app[data-ptab='year'] #view-year,
 #app[data-ptab='subjects'] #view-subjects { display: block; max-width: 560px; }
-#app:not([data-ptab='week']) .grid-outer,
-#app:not([data-ptab='week']) .mobilebar,
-#app:not([data-ptab='week']) .dayview,
-#app:not([data-ptab='week']) .legend,
-#app:not([data-ptab='week']) .hint,
-#app:not([data-ptab='week']) .controls .ctl-label,
-#app:not([data-ptab='week']) #sun-btn,
-#app:not([data-ptab='week']) #add-btn,
-#app:not([data-ptab='week']) #reset-btn,
-#app:not([data-ptab='week']) #editor { display: none !important; }
+/* Fail-OPEN: the hide rules are enumerated positively, one per planner tab.
+   If the planner JS never runs, #app carries no data-ptab and NOTHING here
+   matches — the classic schedule stays fully visible. Never use
+   #app:not([data-ptab='week']) here: that fails closed (blank page). */
+#app[data-ptab='today'] .grid-outer, #app[data-ptab='year'] .grid-outer, #app[data-ptab='subjects'] .grid-outer,
+#app[data-ptab='today'] .mobilebar, #app[data-ptab='year'] .mobilebar, #app[data-ptab='subjects'] .mobilebar,
+#app[data-ptab='today'] .dayview, #app[data-ptab='year'] .dayview, #app[data-ptab='subjects'] .dayview,
+#app[data-ptab='today'] .legend, #app[data-ptab='year'] .legend, #app[data-ptab='subjects'] .legend,
+#app[data-ptab='today'] .hint, #app[data-ptab='year'] .hint, #app[data-ptab='subjects'] .hint,
+#app[data-ptab='today'] .controls .ctl-label, #app[data-ptab='year'] .controls .ctl-label, #app[data-ptab='subjects'] .controls .ctl-label,
+#app[data-ptab='today'] #sun-btn, #app[data-ptab='year'] #sun-btn, #app[data-ptab='subjects'] #sun-btn,
+#app[data-ptab='today'] #add-btn, #app[data-ptab='year'] #add-btn, #app[data-ptab='subjects'] #add-btn,
+#app[data-ptab='today'] #reset-btn, #app[data-ptab='year'] #reset-btn, #app[data-ptab='subjects'] #reset-btn,
+#app[data-ptab='today'] #editor, #app[data-ptab='year'] #editor, #app[data-ptab='subjects'] #editor { display: none !important; }
 
 @media (max-width: 699px) {
   #ptabs { position: fixed; left: 10px; right: 10px; max-width: none;
@@ -30,7 +38,17 @@
   body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }
 
-@media print { #ptabs, .pview { display: none !important; } }
+/* Print safety lives HERE, not in print.css. The tab hide rules above carry
+   #app + [data-ptab] specificity, so print.css's plain `.grid-outer` rule can
+   never out-rank them (specificity beats source order among !important decls).
+   These selectors match that specificity and come later in this file, so the
+   week grid is forced back on whichever planner tab is open. */
+@media print {
+  #ptabs, .pview { display: none !important; }
+  #app[data-ptab='today'] .grid-outer,
+  #app[data-ptab='year'] .grid-outer,
+  #app[data-ptab='subjects'] .grid-outer { display: block !important; }
+}
 
 /* ── Shared planner bits ── */
 .pcard { background: var(--bg-panel); border: 1px solid var(--border);
@@ -108,6 +126,7 @@
 .ov-dot { position: absolute; top: 3px; right: 4px; font-size: 9px; font-weight: 700;
           z-index: 6; pointer-events: none; color: var(--et); }
 .ov-dot.ov-done { color: var(--ok); }
+.ov-dot.ov-partial { color: var(--warn); }
 .ov-dot.ov-missed { color: var(--danger-text); }
 #ov-clash:empty { display: none; }
 .ov-clash-in { background: var(--danger-bg); border: 1px solid var(--danger-border);
