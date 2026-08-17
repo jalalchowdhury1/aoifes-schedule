@@ -18,8 +18,9 @@ import { plan, addPeriod, updatePeriod, deletePeriod } from './state.js';
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const D = s => new Date(s + 'T12:00');            // noon: DST can never shift the date
 const fmtDay = s => { const d = D(s); return `${MON[d.getMonth()]} ${d.getDate()}`; };
-// "Jan 4 – 10" inside one month, "Jan 4 – Feb 6" across months.
-const fmtRange = (a, b) => {
+// "Jan 4 – 10" inside one month, "Jan 4 – Feb 6" across months (and across
+// years, where the month has to be repeated too). Exported for tests only.
+export const fmtRange = (a, b) => {
   const x = D(a), y = D(b);
   const same = x.getMonth() === y.getMonth() && x.getFullYear() === y.getFullYear();
   return `${fmtDay(a)} – ${same ? y.getDate() : fmtDay(b)}`;
@@ -27,7 +28,7 @@ const fmtRange = (a, b) => {
 const ICON = { travel: '✈', off: '⏸' };
 // The icon is drawn from the period's TYPE, so strip any the family typed into
 // the label themselves ("Dhaka ✈" renders as "✈ Dhaka", not "✈ Dhaka ✈").
-const perName = p => {
+export const perName = p => {
   const l = String(p.label || '').replace(/[✈⏸]/g, '').trim();
   return l || (p.type === 'off' ? 'Off' : 'Time away');
 };
@@ -37,6 +38,7 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 let openWeek = null;      // Monday of the week whose info card is showing
 let sheet = null;         // {mode:'add'|'edit', id, start, end, type, label, err}
 let delArmed = false;     // two-tap delete: armed by the first tap
+let justOpened = false;   // one render only: scroll the sheet in + focus it
 
 const periodsOf = () => plan.data.periods || [];
 const findPeriod = id => periodsOf().find(p => p.id === id) || null;
@@ -53,7 +55,7 @@ function yearWeeks() {
 // Away days in one week, split by type, plus the distinct periods involved.
 // (model's awayDaysInWeek returns the same total; the tracks also need the
 // travel/off split to pick a hatch, so one dayStatus pass produces both.)
-function weekAway(periods, weekStart) {
+export function weekAway(periods, weekStart) {
   const seen = new Map();
   let travel = 0, off = 0;
   for (let i = 0; i < 7; i++) {
@@ -67,7 +69,7 @@ function weekAway(periods, weekStart) {
 
 // 7 away days -> full hatch, 1-6 -> half-height hatch; `off` hatches darker.
 // A week overlapped by both types takes whichever covers more days (travel wins ties).
-const awayCls = aw =>
+export const awayCls = aw =>
   !aw.total ? '' : (aw.off > aw.travel ? 'offw' : 'trip') + (aw.total === 7 ? '' : '-part');
 
 // ── Tracks ──────────────────────────────────────────────────
@@ -175,12 +177,32 @@ function impactHtml() {
   }).join('');
 }
 
+// ── Overlap notice (advisory, never blocking) ───────────────
+// Two periods may legitimately overlap (a work trip inside a longer break), so
+// Save stays enabled. What the family CAN'T see from two date ranges is which
+// one wins on the shared days, so name it: dayAway() resolves `off` over
+// `travel`, and the notice says exactly that.
+function draftOverlaps() {
+  if (!sheet || !sheet.start || !sheet.end || sheet.end < sheet.start) return [];
+  return periodsOf().filter(p =>
+    p.id !== sheet.id && p.start <= sheet.end && sheet.start <= p.end);
+}
+
+function warnHtml() {
+  const hits = draftOverlaps();
+  if (!hits.length) return '';
+  const names = hits.map(p =>
+    `${ICON[p.type]} ${esc(perName(p))} (${esc(fmtRange(p.start, p.end))})`).join(', ');
+  return `Overlaps ${names} — Off days win over Travel days.`;
+}
+
 function sheetHtml() {
   if (!sheet) return '';
   const edit = sheet.mode === 'edit';
   const title = edit ? 'Edit time away' : 'Add time away';
+  const warn = warnHtml();
   return `<div class="ysh-bd" id="ysh-bd"></div>
-  <div class="ysh" role="dialog" aria-label="${title}">
+  <div class="ysh" role="dialog" aria-modal="true" aria-label="${title}">
     <div class="ysh-h">${title}</div>
     <div class="ysh-dates">
       <div><label for="ysh-start">From</label><input type="date" id="ysh-start" value="${esc(sheet.start)}"></div>
@@ -196,6 +218,7 @@ function sheetHtml() {
       <div class="ysh-help">Travel = Singapore Math keeps going every other day · Off = everything pauses</div>
     </div>
     <div class="form-err${sheet.err ? ' show' : ''}" id="ysh-err">${esc(sheet.err || '')}</div>
+    <div class="form-err warn${warn ? ' show' : ''}" id="ysh-warn">${warn}</div>
     <div class="psec">What this moves</div>
     <div class="ysh-imp" id="ysh-imp">${impactHtml()}</div>
     <div class="ysh-btns">
@@ -209,7 +232,7 @@ function sheetHtml() {
 // ── Footer: the parent cycle, stated once, with no controls ──
 // A work stretch runs Tue -> Mon; its first day is the one where isWorkDay
 // flips false -> true. Scan a fortnight forward and stop at the first.
-function nextWorkStart(cycle, from) {
+export function nextWorkStart(cycle, from) {
   for (let i = 0; i < 15; i++) {
     const d = addDays(from, i);
     if (isWorkDay(cycle, d) && !isWorkDay(cycle, addDays(d, -1))) return d;
@@ -222,7 +245,7 @@ function openAdd(weekStart) {
   const t = todayStr();
   sheet = { mode: 'add', id: null, start: weekStart || t,
             end: weekStart ? addDays(weekStart, 6) : t, type: 'travel', label: '', err: '' };
-  delArmed = false;
+  delArmed = false; justOpened = true;
   renderYear();
 }
 
@@ -230,11 +253,41 @@ function openEdit(id) {
   const p = findPeriod(id);
   if (!p) return;
   sheet = { mode: 'edit', id, start: p.start, end: p.end, type: p.type, label: p.label || '', err: '' };
-  delArmed = false;
+  delArmed = false; justOpened = true;
   renderYear();
 }
 
 function closeSheet() { sheet = null; delArmed = false; renderYear(); }
+
+// ── Document-level dismissal (bound only while something is open) ──
+// Both handlers are stable references, so addEventListener is idempotent —
+// calling this on every render neither stacks nor leaks listeners.
+function onDocTap(e) {
+  // A tap anywhere that is not a week cell and not inside the info card
+  // dismisses the card. The sheet is exempt outright: it renders ON TOP of the
+  // card, and re-rendering mid-interaction would tear its inputs out from
+  // under the family's finger.
+  if (sheet || openWeek == null) return;
+  const t = e.target;
+  if (t && t.closest && (t.closest('.ycard') || t.closest('.tgrid'))) return;
+  openWeek = null;
+  renderYear();
+}
+
+function onDocKey(e) {
+  // Escape closes the sheet, and the info card underneath it with it; with no
+  // sheet open it closes the card on its own.
+  if (e.key !== 'Escape' || (!sheet && openWeek == null)) return;
+  sheet = null; delArmed = false; openWeek = null;
+  renderYear();
+}
+
+function bindDismiss() {
+  if (openWeek != null) document.addEventListener('click', onDocTap);
+  else document.removeEventListener('click', onDocTap);
+  if (sheet || openWeek != null) document.addEventListener('keydown', onDocKey);
+  else document.removeEventListener('keydown', onDocKey);
+}
 
 // ── Render ──────────────────────────────────────────────────
 export function renderYear() {
@@ -242,7 +295,14 @@ export function renderYear() {
   if (!el || !plan.data) return;
   const p = plan.data, today = todayStr(), wks = yearWeeks();
   // year.end before year.start walks zero weeks; everything below indexes wks[0].
-  if (!wks.length) { el.innerHTML = `<div class="pcard pmeta">The school year's dates look wrong — check the plan's year range.</div>`; return; }
+  if (!wks.length) {
+    el.innerHTML = `<div class="pcard pmeta">The school year's dates look wrong — check the plan's year range.</div>`;
+    // Nothing left to point a card or sheet at. Drop both and unbind, or the
+    // document listeners would re-render this message on every stray tap.
+    openWeek = null; sheet = null; delArmed = false; justOpened = false;
+    bindDismiss();
+    return;
+  }
   if (openWeek && !wks.includes(openWeek)) openWeek = null;
   const away = wks.map(w => weekAway(p.periods, w));
   const todayPct = Math.min(100, Math.max(0,
@@ -279,6 +339,19 @@ export function renderYear() {
 
   el.innerHTML = h;
   wire(el);
+  bindDismiss();
+
+  // On a laptop the sheet renders inline at the BOTTOM of a tall year page, so
+  // opening it can leave Save below the fold with no hint anything happened.
+  // Pull it into view and put the caret in the first field — once, on open
+  // only: the impact block re-renders on every keystroke (see sync()) and
+  // planNotify() re-renders on every save, and neither may steal the scroll
+  // position or the focus back.
+  if (justOpened) {
+    justOpened = false;
+    el.querySelector('.ysh')?.scrollIntoView({ block: 'nearest' });
+    el.querySelector('#ysh-start')?.focus({ preventScroll: true });
+  }
 }
 
 // ── Wiring ──────────────────────────────────────────────────
@@ -291,6 +364,15 @@ function wire(el) {
   }));
   el.querySelectorAll('[data-yedit]').forEach(b =>
     b.addEventListener('click', () => openEdit(b.dataset.yedit)));
+  // The list rows are divs with role=button/tabindex=0, so the browser gives
+  // them focus but NOT the Enter/Space activation a real <button> gets.
+  // (The card's Edit controls are real buttons and already work.)
+  el.querySelectorAll('.yrow[data-yedit]').forEach(r =>
+    r.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();                     // Space would otherwise page-scroll
+      openEdit(r.dataset.yedit);
+    }));
   el.querySelectorAll('[data-yadd]').forEach(b =>
     b.addEventListener('click', () => openAdd(b.dataset.yadd)));
 
@@ -302,7 +384,7 @@ function wire(el) {
   if (!sheet) return;
   const start = $('ysh-start'), end = $('ysh-end'), label = $('ysh-label');
   const travel = $('ysh-t-travel'), off = $('ysh-t-off');
-  const err = $('ysh-err'), imp = $('ysh-imp'), del = $('ysh-del');
+  const err = $('ysh-err'), warn = $('ysh-warn'), imp = $('ysh-imp'), del = $('ysh-del');
 
   const showErr = msg => {
     sheet.err = msg;
@@ -316,6 +398,9 @@ function wire(el) {
     sheet.start = start.value; sheet.end = end.value; sheet.label = label.value;
     sheet.type = off.checked ? 'off' : 'travel';
     imp.innerHTML = impactHtml();
+    const w = warnHtml();                     // advisory only — Save stays enabled
+    warn.innerHTML = w;
+    warn.className = `form-err warn${w ? ' show' : ''}`;
     if (sheet.err) showErr('');
     disarm();
   };

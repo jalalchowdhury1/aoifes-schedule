@@ -4,8 +4,11 @@ export function seedPlan() {
   return {
     version: 1,
     year: { label: '2026-27', start: '2026-08-17', end: '2027-08-31' },
+    // Parity CONFIRMED against the family calendar 2026-08-17: Charlton work
+    // stretches run Tue->Mon from dutyStart. `confirmed` is now inert metadata —
+    // the Flip button it used to gate is gone.
     parentCycle: { pattern: '7on7off', anchorMonday: '2026-08-17',
-                   dutyStart: '2026-08-11', confirmed: false },
+                   dutyStart: '2026-08-11', confirmed: true },
     periods: [],
     activities: [
       { id: 'core-ruhamah', type: 'ongoing', status: 'active', cat: 'ruhamah', cls: 'r', chain: [] },

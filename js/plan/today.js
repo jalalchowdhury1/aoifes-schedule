@@ -4,7 +4,7 @@
 import { DAYS, fmt, esc, CATS } from '../model.js';
 import { store, catLabel, evLabel } from '../state.js';
 import {
-  todayStr, addDays, dayIdx, isWorkDay, dayStatus, daysBetween, nextSession,
+  todayStr, addDays, dayIdx, isWorkDay, dayStatus, dayAway, daysBetween, nextSession,
   currentCur, cycleStats, doneOn, actTotal, okCls,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
@@ -71,7 +71,12 @@ function chips(dateStr) {
   const c = [];
   if (p.activities.some(a => a.status === 'active' && a.rhythm?.kind === 'cycle'))
     c.push(`<span class="pchip">${isWorkDay(p.parentCycle, dateStr) ? 'Mama: work day' : 'Mama: home day'}</span>`);
-  const next = p.periods.find(pd => pd.start > dateStr);       // periods are kept sorted by start
+  // periods are kept sorted by start, so the first future one is the nearest.
+  // Skip any whose own start day resolves to a DIFFERENT period (dayAway lets
+  // `off` outrank `travel`): a shadowed period never renders as itself on the
+  // Today/Year pages, so advertising it here would name a trip that never arrives.
+  const next = p.periods.find(pd =>
+    pd.start > dateStr && dayAway(p.periods, pd.start)?.id === pd.id);
   if (next) c.push(`<span class="pchip">${AWAY_ICON[next.type] || '✈'} ${esc(awayLabel(next))} ${
     fmtUntil(daysBetween(dateStr, next.start))}</span>`);
   return c.join('');

@@ -43,7 +43,7 @@ test('seed facts: LoE active at lesson 101 done; Singapore waiting; template unt
   assert.equal(jj.target, 20);
   const hist = p.activities.find(a => a.id === 'history');
   assert.equal(hist.status, 'parked');
-  assert.equal(p.parentCycle.confirmed, false);            // anchor parity is a guess
+  assert.equal(p.parentCycle.confirmed, true);             // parity checked against the calendar
   assert.equal(p.parentCycle.dutyStart, '2026-08-11');     // Charlton Tue->Mon stretch
   assert.deepEqual(p.periods, []);                         // no invented trip dates
   assert.equal(p.log.length, 1);                           // the known 8/16 LoE lesson

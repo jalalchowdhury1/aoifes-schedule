@@ -61,17 +61,37 @@ Static vanilla app, no build step, no dependencies, no framework:
 ## Planner data contract (additive — the section above is still frozen)
 - KV key `aoife_plan` (+ `aoife_plan_prev` one-step undo, written by plan-save);
   localStorage `aoife_plan_v1`; same double-wrap POST convention as /api/save.
-- Shape: {version, year, parentCycle{anchorMonday,confirmed}, weeks{monday:{type,label}},
+- Shape: {version, year, parentCycle{anchorMonday,dutyStart,confirmed},
+  periods[{id:"p<n>",start,end,type:'travel'|'off',label}],
   activities[{id,type,status,cls,onGrid,slots,rhythm,travel,goal,target,note,chain[
   {id,name,pattern:'simple'|'tb-wb',firstUnit,lastUnit,lessons,tests,done,titles}]}],
   overrides[{date,action,...}], log[{date,activityId|eventId,status,...}]}
+- **`weeks` is REMOVED (v2, 2026-08-17).** Time away is day-precise: a `periods`
+  list of inclusive date ranges, kept sorted by start. `sanitizePlan` migrates any
+  legacy `weeks{monday:{type,label}}` blob (each marked week → a 7-day Mon..Sun
+  period; the old `light` type is DROPPED) and then deletes the `weeks` key, so a
+  sanitized plan never carries one. `parentCycle.dutyStart` is the Tuesday a
+  Charlton work stretch begins (Tue→Mon on, 7 days off); default `2026-08-11`.
+- **Overlaps are legal and `off` WINS over `travel`** (`dayAway`): a pause is the
+  stronger claim on a shared day, so a travel day inside an off block earns 0
+  capacity even for a `reduced` activity. Same-type overlaps resolve to the first
+  in sort order (earliest start). The add/edit sheet shows a non-blocking notice
+  naming the overlap; Save stays enabled. A period whose own start day resolves
+  to a *different* period is fully shadowed and is not advertised as the next trip.
+- **No browser dialogs anywhere in the planner** — `prompt`/`alert`/`confirm` are
+  banned (a native dialog is easy to mis-tap on a phone and impossible to style).
+  Destructive actions are two-tap buttons ("Delete" → "Tap again to delete",
+  "Cancel" → "Tap again to cancel", disarmed by any other interaction); validation
+  errors render inline as `.form-err` (`.form-err.warn` for advisory notices).
+  tests/plan-today.test.mjs and tests/plan-year.test.mjs poison all three globals.
 - `sanitizePlan` (js/plan/model.js) drops malformed records on both load paths and
   preserves unknown fields (forward-compatible).
 - Claude sessions may edit this blob directly via the endpoints (bulk-load
   curricula, replan trips, generate progress reports). Restore procedure:
   GET /api/plan-get?prev=1 (undo) or a dated file from Drive
   "Aoife Planner Backups", then POST it back via /api/plan-save.
-- Rollback tags: v2-pre-planner (before any planner code) and planner-v1 (first planner release).
+- Rollback tags: v2-pre-planner (before any planner code), planner-v1 (first planner
+  release, week-marking model) and planner-v2 (day-precise time-away redesign).
 
 ## Planner open items (2026-08-17)
 - LoE Foundations D true span (121-140 vs 121-160) — check the physical book.
@@ -79,8 +99,10 @@ Static vanilla app, no build step, no dependencies, no framework:
 - Dimensions G3 lesson/test counts when the books arrive.
 - Science enrollment decision + Hala Tuesday overlap resolution.
 - Jiu Jitsu enrollment + real target (20/yr is a placeholder).
-- 7-on/7-off anchor parity — flip in Settings (Year view) once confirmed;
-  parentCycle.confirmed stays false until then.
+- 7-on/7-off anchor parity — **CONFIRMED** from the family calendar (2026-08-17):
+  work stretches run Tue→Mon with `parentCycle.dutyStart = '2026-08-11'`. The Flip
+  button is GONE (so are `setWeekType`/`flipAnchor`); the Year footer just states
+  the cycle and the next work week. Nothing left to decide here.
 - Family sign-off of the spec (built overnight on explicit authorization).
 
 ## Env vars (Vercel project settings — names only, never values; repo is public)

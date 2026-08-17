@@ -60,6 +60,43 @@ test('dayAway: covering period, inclusive on both ends', () => {
   assert.equal(dayAway(undefined, '2027-01-20'), null);
 });
 
+// Overlaps are legal (a work trip inside a longer break) and the sheet only
+// warns about them, so the resolution rule has to be pinned down here.
+test('dayAway: overlapping periods — off outranks travel, sort order breaks same-type ties', () => {
+  const travel = { id: 'p1', start: '2027-01-04', end: '2027-01-10', type: 'travel', label: 'Dhaka' };
+  const off = { id: 'p2', start: '2027-01-06', end: '2027-01-07', type: 'off', label: 'Eid' };
+  const both = [travel, off];                                // sorted by start
+  assert.equal(dayAway(both, '2027-01-05').id, 'p1');        // travel-only day
+  assert.equal(dayAway(both, '2027-01-06').id, 'p2');        // overlapped -> off wins
+  assert.equal(dayAway(both, '2027-01-07').id, 'p2');
+  assert.equal(dayAway(both, '2027-01-08').id, 'p1');        // back to travel-only
+  // The rule is about TYPE, not position: an off period listed first still wins,
+  // and an off period listed second still wins.
+  assert.equal(dayAway([off, travel], '2027-01-06').id, 'p2');
+  // Same type overlapping -> the first in sort order (earliest start) wins.
+  const t2 = { id: 'p3', start: '2027-01-06', end: '2027-01-12', type: 'travel', label: 'Sylhet' };
+  assert.equal(dayAway([travel, t2], '2027-01-08').id, 'p1');
+  const o2 = { id: 'p4', start: '2027-01-07', end: '2027-01-09', type: 'off' };
+  assert.equal(dayAway([off, o2], '2027-01-07').id, 'p2');
+});
+
+test('overlap semantics reach capacity: a reduced daily gets 0 on an off-shadowed travel day', () => {
+  const reduced = { travel: { mode: 'reduced', factor: 0.5 } };
+  const travel = { id: 'p1', start: '2026-08-17', end: '2026-08-19', type: 'travel' };  // Mon–Wed
+  // Singapore Math (reduced) would earn 0.5 on each of the 3 travel days: 5.5.
+  assert.equal(effectiveDaysInWeek(reduced, '2026-08-17', [travel]), 5.5);
+  // Drop an off day on top of the Tuesday: that day now pauses EVERYTHING, so
+  // Singapore loses its half day there — 4 plain days + 2 × 0.5 = 5.
+  const off = { id: 'p2', start: '2026-08-18', end: '2026-08-18', type: 'off' };
+  assert.equal(effectiveDaysInWeek(reduced, '2026-08-17', [travel, off]), 5);
+  // An off period swallowing the whole trip zeroes every one of those days:
+  // Mon–Thu off, Fri/Sat/Sun plain = 3.
+  const bigOff = { id: 'p3', start: '2026-08-16', end: '2026-08-20', type: 'off' };
+  assert.equal(effectiveDaysInWeek(reduced, '2026-08-17', [travel, bigOff]), 3);
+  // Total away days are unchanged by the overlap — only WHICH period owns them.
+  assert.equal(awayDaysInWeek([travel, off], '2026-08-17'), 3);
+});
+
 test('dayStatus: day N of total, type and label', () => {
   assert.deepEqual(dayStatus(PERIODS, '2026-12-31'), { away: false });
   const s = dayStatus(PERIODS, '2027-01-06');

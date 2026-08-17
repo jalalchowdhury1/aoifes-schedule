@@ -32,9 +32,23 @@ export const byPeriodStart = (a, b) =>
   a.start < b.start ? -1 : a.start > b.start ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 export const sortPeriods = list => list.sort(byPeriodStart);
 
-// The period covering this day, or null. Overlaps resolve to the earliest start.
-export const dayAway = (periods, dateStr) =>
-  asPeriods(periods).find(p => p.start <= dateStr && dateStr <= p.end) || null;
+// The period covering this day, or null.
+// OVERLAPS: `off` WINS over `travel` — an off day pauses everything, so it is
+// the stronger claim and the safer default when two periods collide (the family
+// would rather see a day off they meant to keep than schoolwork they cancelled).
+// Among periods of the SAME type the first in sort order wins; the list is kept
+// sorted by start (sanitizePlan + every state.js mutation), so that is the
+// earliest start. Nothing here mutates or re-sorts `periods`.
+export const dayAway = (periods, dateStr) => {
+  let hit = null;
+  for (const p of asPeriods(periods)) {
+    if (p.start > dateStr || dateStr > p.end) continue;
+    if (!hit) { hit = p; }
+    else if (hit.type !== 'off' && p.type === 'off') hit = p;
+    if (hit.type === 'off') break;                            // nothing can outrank an off day
+  }
+  return hit;
+};
 
 export function dayStatus(periods, dateStr) {
   const p = dayAway(periods, dateStr);

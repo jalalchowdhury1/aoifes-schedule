@@ -184,6 +184,9 @@
            border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; }
 .ysh-rad input { width: auto; }
 .ysh-help { font-size: 10.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.45; }
+/* Overlap notice: same slot and metrics as .form-err, but advisory — an overlap
+   is legal and Save stays enabled, so it must not read as an error. */
+.form-err.warn { color: var(--warn); }
 .ysh-imp { font-size: 11.5px; color: var(--text-sub); line-height: 1.65; }
 .yimp b { color: var(--text); font-weight: 600; }
 .yimp small { color: var(--text-muted); }

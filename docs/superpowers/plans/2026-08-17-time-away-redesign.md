@@ -93,3 +93,71 @@ print-regression re-run (plan.css changes again!) and a live-data migration chec
 still sanitizes clean; log/periods preserved). Fix loop as needed. Then: AGENTS.md planner
 contract updated (periods replaces weeks; setWeekType/flipAnchor gone), plan addendum, single
 push, live verify (site + a real trip round-trip via the sheet), screenshots to the family.
+
+---
+
+## Execution addendum (2026-08-17)
+
+Built in one session under `superpowers:subagent-driven-development`, three task
+commits then a single review round, then one push. Bare `node --test`
+throughout (`node --test tests/` still breaks on Node 24).
+
+### The three task commits
+
+| SHA | Task | What landed |
+|---|---|---|
+| `6e7c14b` | A — model + state | `periods` replaces `weeks`: `dayAway`/`dayStatus`, day-precise `effectiveDaysInWeek`, `weekCapacity(act, weekStart, periods, cycle)`, `isWorkDay` off `parentCycle.dutyStart`, `tripImpact`, `sanitizePlan` migration (`weeks` → 7-day periods, `light` dropped, key deleted). `addPeriod`/`updatePeriod`/`deletePeriod` in; `setWeekType`/`flipAnchor` out. 5 files, +487/−68. |
+| `a981e57` | B — Year page | View-only tracks (`trip`/`trip-part`/`offw`/`offw-part` hatches), collapsed non-active line, week info card, Time-away list, add/edit sheet with live impact preview, footer stating the cycle. 4 files, +399/−64. |
+| `d963003` | C — Today page | Away-day banner (`day N of M`), `isWorkDay` Mama chip, next-trip chip from `periods`, travel/off rules for timed blocks + dailies + the tomorrow strip; the last `weeks` shims removed. 6 files, +211/−55. |
+
+### Declared deviations from the plan above
+
+1. **Delete has no `confirm()`.** The plan said "Delete (edit mode only, with
+   confirm)". A native dialog is easy to mis-tap on a phone and impossible to
+   style, so it shipped as a two-tap button ("Delete" → "Tap again to delete",
+   disarmed by any other interaction). The review round extended the same
+   pattern to Subjects' Cancel, making *no browser dialogs* a planner-wide
+   invariant that the tests now enforce by poisoning `alert`/`confirm`/`prompt`.
+2. **Legend reads "travel", not "away".** The plan's wording was
+   "done · planned · away · off"; with two away *types* on screen, naming the
+   travel hatch "travel" is what actually distinguishes it from "off".
+3. **Off-type weeks get their own classes** (`offw`/`offw-part`) rather than the
+   plan's "off-type darker than travel-type" restyle of `trip` — same visual
+   result, but it keeps the majority rule (`awayCls`) expressible in one line.
+4. **Tap-elsewhere-dismisses the info card was missed in Task B** and is Fix 1
+   of the review round below — it was in the plan, so it is a gap, not a change.
+
+### Review round (one commit: card dismissal, sheet fold, overlap semantics, year tests, a11y, no-dialog subjects)
+
+Two verified reviews (spec + quality) produced six fixes and the doc updates:
+
+1. **Spec gap — info card outside-tap dismissal.** One document-level `click`
+   listener, bound only while a card is open (stable fn ref ⇒ idempotent
+   add/remove); exempts week cells, the card itself, and the sheet outright so
+   it can never tear down sheet inputs mid-interaction.
+2. **I1 — desktop sheet below the fold.** On open only, `.ysh` is
+   `scrollIntoView({block:'nearest'})`; guarded by a `justOpened` flag so the
+   per-keystroke impact re-render and post-save `planNotify()` never steal the
+   scroll position. Verified at 1280×680.
+3. **I2 — overlapping-period semantics.** `dayAway` now resolves `off` OVER
+   `travel` (same type → first in sort order); the sheet shows a non-blocking
+   `.form-err.warn` notice naming the overlap ("Overlaps ✈ Dhaka (Jan 4 – Feb 6)
+   — Off days win over Travel days.") with Save still enabled; the Today
+   next-trip chip skips periods whose own start day resolves to a different
+   period, so a fully shadowed trip is never advertised.
+4. **I3 — Year pure helpers under test.** `fmtRange`, `perName`, `awayCls`,
+   `weekAway`, `nextWorkStart` exported; new `tests/plan-year.test.mjs`.
+5. **M1+M2 — cheap a11y.** Sheet focuses the first date input on open, `Escape`
+   closes sheet + card, `aria-modal="true"`; the `role=button tabindex=0` list
+   rows now activate on Enter/Space.
+6. **M5+M8 — honesty + the dialog invariant.** One-line comments on the
+   `state.js` early returns (the UI validates first; no `commit()` ⇒ no
+   re-render); Subjects' `confirm()` replaced by the two-tap pattern.
+
+Docs: this addendum plus the AGENTS.md planner contract (shape without `weeks`,
+off-wins-over-travel, the no-dialogs invariant, `planner-v2` rollback tag) and
+the stale anchor-parity open item, which is now CONFIRMED — work runs Tue→Mon
+from `dutyStart 2026-08-11`, the Flip button is gone, and `parentCycle.confirmed`
+is inert metadata (the seed says `true`).
+
+Shipped as tag `planner-v2`.

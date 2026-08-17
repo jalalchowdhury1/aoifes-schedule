@@ -120,6 +120,36 @@ test('renderToday: (c) off-type day — banner shown, no dailies section at all'
   assert.doesNotMatch(html, /Logic of English/);
 });
 
+test('renderToday: next-trip chip skips a period whose own start day is shadowed by an off period', () => {
+  store.events = [];
+  const tripStart = addDays(TODAY, 10), tripEnd = addDays(TODAY, 20);
+  // An `off` period blankets the trip's opening days. dayAway resolves those
+  // days to the off period, so the trip never renders as itself on day one —
+  // advertising "Dhaka in 10 days" would name a banner that never appears.
+  loadPlan([
+    { id: 'p1', start: addDays(TODAY, 5), end: addDays(TODAY, 12), type: 'off', label: 'Eid break' },
+    { id: 'p2', start: tripStart, end: tripEnd, type: 'travel', label: 'Dhaka' },
+  ]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  assert.match(html, /⏸ Eid break in 5 days/);              // the period that DOES own its start
+  assert.doesNotMatch(html, /Dhaka/);                        // shadowed -> not advertised
+});
+
+test('renderToday: next-trip chip still shows an overlapped period that owns its own start day', () => {
+  store.events = [];
+  // Same two periods, but the trip starts BEFORE the off block, so its first
+  // day resolves to itself and it is a real, visible upcoming trip.
+  loadPlan([
+    { id: 'p2', start: addDays(TODAY, 3), end: addDays(TODAY, 20), type: 'travel', label: 'Dhaka' },
+    { id: 'p1', start: addDays(TODAY, 8), end: addDays(TODAY, 12), type: 'off', label: 'Eid break' },
+  ]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  assert.match(html, /✈ Dhaka in 3 days/);                   // nearest, and it owns its start
+  assert.doesNotMatch(html, /Eid break/);                    // only ONE next-trip chip renders
+});
+
 test('renderToday: (d) tomorrow away — tomorrow strip shows the trip instead of a class list', () => {
   store.events = [{ id: 'e2', cat: 'quran', day: dayIdx(addDays(TODAY, 1)), start: 9, end: 10, name: 'Should be hidden' }];
   const tStart = addDays(TODAY, 1), tEnd = addDays(TODAY, 3);

@@ -1,4 +1,8 @@
 // Subjects view: one card per activity — progress, pace, controls.
+// NO browser dialogs anywhere in the planner (prompt/alert/confirm): this runs
+// on the family's phones, where a native dialog is easy to mis-tap and
+// impossible to style. Cancelling is a two-tap button, exactly like year.js's
+// two-tap Delete.
 import { esc } from '../model.js';
 import { catLabel } from '../state.js';
 import {
@@ -8,6 +12,16 @@ import {
 import { plan, setActivityStatus, setTravelMode } from './state.js';
 
 const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+
+// Two-tap Cancel. The armed button is mutated IN PLACE rather than re-rendered
+// because the controls live inside a <details>, and re-rendering would snap it
+// shut mid-decision. `armedBtn` therefore holds a DOM node and must be dropped
+// on every render (the node it points at is about to be replaced).
+let armedBtn = null;
+let elWired = false;                          // #view-subjects survives re-renders
+const disarm = () => {
+  if (armedBtn) { armedBtn.textContent = 'Cancel'; armedBtn = null; }
+};
 
 function paceLine(a) {
   const p = plan.data, today = todayStr();
@@ -68,14 +82,29 @@ export function renderSubjects() {
   const order = { active: 0, planned: 1, parked: 2, done: 3, cancelled: 4 };
   const acts = [...plan.data.activities].sort((x, y) =>
     (order[x.status] ?? 9) - (order[y.status] ?? 9));
+  armedBtn = null;                            // the node it held is about to go
   el.innerHTML = acts.map(card).join('');
+  // One delegated listener on the container, which OUTLIVES innerHTML, so it is
+  // registered once ever: any tap that isn't the armed Cancel disarms it.
+  if (!elWired) {
+    elWired = true;
+    el.addEventListener('click', e => {
+      if (!e.target.closest('[data-do="cancel"]')) disarm();
+    });
+  }
   el.querySelectorAll('[data-do]').forEach(b => {
     const id = b.closest('.scard').dataset.id;
     if (b.dataset.do === 'travel')
-      b.addEventListener('change', () => setTravelMode(id, b.value));
+      b.addEventListener('change', () => { disarm(); setTravelMode(id, b.value); });
     else b.addEventListener('click', () => {
       const map = { activate: 'active', park: 'parked', cancel: 'cancelled' };
-      if (b.dataset.do === 'cancel' && !confirm('Cancel this activity? History is kept.')) return;
+      if (b.dataset.do === 'cancel' && armedBtn !== b) {
+        disarm();                             // re-arm from some other card's button
+        armedBtn = b;
+        b.textContent = 'Tap again to cancel';
+        return;
+      }
+      disarm();
       setActivityStatus(id, map[b.dataset.do]);
     });
   });

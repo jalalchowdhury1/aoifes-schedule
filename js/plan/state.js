@@ -106,6 +106,10 @@ const nextPeriodId = () => `p${periods().reduce((m, p) => {
 }, 0) + 1}`;
 
 export function addPeriod({ start, end, type, label } = {}) {
+  // Last-resort guard, not the user-facing check: year.js validates both dates
+  // and end >= start inline (.form-err) before it ever calls this. Returning
+  // early skips commit(), so nothing notifies and nothing re-renders — a caller
+  // that reaches this line has already shown its own message or is a bad script.
   if (!isISO(start) || !isISO(end) || start > end) return null;
   const per = { id: nextPeriodId(), start, end, type: okType(type),
     ...(label ? { label: String(label) } : {}) };
@@ -117,9 +121,11 @@ export function addPeriod({ start, end, type, label } = {}) {
 
 export function updatePeriod(id, patch = {}) {
   const per = periods().find(p => p.id === id);
-  if (!per) return null;
+  if (!per) return null;          // deleted underneath us: no commit, no re-render
   const start = isISO(patch.start) ? patch.start : per.start;
   const end = isISO(patch.end) ? patch.end : per.end;
+  // Reversed/garbage dates keep the stored range rather than corrupting it; the
+  // sheet already rejects them inline, so this branch is unreachable from the UI.
   if (start <= end) { per.start = start; per.end = end; }
   if (PERIOD_TYPES.includes(patch.type)) per.type = patch.type;
   if ('label' in patch) {
@@ -133,7 +139,7 @@ export function updatePeriod(id, patch = {}) {
 
 export function deletePeriod(id) {
   const i = periods().findIndex(p => p.id === id);
-  if (i < 0) return;
+  if (i < 0) return;              // already gone: no commit, so no notify/re-render
   periods().splice(i, 1);
   commit();
 }
