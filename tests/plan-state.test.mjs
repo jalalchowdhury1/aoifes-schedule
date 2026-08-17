@@ -130,3 +130,11 @@ test('week-walk loops terminate on a malformed date (600-iteration cap)', () => 
     { ...p, year: { start: '2026-08-17', end: 'zzz' } }, [], '2026-09-01');
   assert.equal(Number.isFinite(st.expected), true);
 });
+
+test('sanitizePlan drops a chain entry lacking id (togglePaced needs it)', () => {
+  const p = sanitizePlan({ activities: [{ id: 'a1', type: 'paced', chain: [
+    { id: 'good', pattern: 'simple', firstUnit: 1, lastUnit: 5, done: 0 },
+    { pattern: 'simple', firstUnit: 6, lastUnit: 9, done: 0 },   // no id -> dropped
+  ] }] });
+  assert.deepEqual(p.activities[0].chain.map(c => c.id), ['good']);
+});

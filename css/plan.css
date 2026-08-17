@@ -29,7 +29,9 @@
 #app[data-ptab='today'] #sun-btn, #app[data-ptab='year'] #sun-btn, #app[data-ptab='subjects'] #sun-btn,
 #app[data-ptab='today'] #add-btn, #app[data-ptab='year'] #add-btn, #app[data-ptab='subjects'] #add-btn,
 #app[data-ptab='today'] #reset-btn, #app[data-ptab='year'] #reset-btn, #app[data-ptab='subjects'] #reset-btn,
-#app[data-ptab='today'] #editor, #app[data-ptab='year'] #editor, #app[data-ptab='subjects'] #editor { display: none !important; }
+#app[data-ptab='today'] #editor, #app[data-ptab='year'] #editor, #app[data-ptab='subjects'] #editor,
+/* The clash banner annotates the Week grid, so it rides with it (intentional). */
+#app[data-ptab='today'] #ov-clash, #app[data-ptab='year'] #ov-clash, #app[data-ptab='subjects'] #ov-clash { display: none !important; }
 
 @media (max-width: 699px) {
   #ptabs { position: fixed; left: 10px; right: 10px; max-width: none;

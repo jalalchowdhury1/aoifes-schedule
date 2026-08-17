@@ -2,7 +2,7 @@
 import { esc } from '../model.js';
 import {
   todayStr, addDays, mondayOf, weeksBetween, weekType, weekCapacity,
-  actTotal, actDone, projectFinish,
+  actTotal, actDone, projectFinish, okCls, WALK_CAP,
 } from './model.js';
 import { plan, setWeekType, flipAnchor } from './state.js';
 
@@ -13,7 +13,8 @@ function yearWeeks() {
   const { start, end } = plan.data.year;
   const out = [];
   let w = mondayOf(start);
-  while (w <= end) { out.push(w); w = addDays(w, 7); }
+  // Same rationale as model.js's walks: never let a malformed `end` hang the UI.
+  while (w <= end && out.length < WALK_CAP) { out.push(w); w = addDays(w, 7); }
   return out;
 }
 
@@ -37,7 +38,7 @@ function trackFor(a, wks, today) {
   const fin = a.type === 'paced' && a.status === 'active' && total > 0
     ? projectFinish(a, today, p) : null;
   const sub = fin && !fin.done ? `→ ${fmtDate(fin.date)}` : a.status !== 'active' ? a.status : '';
-  return `<div class="track ${a.cls || ''}"><div class="tl"><b>${esc(a.name || a.id)}</b><small>${esc(sub)}</small></div>
+  return `<div class="track ${a.cls ? okCls(a.cls) : ''}"><div class="tl"><b>${esc(a.name || a.id)}</b><small>${esc(sub)}</small></div>
     <div class="tgrid" style="--n:${wks.length}">${cells}</div></div>`;
 }
 

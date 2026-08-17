@@ -4,15 +4,11 @@ import { DAYS, fmt, esc, CATS } from '../model.js';
 import { store, catLabel, evLabel } from '../state.js';
 import {
   todayStr, addDays, dayIdx, mondayOf, weekType, isOnWeek, nextSession,
-  currentCur, cycleStats, doneOn, actTotal,
+  currentCur, cycleStats, doneOn, actTotal, okCls,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
-
-// `cls` lands unescaped in a class attribute, so it is whitelisted, not escaped.
-const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
-const okCls = x => (CLS.has(x) ? x : 'ot');
 
 function timedFor(dateStr) {
   const d = dayIdx(dateStr);

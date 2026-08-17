@@ -38,6 +38,12 @@ export const nextSession = cur => {
   return d >= n ? null : { index: d, label: sessionLabel(cur, d) };
 };
 
+// ── Category class tokens ───────────────────────────────────
+// `cls` is interpolated RAW into class="…" attributes by every view, so it is
+// whitelisted rather than escaped. Lives here (pure) so no view imports another.
+const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
+export const okCls = x => (CLS.has(x) ? x : 'ot');
+
 export const currentCur = act => (act.chain || []).find(c => (c.done || 0) < sessionsCount(c)) || null;
 export const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCount(c), 0);
 export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);
@@ -65,8 +71,10 @@ export function sanitizePlan(raw) {
   out.activities = (Array.isArray(r.activities) ? r.activities : [])
     .filter(a => a && typeof a === 'object' && a.id && a.type)
     .map(a => {
+      // `id` is required: togglePaced records it in the log and finds the
+      // curriculum by it on uncheck. An id-less entry would break that identity.
       const o = { ...a, chain: Array.isArray(a.chain)
-          ? a.chain.filter(c => c && c.pattern).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
+          ? a.chain.filter(c => c && c.pattern && c.id).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
           : [] };
       if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
       return o;
@@ -115,7 +123,7 @@ export function projectFinish(act, fromDate, plan, horizon = 300) {
 
 // Hard stop for every week-walk loop (~11.5 years). Belt-and-braces alongside
 // sanitizePlan's ISO guards: an unsanitized/hand-built plan must never hang the UI.
-const WALK_CAP = 600;
+export const WALK_CAP = 600;
 
 // Minimum sessions per 2-week cycle to hit the goal (counting non-blocked weeks).
 export function requiredPerCycle(act, fromDate, plan) {

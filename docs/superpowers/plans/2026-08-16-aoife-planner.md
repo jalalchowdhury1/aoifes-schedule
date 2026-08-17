@@ -182,6 +182,12 @@ export const nextSession = cur => {
   return d >= n ? null : { index: d, label: sessionLabel(cur, d) };
 };
 
+// ── Category class tokens ───────────────────────────────────
+// `cls` is interpolated RAW into class="…" attributes by every view, so it is
+// whitelisted rather than escaped. Lives here (pure) so no view imports another.
+const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
+export const okCls = x => (CLS.has(x) ? x : 'ot');
+
 export const currentCur = act => (act.chain || []).find(c => (c.done || 0) < sessionsCount(c)) || null;
 export const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCount(c), 0);
 export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);
@@ -209,8 +215,10 @@ export function sanitizePlan(raw) {
   out.activities = (Array.isArray(r.activities) ? r.activities : [])
     .filter(a => a && typeof a === 'object' && a.id && a.type)
     .map(a => {
+      // `id` is required: togglePaced records it in the log and finds the
+      // curriculum by it on uncheck. An id-less entry would break that identity.
       const o = { ...a, chain: Array.isArray(a.chain)
-          ? a.chain.filter(c => c && c.pattern).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
+          ? a.chain.filter(c => c && c.pattern && c.id).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
           : [] };
       if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
       return o;
@@ -394,7 +402,7 @@ export function projectFinish(act, fromDate, plan, horizon = 300) {
 
 // Hard stop for every week-walk loop (~11.5 years). Belt-and-braces alongside
 // sanitizePlan's ISO guards: an unsanitized/hand-built plan must never hang the UI.
-const WALK_CAP = 600;
+export const WALK_CAP = 600;
 
 // Minimum sessions per 2-week cycle to hit the goal (counting non-blocked weeks).
 export function requiredPerCycle(act, fromDate, plan) {
@@ -975,7 +983,9 @@ export function initPlanner() {
 #app[data-ptab='today'] #sun-btn, #app[data-ptab='year'] #sun-btn, #app[data-ptab='subjects'] #sun-btn,
 #app[data-ptab='today'] #add-btn, #app[data-ptab='year'] #add-btn, #app[data-ptab='subjects'] #add-btn,
 #app[data-ptab='today'] #reset-btn, #app[data-ptab='year'] #reset-btn, #app[data-ptab='subjects'] #reset-btn,
-#app[data-ptab='today'] #editor, #app[data-ptab='year'] #editor, #app[data-ptab='subjects'] #editor { display: none !important; }
+#app[data-ptab='today'] #editor, #app[data-ptab='year'] #editor, #app[data-ptab='subjects'] #editor,
+/* The clash banner annotates the Week grid, so it rides with it (intentional). */
+#app[data-ptab='today'] #ov-clash, #app[data-ptab='year'] #ov-clash, #app[data-ptab='subjects'] #ov-clash { display: none !important; }
 
 @media (max-width: 699px) {
   #ptabs { position: fixed; left: 10px; right: 10px; max-width: none;
@@ -1070,15 +1080,11 @@ import { DAYS, fmt, esc, CATS } from '../model.js';
 import { store, catLabel, evLabel } from '../state.js';
 import {
   todayStr, addDays, dayIdx, mondayOf, weekType, isOnWeek, nextSession,
-  currentCur, cycleStats, doneOn, actTotal,
+  currentCur, cycleStats, doneOn, actTotal, okCls,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
-
-// `cls` lands unescaped in a class attribute, so it is whitelisted, not escaped.
-const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
-const okCls = x => (CLS.has(x) ? x : 'ot');
 
 function timedFor(dateStr) {
   const d = dayIdx(dateStr);
@@ -1239,7 +1245,7 @@ import { esc } from '../model.js';
 import { catLabel } from '../state.js';
 import {
   todayStr, actTotal, actDone, currentCur, nextSession,
-  projectFinish, requiredPerCycle, targetStats,
+  projectFinish, requiredPerCycle, targetStats, okCls,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode } from './state.js';
 
@@ -1276,7 +1282,7 @@ function card(a) {
   const cur = currentCur(a), ns = cur ? nextSession(cur) : null;
   const pct = total ? Math.round((done / total) * 100) : 0;
   const stChip = { planned: 'Planned', parked: 'Parked', cancelled: 'Cancelled', done: 'Done' }[a.status];
-  let h = `<div class="pcard scard ${a.cls || ''}${a.status !== 'active' ? ' dim' : ''}" data-id="${esc(a.id)}">
+  let h = `<div class="pcard scard ${a.cls ? okCls(a.cls) : ''}${a.status !== 'active' ? ' dim' : ''}" data-id="${esc(a.id)}">
     <div class="trow"><span class="tnm"><i class="sdot"></i>${esc(name)}</span>
       <span class="smeta">${stChip ? `<span class="pchip">${stChip}</span>` : paceLine(a)}</span></div>`;
   if (a.type === 'paced' && total > 0)
@@ -1365,7 +1371,7 @@ git commit -m "feat(planner): Subjects view — progress, projections, manage co
 import { esc } from '../model.js';
 import {
   todayStr, addDays, mondayOf, weeksBetween, weekType, weekCapacity,
-  actTotal, actDone, projectFinish,
+  actTotal, actDone, projectFinish, okCls, WALK_CAP,
 } from './model.js';
 import { plan, setWeekType, flipAnchor } from './state.js';
 
@@ -1376,7 +1382,8 @@ function yearWeeks() {
   const { start, end } = plan.data.year;
   const out = [];
   let w = mondayOf(start);
-  while (w <= end) { out.push(w); w = addDays(w, 7); }
+  // Same rationale as model.js's walks: never let a malformed `end` hang the UI.
+  while (w <= end && out.length < WALK_CAP) { out.push(w); w = addDays(w, 7); }
   return out;
 }
 
@@ -1400,7 +1407,7 @@ function trackFor(a, wks, today) {
   const fin = a.type === 'paced' && a.status === 'active' && total > 0
     ? projectFinish(a, today, p) : null;
   const sub = fin && !fin.done ? `→ ${fmtDate(fin.date)}` : a.status !== 'active' ? a.status : '';
-  return `<div class="track ${a.cls || ''}"><div class="tl"><b>${esc(a.name || a.id)}</b><small>${esc(sub)}</small></div>
+  return `<div class="track ${a.cls ? okCls(a.cls) : ''}"><div class="tl"><b>${esc(a.name || a.id)}</b><small>${esc(sub)}</small></div>
     <div class="tgrid" style="--n:${wks.length}">${cells}</div></div>`;
 }
 
@@ -1500,6 +1507,10 @@ import { store, catLabel } from '../state.js';
 import { todayStr, findClashes } from './model.js';
 import { plan } from './state.js';
 
+// Event ids are stored data; escape them before they enter a CSS selector.
+const cssEsc = x =>
+  (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(x) : x);
+
 export function applyOverlay() {
   if (!plan.data) return;
   const grid = document.getElementById('grid');
@@ -1511,7 +1522,7 @@ export function applyOverlay() {
     if (e.date !== today || !e.eventId) continue;
     const ev = store.events.find(x => x.id === e.eventId);
     if (!ev || ev.day !== tIdx) continue;
-    grid.querySelectorAll(`.evt[data-id="${e.eventId}"]`).forEach(el => {
+    grid.querySelectorAll(`.evt[data-id="${cssEsc(e.eventId)}"]`).forEach(el => {
       const d = document.createElement('span');
       d.className = `ov-dot ov-${e.status}`;
       d.textContent = e.status === 'done' ? '✓' : e.status === 'partial' ? '◐' : '✗';
@@ -1546,7 +1557,11 @@ function renderClashBanner() {
 - [ ] **Step 2: Wire into `js/plan/tabs.js`**
 
 Add import: `import { applyOverlay } from './overlay.js';`
-In `renderViews()`, add as the last line: `applyOverlay();`
+In `renderViews()`, add as the last line: `queueMicrotask(applyOverlay);`
+It MUST be deferred a microtask, not called synchronously: on a shared notify
+(`onChange`), main.js's `render()` — and therefore `renderGrid()`, which replaces
+the grid's innerHTML — may run *after* this listener, so a synchronous overlay
+decorates DOM that is about to be discarded and the dots vanish on first paint.
 
 - [ ] **Step 3: Append overlay styles to `css/plan.css`**
 
@@ -1776,12 +1791,50 @@ have already been patched to match; this list records *why*.
   the raw cat key via `catLabel(h.cat)`; added the missing
   `.ov-dot.ov-partial { color: var(--warn); }` rule.
 
-**Residual, deliberately not changed**
+**Residual (both closed in the pre-ship polish below)**
 
-- `js/plan/subjects.js` and `js/plan/year.js` also interpolate `a.cls` into a
-  class attribute. They are fed only from `plan.data.activities`, which no UI
-  path lets a user author, so this is not reachable today — but if activity
-  creation ever ships, route those through the same `okCls()` whitelist.
-- `js/plan/year.js`'s `yearWeeks()` walks `while (w <= end)` without a cap. It
-  reads `plan.data.year`, which `sanitizePlan` now guarantees is ISO on both
-  load paths, so the cap would be dead code.
+- `js/plan/subjects.js` and `js/plan/year.js` also interpolated `a.cls` into a
+  class attribute. `plan.data` is loaded from KV and from `localStorage`, and
+  Claude sessions edit that blob directly, so this was a **low-impact stored-XSS
+  vector** — not merely a theoretical one. Now closed by `okCls()` at all call
+  sites.
+- `js/plan/year.js`'s `yearWeeks()` walked `while (w <= end)` without a cap.
+  Now capped at `WALK_CAP`.
+
+**Pre-ship polish (re-review)**
+
+Second review round; approved-to-ship with these folded in as one commit.
+
+- **N1 — overlay dropped on first paint (`js/plan/tabs.js`).** `renderViews()`
+  called `applyOverlay()` synchronously. Both it and main.js's `render()` are
+  registered on the same `onChange` notify, and listeners fire in insertion
+  order — `render()` (and therefore `renderGrid()`, which replaces the grid's
+  innerHTML) can run *after* `renderViews()`. The status dots were being
+  appended to DOM that was immediately thrown away. Now `queueMicrotask(
+  applyOverlay)`, which lands after every synchronous listener has finished.
+
+- **`okCls` moved into `js/plan/model.js` (pure, exported).** `today.js`,
+  `subjects.js` and `year.js` all import it from there, so no view imports
+  another view. All three now whitelist `cls` before it reaches a `class="…"`
+  attribute — this is what closes the stored-XSS residual noted above.
+
+- **`sanitizePlan` requires `chain[].id`.** An id-less curriculum entry would
+  silently break `togglePaced`'s check → uncheck identity (the log records the
+  id and the uncheck looks the curriculum up by it). Entries without one are
+  now dropped alongside those without a `pattern`.
+
+- **`WALK_CAP` exported; `year.js` `yearWeeks()` capped.** The last uncapped
+  week-walk in the codebase now stops at 600 iterations like the other two.
+
+- **`CSS.escape` on the overlay's event-id selector (`js/plan/overlay.js`).**
+  `e.eventId` is stored data interpolated into `.evt[data-id="…"]`; a quote in
+  it would throw a `SyntaxError` out of `querySelectorAll` and kill the whole
+  overlay pass. Guarded (`typeof CSS !== 'undefined' && CSS.escape`) so the
+  module still imports under Node for tests.
+
+- **Clash banner scoped to the Week tab (`css/plan.css`).** `#ov-clash` joined
+  the per-tab hide block. **Decision: intentional** — the banner annotates the
+  week grid, so it belongs with the grid rather than floating above the Today
+  or Subjects views.
+
+- **Test count 33 → 34**: added `sanitizePlan` drops a chain entry lacking id.

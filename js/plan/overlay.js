@@ -5,6 +5,10 @@ import { store, catLabel } from '../state.js';
 import { todayStr, findClashes } from './model.js';
 import { plan } from './state.js';
 
+// Event ids are stored data; escape them before they enter a CSS selector.
+const cssEsc = x =>
+  (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(x) : x);
+
 export function applyOverlay() {
   if (!plan.data) return;
   const grid = document.getElementById('grid');
@@ -16,7 +20,7 @@ export function applyOverlay() {
     if (e.date !== today || !e.eventId) continue;
     const ev = store.events.find(x => x.id === e.eventId);
     if (!ev || ev.day !== tIdx) continue;
-    grid.querySelectorAll(`.evt[data-id="${e.eventId}"]`).forEach(el => {
+    grid.querySelectorAll(`.evt[data-id="${cssEsc(e.eventId)}"]`).forEach(el => {
       const d = document.createElement('span');
       d.className = `ov-dot ov-${e.status}`;
       d.textContent = e.status === 'done' ? '✓' : e.status === 'partial' ? '◐' : '✗';

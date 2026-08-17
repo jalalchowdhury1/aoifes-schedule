@@ -3,7 +3,7 @@ import { esc } from '../model.js';
 import { catLabel } from '../state.js';
 import {
   todayStr, actTotal, actDone, currentCur, nextSession,
-  projectFinish, requiredPerCycle, targetStats,
+  projectFinish, requiredPerCycle, targetStats, okCls,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode } from './state.js';
 
@@ -40,7 +40,7 @@ function card(a) {
   const cur = currentCur(a), ns = cur ? nextSession(cur) : null;
   const pct = total ? Math.round((done / total) * 100) : 0;
   const stChip = { planned: 'Planned', parked: 'Parked', cancelled: 'Cancelled', done: 'Done' }[a.status];
-  let h = `<div class="pcard scard ${a.cls || ''}${a.status !== 'active' ? ' dim' : ''}" data-id="${esc(a.id)}">
+  let h = `<div class="pcard scard ${a.cls ? okCls(a.cls) : ''}${a.status !== 'active' ? ' dim' : ''}" data-id="${esc(a.id)}">
     <div class="trow"><span class="tnm"><i class="sdot"></i>${esc(name)}</span>
       <span class="smeta">${stChip ? `<span class="pchip">${stChip}</span>` : paceLine(a)}</span></div>`;
   if (a.type === 'paced' && total > 0)

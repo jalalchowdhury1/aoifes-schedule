@@ -34,7 +34,11 @@ function renderViews() {
   if (tab === 'today') renderToday();
   else if (tab === 'year') renderYear();
   else if (tab === 'subjects') renderSubjects();
-  applyOverlay();
+  // Deferred one microtask: on a shared notify (onChange), main.js's render()
+  // — and therefore renderGrid(), which replaces the grid's innerHTML — may run
+  // AFTER this listener. Overlaying synchronously would decorate DOM that is
+  // about to be thrown away, so the dots vanish on first paint.
+  queueMicrotask(applyOverlay);
 }
 
 export function initPlanner() {
