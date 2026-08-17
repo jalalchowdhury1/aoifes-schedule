@@ -11,7 +11,8 @@ import {
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 globalThis.document = { dispatchEvent: () => {} };
-const { plan, initPlan, togglePaced } = await import('../js/plan/state.js');
+const { plan, initPlan, togglePaced, addPeriod, updatePeriod, deletePeriod,
+        setWeekType, flipAnchor } = await import('../js/plan/state.js');
 
 const curOf = (p, actId, curId) =>
   p.activities.find(a => a.id === actId).chain.find(c => c.id === curId);
@@ -43,8 +44,68 @@ test('seed facts: LoE active at lesson 101 done; Singapore waiting; template unt
   const hist = p.activities.find(a => a.id === 'history');
   assert.equal(hist.status, 'parked');
   assert.equal(p.parentCycle.confirmed, false);            // anchor parity is a guess
-  assert.deepEqual(p.weeks, {});                           // no invented trip dates
+  assert.equal(p.parentCycle.dutyStart, '2026-08-11');     // Charlton Tue->Mon stretch
+  assert.deepEqual(p.periods, []);                         // no invented trip dates
   assert.equal(p.log.length, 1);                           // the known 8/16 LoE lesson
+});
+
+test('initPlan sanitizes the seed: v2 invariants on every load path', () => {
+  initPlan();
+  assert.deepEqual(plan.data.periods, []);
+  assert.equal(plan.data.parentCycle.dutyStart, '2026-08-11');
+  assert.deepEqual(Object.keys(plan.data.weeks), []);   // DEPRECATED shim, gone in Task B/C
+});
+
+// ── time-away period mutations ──────────────────────────────
+test('addPeriod / updatePeriod / deletePeriod round-trip leaves the plan untouched', () => {
+  initPlan();
+  const before = snap(plan.data);
+  assert.deepEqual(plan.data.periods, []);
+
+  const a = addPeriod({ start: '2027-01-04', end: '2027-02-07', type: 'travel', label: 'Dhaka ✈' });
+  assert.equal(a.id, 'p1');
+  assert.deepEqual(plan.data.periods, [{ id: 'p1', start: '2027-01-04', end: '2027-02-07',
+                                         type: 'travel', label: 'Dhaka ✈' }]);
+  const b = addPeriod({ start: '2026-12-24', end: '2026-12-26', type: 'off' });
+  assert.equal(b.id, 'p2');                                     // id from max, not length
+  assert.deepEqual(plan.data.periods.map(p => p.id), ['p2', 'p1']);   // kept sorted by start
+  assert.equal(plan.data.periods[0].label, undefined);          // label is optional
+
+  updatePeriod('p1', { end: '2027-01-31', label: 'Dhaka', type: 'off' });
+  const edited = plan.data.periods.find(p => p.id === 'p1');
+  assert.deepEqual(edited, { id: 'p1', start: '2027-01-04', end: '2027-01-31',
+                             type: 'off', label: 'Dhaka' });
+  updatePeriod('p1', { label: '' });                            // clearing the label drops the key
+  assert.equal('label' in plan.data.periods.find(p => p.id === 'p1'), false);
+
+  deletePeriod('p1');
+  deletePeriod('p2');
+  assert.deepEqual(snap(plan.data), before);
+});
+
+test('period mutations reject junk instead of poisoning the plan', () => {
+  initPlan();
+  assert.equal(addPeriod({ start: 'zzz', end: '2027-01-05', type: 'travel' }), null);
+  assert.equal(addPeriod({ start: '2027-01-05', end: '2027-01-04', type: 'travel' }), null);
+  assert.deepEqual(plan.data.periods, []);
+  const p = addPeriod({ start: '2027-01-04', end: '2027-01-05', type: 'nonsense' });
+  assert.equal(p.type, 'travel');                               // unknown type falls back to travel
+  updatePeriod('p1', { start: 'zzz', end: 'zzz', type: 'light' });
+  assert.deepEqual(plan.data.periods, [{ id: 'p1', start: '2027-01-04',
+                                         end: '2027-01-05', type: 'travel' }]);
+  updatePeriod('nope', { end: '2027-02-01' });                  // unknown id -> no-op
+  deletePeriod('nope');
+  assert.equal(plan.data.periods.length, 1);
+  deletePeriod('p1');
+  assert.deepEqual(plan.data.periods, []);
+});
+
+test('DEPRECATED setWeekType / flipAnchor are inert no-ops (removed in Task B)', () => {
+  initPlan();
+  const before = snap(plan.data);
+  setWeekType('2027-01-04', 'travel', 'Dhaka');
+  flipAnchor();
+  assert.deepEqual(snap(plan.data), before);
 });
 
 // ── togglePaced mutation invariants (I1) ────────────────────
@@ -99,6 +160,8 @@ test('sanitizePlan: malformed dates fall back to defaults and bad rows are dropp
     year: { label: 'bad', start: '2026-08-17', end: 'zzz' },
     parentCycle: { pattern: '7on7off', anchorMonday: 'nope', confirmed: true },
     weeks: { 'zzz': { type: 'travel' }, '2026-12-21': { type: 'travel' } },
+    periods: [{ id: 'p1', start: 'zzz', end: '2027-01-05', type: 'travel' },
+              { id: 'p2', start: '2027-01-04', end: '2027-01-05', type: 'travel' }],
     activities: [
       { id: 'a1', type: 'paced', goal: { finishBy: 'zzz' }, chain: [] },
       { id: 'a2', type: 'paced', goal: { finishBy: '2027-08-31' }, chain: [] },
@@ -111,7 +174,8 @@ test('sanitizePlan: malformed dates fall back to defaults and bad rows are dropp
   assert.equal(p.year.label, '2026-27');
   assert.equal(p.parentCycle.anchorMonday, '2026-08-17');
   assert.equal(p.parentCycle.confirmed, false);           // whole default parentCycle
-  assert.deepEqual(Object.keys(p.weeks), ['2026-12-21']);
+  assert.equal(p.parentCycle.dutyStart, '2026-08-11');    // ISO-validated default
+  assert.deepEqual(p.periods.map(x => x.id), ['w-2026-12-21', 'p2']);  // bad period dropped, week migrated
   assert.equal(p.activities[0].goal, undefined);          // invalid goal deleted
   assert.equal(p.activities[1].goal.finishBy, '2027-08-31');
   assert.equal(p.log.length, 1);

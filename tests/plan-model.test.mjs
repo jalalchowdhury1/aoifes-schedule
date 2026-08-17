@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addDays, dayIdx, mondayOf, weeksBetween, weekType, isOnWeek,
+  addDays, dayIdx, mondayOf, weeksBetween, daysBetween, weekType, isOnWeek, isWorkDay,
   sessionsCount, nextSession, actTotal, actDone, actRemaining,
-  sanitizePlan,
+  dayAway, dayStatus, awayDaysInWeek, effectiveDaysInWeek,
+  sanitizePlan, serializePlan,
 } from '../js/plan/model.js';
 
 test('date helpers: Mon-first indexing and week math', () => {
@@ -14,12 +15,19 @@ test('date helpers: Mon-first indexing and week math', () => {
   assert.equal(addDays('2026-08-31', 1), '2026-09-01');
   assert.equal(weeksBetween('2026-08-17', '2026-08-31'), 2);
   assert.equal(weeksBetween('2026-08-17', '2026-08-23'), 0);
+  assert.equal(daysBetween('2026-08-17', '2026-08-18'), 1);
+  assert.equal(daysBetween('2026-08-11', '2026-08-25'), 14);
+  assert.equal(daysBetween('2026-11-01', '2026-11-02'), 1);   // DST fall-back night
+  assert.equal(daysBetween('2027-03-14', '2027-03-15'), 1);   // DST spring-forward
+  assert.equal(daysBetween('2026-08-25', '2026-08-11'), -14);
 });
 
-test('weekType defaults to teaching, reads marked weeks by any date in week', () => {
+test('weekType (DEPRECATED shim) defaults to teaching, reads a legacy weeks map', () => {
   const weeks = { '2027-01-04': { type: 'travel', label: 'Dhaka' } };
   assert.equal(weekType(weeks, '2027-01-07'), 'travel'); // Thu of that week
   assert.equal(weekType(weeks, '2026-12-30'), 'teaching');
+  assert.equal(weekType({}, '2027-01-07'), 'teaching');
+  assert.equal(weekType(undefined, '2027-01-07'), 'teaching');
 });
 
 test('isOnWeek: anchor week is a work week, alternating', () => {
@@ -27,6 +35,69 @@ test('isOnWeek: anchor week is a work week, alternating', () => {
   assert.equal(isOnWeek(cyc, '2026-08-20'), true);   // anchor week
   assert.equal(isOnWeek(cyc, '2026-08-24'), false);  // next week = home
   assert.equal(isOnWeek(cyc, '2026-08-31'), true);
+});
+
+// ── isWorkDay: Charlton stretches run Tue → Mon, every other week ──
+test('isWorkDay: dutyStart 2026-08-11 gives work Tue..Mon then 7 home days', () => {
+  const cyc = { anchorMonday: '2026-08-24', dutyStart: '2026-08-11' };
+  assert.equal(isWorkDay(cyc, '2026-08-11'), true);   // first day of the stretch
+  assert.equal(isWorkDay(cyc, '2026-08-17'), true);   // Monday, last day of the stretch
+  assert.equal(isWorkDay(cyc, '2026-08-18'), false);  // Tuesday, home stretch starts
+  assert.equal(isWorkDay(cyc, '2026-08-24'), false);  // Monday, last home day
+  assert.equal(isWorkDay(cyc, '2026-08-25'), true);   // Tuesday, back on duty
+  assert.equal(isWorkDay(cyc, '2026-08-31'), true);
+  assert.equal(isWorkDay(cyc, '2026-09-01'), false);
+  // Dates before dutyStart must not flip the parity (negative modulo guard).
+  assert.equal(isWorkDay(cyc, '2026-08-04'), false);  // 7 days earlier = home
+  assert.equal(isWorkDay(cyc, '2026-07-28'), true);   // 14 days earlier = work
+});
+
+// ── Day-precise time-away periods ───────────────────────────
+const DHAKA = { id: 'p1', start: '2027-01-04', end: '2027-02-07', type: 'travel', label: 'Dhaka ✈' };
+const PAUSE = { id: 'p2', start: '2027-03-01', end: '2027-03-02', type: 'off' };
+const PERIODS = [DHAKA, PAUSE];
+
+test('dayAway: covering period, inclusive on both ends', () => {
+  assert.equal(dayAway(PERIODS, '2027-01-03'), null);
+  assert.equal(dayAway(PERIODS, '2027-01-04').id, 'p1');   // first day
+  assert.equal(dayAway(PERIODS, '2027-01-20').id, 'p1');
+  assert.equal(dayAway(PERIODS, '2027-02-07').id, 'p1');   // last day
+  assert.equal(dayAway(PERIODS, '2027-02-08'), null);
+  assert.equal(dayAway(PERIODS, '2027-03-02').id, 'p2');
+  assert.equal(dayAway([], '2027-01-20'), null);
+  assert.equal(dayAway(undefined, '2027-01-20'), null);
+});
+
+test('dayStatus: day N of total, type and label', () => {
+  assert.deepEqual(dayStatus(PERIODS, '2026-12-31'), { away: false });
+  const s = dayStatus(PERIODS, '2027-01-06');
+  assert.equal(s.away, true);
+  assert.equal(s.type, 'travel');
+  assert.equal(s.label, 'Dhaka ✈');
+  assert.equal(s.dayN, 3);
+  assert.equal(s.total, 35);                              // Jan 4 .. Feb 7 inclusive
+  const off = dayStatus(PERIODS, '2027-03-01');
+  assert.equal(off.type, 'off');
+  assert.equal(off.dayN, 1);
+  assert.equal(off.total, 2);
+  assert.equal(off.label, '');                            // no label on that period
+});
+
+test('awayDaysInWeek / effectiveDaysInWeek: partial weeks count by the day', () => {
+  const pause = { travel: { mode: 'pause' } };
+  const reduced = { travel: { mode: 'reduced', factor: 0.5 } };
+  const cont = { travel: { mode: 'continue' } };
+  const monWed = [{ id: 't', start: '2026-08-17', end: '2026-08-19', type: 'travel' }];
+  assert.equal(awayDaysInWeek(monWed, '2026-08-17'), 3);
+  assert.equal(awayDaysInWeek([], '2026-08-17'), 0);
+  assert.equal(awayDaysInWeek([DHAKA], '2027-01-04'), 7);
+  assert.equal(effectiveDaysInWeek(pause, '2026-08-17', monWed), 4);
+  assert.equal(effectiveDaysInWeek(reduced, '2026-08-17', monWed), 5.5);   // 3×0.5 + 4
+  assert.equal(effectiveDaysInWeek(cont, '2026-08-17', monWed), 7);
+  const monWedOff = [{ id: 't', start: '2026-08-17', end: '2026-08-19', type: 'off' }];
+  assert.equal(effectiveDaysInWeek(reduced, '2026-08-17', monWedOff), 4);  // off beats travel mode
+  assert.equal(effectiveDaysInWeek(cont, '2026-08-17', monWedOff), 4);
+  assert.equal(effectiveDaysInWeek({}, '2026-08-17', monWed), 4);          // no travel = pause
 });
 
 test('session sequences: simple and tb-wb', () => {
@@ -58,7 +129,8 @@ test('sanitizePlan: drops junk, keeps unknown fields, defaults everything', () =
   const raw = {
     version: 1, futureField: 'keep-me',
     year: { label: 'x', start: '2026-08-17', end: '2027-08-31' },
-    weeks: { '2027-01-04': { type: 'travel' }, bad: { type: 'nope' } },
+    periods: [{ id: 'p1', start: '2027-01-04', end: '2027-02-07', type: 'travel' },
+              { id: 'bad', start: 'nope', end: '2027-02-07', type: 'travel' }],
     activities: [
       { id: 'ok', type: 'ongoing' },
       { type: 'paced' },                              // no id -> dropped
@@ -72,22 +144,83 @@ test('sanitizePlan: drops junk, keeps unknown fields, defaults everything', () =
   };
   const p = sanitizePlan(raw);
   assert.equal(p.futureField, 'keep-me');
-  assert.equal(Object.keys(p.weeks).length, 1);
+  assert.equal(p.periods.length, 1);
   assert.equal(p.activities.length, 1);
   assert.equal(p.log.length, 1);
   assert.deepEqual(p.overrides, []);
   const empty = sanitizePlan(null);
   assert.equal(empty.version, 1);
   assert.ok(Array.isArray(empty.activities));
+  assert.deepEqual(empty.periods, []);
+  assert.equal(empty.parentCycle.dutyStart, '2026-08-11');
+});
+
+test('sanitizePlan: periods validated (id, ISO dates, start<=end, known type) and sorted', () => {
+  const p = sanitizePlan({ periods: [
+    { id: 'b', start: '2027-03-01', end: '2027-03-02', type: 'off', label: 'Rest' },
+    { id: 'a', start: '2027-01-04', end: '2027-02-07', type: 'travel', label: 'Dhaka' },
+    { id: '', start: '2027-04-01', end: '2027-04-02', type: 'travel' },      // no id
+    { id: 'c', start: '2027-05-02', end: '2027-05-01', type: 'travel' },     // end < start
+    { id: 'd', start: '2027-06-01', end: 'zzz', type: 'travel' },            // bad ISO
+    { id: 'e', start: '2027-07-01', end: '2027-07-02', type: 'light' },      // type gone
+    { id: 'f', start: '2027-08-01', end: '2027-08-02' },                     // no type
+    'garbage', null,
+  ] });
+  assert.deepEqual(p.periods.map(x => x.id), ['a', 'b']);                    // sorted by start
+  assert.deepEqual(p.periods[0], { id: 'a', start: '2027-01-04', end: '2027-02-07',
+                                   type: 'travel', label: 'Dhaka' });
+  assert.equal(p.periods[1].label, 'Rest');
+  assert.deepEqual(sanitizePlan({ periods: 'nope' }).periods, []);
+});
+
+test('sanitizePlan: legacy weeks map migrates to 7-day periods and the key is gone', () => {
+  const p = sanitizePlan({ weeks: {
+    '2027-01-11': { type: 'travel', label: 'Dhaka' },
+    '2027-01-04': { type: 'travel', label: 'Dhaka' },
+    '2027-02-15': { type: 'off' },
+    '2026-10-05': { type: 'light' },                 // light is REMOVED -> dropped
+    '2026-11-02': { type: 'teaching' },              // normal week -> nothing to record
+    'zzz': { type: 'travel' },                       // bad key -> dropped
+  } });
+  assert.equal(p.periods.length, 3);
+  assert.deepEqual(p.periods.map(x => x.start), ['2027-01-04', '2027-01-11', '2027-02-15']);
+  assert.deepEqual(p.periods[0], { id: 'w-2027-01-04', start: '2027-01-04',
+                                   end: '2027-01-10', type: 'travel', label: 'Dhaka' });
+  assert.equal(p.periods[2].type, 'off');
+  assert.equal(p.periods[2].end, '2027-02-21');      // monday + 6
+  assert.equal(Object.keys(p).includes('weeks'), false);
+  assert.equal('weeks' in JSON.parse(serializePlan(p)), false);
+  // Re-sanitizing is idempotent (no duplicate periods from a second migration).
+  assert.equal(sanitizePlan(JSON.parse(serializePlan(p))).periods.length, 3);
+});
+
+test('DEPRECATED weeks shim keeps the un-rewritten views alive (delete in Task B/C)', () => {
+  // year.js/today.js still read plan.weeks directly; sanitize hands them an
+  // inert empty map so nothing throws between Task A and Tasks B/C.
+  const p = sanitizePlan({ weeks: { '2027-01-04': { type: 'travel', label: 'Dhaka' } } });
+  assert.equal(p.weeks['2027-01-04']?.label, undefined);
+  assert.deepEqual(Object.keys(p.weeks), []);
+  assert.equal(weekType(p.weeks, '2027-01-07'), 'teaching');
+});
+
+test('sanitizePlan: parentCycle.dutyStart ISO-validated with a 2026-08-11 default', () => {
+  assert.equal(sanitizePlan({ parentCycle: { anchorMonday: '2026-08-24', dutyStart: '2026-09-08' } })
+    .parentCycle.dutyStart, '2026-09-08');
+  assert.equal(sanitizePlan({ parentCycle: { anchorMonday: '2026-08-24', dutyStart: 'zzz' } })
+    .parentCycle.dutyStart, '2026-08-11');
+  const kept = sanitizePlan({ parentCycle: { pattern: '7on7off', anchorMonday: '2026-08-24', confirmed: true } });
+  assert.equal(kept.parentCycle.anchorMonday, '2026-08-24');
+  assert.equal(kept.parentCycle.confirmed, true);
+  assert.equal(kept.parentCycle.dutyStart, '2026-08-11');
 });
 
 import {
   weekCapacity, projectFinish, requiredPerCycle, cycleBounds, cycleStats,
-  targetStats, findClashes, freeSlots, doneOn,
+  targetStats, tripImpact, findClashes, freeSlots, doneOn,
 } from '../js/plan/model.js';
 
 const LOE = {
-  id: 'loe', type: 'paced', status: 'active',
+  id: 'loe', name: 'Logic of English', type: 'paced', status: 'active',
   rhythm: { kind: 'cycle', perOnWeek: 1, perOffWeek: 2.5 },
   travel: { mode: 'pause' },
   goal: { finishBy: '2027-08-31' },
@@ -97,45 +230,67 @@ const LOE = {
   ],
 };
 const SM = {
-  id: 'singapore', type: 'paced', status: 'active',
+  id: 'singapore', name: 'Singapore Math', type: 'paced', status: 'active',
   rhythm: { kind: 'daily' }, travel: { mode: 'reduced', factor: 0.5 },
   chain: [{ id: 'dm3', pattern: 'tb-wb', lessons: 60, tests: 14, done: 0 }],
 };
-const CYC = { anchorMonday: '2026-08-17', confirmed: false };
-const JAN_TRIP = {};
-for (let i = 0; i < 5; i++) JAN_TRIP[addDays('2027-01-04', i * 7)] = { type: 'travel', label: 'Dhaka' };
+const CYC = { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: false };
+// The old 5-week JAN_TRIP weeks-map fixture, as one day-precise period.
+const JAN_TRIP = [{ id: 'p1', start: '2027-01-04', end: '2027-02-07', type: 'travel', label: 'Dhaka' }];
 
-test('weekCapacity: rhythms × week types', () => {
-  assert.equal(weekCapacity(SM, '2026-08-17', {}, CYC), 7);              // daily teaching
-  assert.equal(weekCapacity(SM, '2027-01-04', JAN_TRIP, CYC), 3.5);      // daily reduced travel
-  assert.equal(weekCapacity(LOE, '2026-08-17', {}, CYC), 1);             // cycle, work week
-  assert.equal(weekCapacity(LOE, '2026-08-24', {}, CYC), 2.5);           // cycle, home week
-  assert.equal(weekCapacity(LOE, '2027-01-04', JAN_TRIP, CYC), 0);       // pause on travel
+test('weekCapacity: rhythms × away days', () => {
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC), 7);               // daily, no trip
+  assert.equal(weekCapacity(SM, '2027-01-04', JAN_TRIP, CYC), 3.5);       // daily reduced, all 7 away
+  assert.equal(weekCapacity(LOE, '2026-08-17', [], CYC), 1);              // cycle, work week
+  assert.equal(weekCapacity(LOE, '2026-08-24', [], CYC), 2.5);            // cycle, home week
+  assert.equal(weekCapacity(LOE, '2027-01-04', JAN_TRIP, CYC), 0);        // pause on travel
   const geo = { rhythm: { kind: 'weekly', perWeek: 1 }, travel: { mode: 'pause' } };
-  assert.equal(weekCapacity(geo, '2026-08-17', {}, CYC), 1);
-  assert.equal(weekCapacity(geo, '2026-08-17', { '2026-08-17': { type: 'light' } }, CYC), 0.5);
-  assert.equal(weekCapacity(geo, '2026-08-17', { '2026-08-17': { type: 'off' } }, CYC), 0);
+  assert.equal(weekCapacity(geo, '2026-08-17', [], CYC), 1);
+  assert.equal(weekCapacity(geo, '2026-08-17',
+    [{ id: 'o', start: '2026-08-17', end: '2026-08-23', type: 'off' }], CYC), 0);
+  // DEPRECATED shim: a legacy weeks map (plain object) is read as "no periods".
+  assert.equal(weekCapacity(SM, '2026-08-17', {}, CYC), 7);
+  assert.equal(weekCapacity(SM, '2026-08-17', undefined, CYC), 7);
 });
 
-test('LoE projection: C ~Nov 2026, C+D Feb-Mar 2027 with Jan trip, before goal', () => {
-  // 39 sessions left at 3.5/cycle from 2026-08-17 with a 5-week January travel pause.
-  const fin = projectFinish(LOE, '2026-08-17', { weeks: JAN_TRIP, parentCycle: CYC });
+test('weekCapacity: a 3-day trip inside a home week scales the cycle base by 4/7', () => {
+  const trip = [{ id: 'p9', start: '2026-08-26', end: '2026-08-28', type: 'travel' }];
+  const cap = weekCapacity(LOE, '2026-08-24', trip, CYC);                 // home week, LoE pauses
+  assert.ok(Math.abs(cap - 2.5 * 4 / 7) < 0.01, String(cap));
+  const work = weekCapacity(LOE, '2026-08-17',
+    [{ id: 'p9', start: '2026-08-19', end: '2026-08-21', type: 'travel' }], CYC);
+  assert.ok(Math.abs(work - 1 * 4 / 7) < 0.01, String(work));
+});
+
+test('weekCapacity: Singapore (daily, reduced) Mon-Wed away = 5.5; the same days off = 4', () => {
+  const travel = [{ id: 'p9', start: '2026-08-17', end: '2026-08-19', type: 'travel' }];
+  assert.equal(weekCapacity(SM, '2026-08-17', travel, CYC), 5.5);         // 3×0.5 + 4
+  const off = [{ id: 'p9', start: '2026-08-17', end: '2026-08-19', type: 'off' }];
+  assert.equal(weekCapacity(SM, '2026-08-17', off, CYC), 4);
+});
+
+test('LoE projection: C ~Nov 2026, C+D Feb-Mar 2027 with the Jan trip, before goal', () => {
+  // 39 sessions left at 3.5/cycle from 2026-08-17 with a 35-day January travel pause.
+  const fin = projectFinish(LOE, '2026-08-17', { periods: JAN_TRIP, parentCycle: CYC });
   assert.ok(fin.date >= '2027-02-01' && fin.date <= '2027-03-31', fin.date);
   assert.ok(fin.date < LOE.goal.finishBy);
   // C alone (clone with D emptied) lands around Nov 2026.
   const cOnly = { ...LOE, chain: [LOE.chain[0]] };
-  const finC = projectFinish(cOnly, '2026-08-17', { weeks: {}, parentCycle: CYC });
+  const finC = projectFinish(cOnly, '2026-08-17', { periods: [], parentCycle: CYC });
   assert.ok(finC.date >= '2026-10-15' && finC.date <= '2026-11-30', finC.date);
+  // The trip pushes the finish out.
+  const noTrip = projectFinish(LOE, '2026-08-17', { periods: [], parentCycle: CYC });
+  assert.ok(fin.date > noTrip.date);
 });
 
 test('LoE minimum pace to hit the goal is about 2 per cycle', () => {
-  const need = requiredPerCycle(LOE, '2026-08-17', { weeks: JAN_TRIP, parentCycle: CYC });
+  const need = requiredPerCycle(LOE, '2026-08-17', { periods: JAN_TRIP, parentCycle: CYC });
   assert.ok(need > 1 && need < 2.5, String(need));
 });
 
 test('unknown counts (waiting for books) -> no projection', () => {
   const waiting = { ...SM, chain: [{ pattern: 'tb-wb', lessons: 0, tests: 0, done: 0 }] };
-  assert.equal(projectFinish(waiting, '2026-08-17', { weeks: {}, parentCycle: CYC }), null);
+  assert.equal(projectFinish(waiting, '2026-08-17', { periods: [], parentCycle: CYC }), null);
 });
 
 test('cycleStats: one work-week lesson is on pace; targets 3-4', () => {
@@ -153,13 +308,74 @@ test('cycleStats: one work-week lesson is on pace; targets 3-4', () => {
 
 test('targetStats: JJ 3 done at ~week 11 of 48 teaching weeks, target 20 -> behind', () => {
   const jj = { id: 'jj', type: 'target', status: 'active', target: 20 };
-  const plan = { year: { start: '2026-09-01', end: '2027-08-31' }, weeks: JAN_TRIP, parentCycle: CYC };
+  const plan = { year: { start: '2026-09-01', end: '2027-08-31' }, periods: JAN_TRIP, parentCycle: CYC };
   const log = Array.from({ length: 3 }, (_, i) =>
     ({ date: addDays('2026-09-05', i * 14), activityId: 'jj', status: 'done' }));
   const st = targetStats(jj, plan, log, '2026-11-10');
   assert.equal(st.done, 3);
   assert.ok(st.expected >= 4 && st.expected <= 5, String(st.expected)); // 20 * 11/48
   assert.ok(st.behind >= 1);
+});
+
+test('targetStats: a teaching week needs >=4 plain school days', () => {
+  const jj = { id: 'jj', type: 'target', status: 'active', target: 10 };
+  const year = { start: '2026-08-17', end: '2026-09-13' };               // 4 weeks
+  const none = targetStats(jj, { year, periods: [], parentCycle: CYC }, [], '2026-09-13');
+  const three = targetStats(jj, { year, parentCycle: CYC,                // 3 away days -> still teaching
+    periods: [{ id: 'a', start: '2026-08-17', end: '2026-08-19', type: 'travel' }] }, [], '2026-09-13');
+  const four = targetStats(jj, { year, parentCycle: CYC,                 // 4 away days -> not teaching
+    periods: [{ id: 'a', start: '2026-08-17', end: '2026-08-20', type: 'travel' }] }, [], '2026-09-13');
+  assert.equal(none.expected, 10);                                       // all 4 weeks elapsed
+  assert.equal(three.expected, 10);
+  assert.equal(four.expected, 10);                                       // 3 of 3 weeks elapsed
+  // The week itself is what changed: expected is a ratio, so compare mid-year instead.
+  const midNone = targetStats(jj, { year, periods: [], parentCycle: CYC }, [], '2026-08-17');
+  const midFour = targetStats(jj, { year, parentCycle: CYC,
+    periods: [{ id: 'a', start: '2026-08-17', end: '2026-08-20', type: 'travel' }] }, [], '2026-08-17');
+  assert.ok(midFour.expected < midNone.expected, `${midFour.expected} < ${midNone.expected}`);
+});
+
+// ── tripImpact: live preview for the time-away sheet ─────────
+const IMPACT_PLAN = {
+  year: { start: '2026-08-17', end: '2027-08-31' },
+  parentCycle: CYC, periods: [], log: [],
+  activities: [LOE, { ...SM, status: 'planned' },
+    { id: 'waiting', name: 'Books pending', type: 'paced', status: 'active',
+      rhythm: { kind: 'weekly', perWeek: 1 }, chain: [] }],
+};
+
+test('tripImpact: adding the Jan trip moves the LoE finish later but keeps it before the goal', () => {
+  const rows = tripImpact(IMPACT_PLAN, JAN_TRIP[0], '2026-08-17');
+  assert.deepEqual(rows.map(r => r.id), ['loe']);      // planned + unknown-count rows skipped
+  assert.equal(rows[0].name, 'Logic of English');
+  const { before, after } = rows[0];
+  assert.ok(after > before, `${after} > ${before}`);
+  assert.ok(after < LOE.goal.finishBy);
+  assert.equal(before, projectFinish(LOE, '2026-08-17', { ...IMPACT_PLAN, periods: [] }).date);
+  assert.equal(after, projectFinish(LOE, '2026-08-17', { ...IMPACT_PLAN, periods: JAN_TRIP }).date);
+  assert.deepEqual(IMPACT_PLAN.periods, []);           // never mutates the plan
+});
+
+test('tripImpact: an edit draft REPLACES the period it carries an id for, it does not stack', () => {
+  const p = { ...IMPACT_PLAN, periods: JAN_TRIP };
+  const shorter = { id: 'p1', start: '2027-01-04', end: '2027-01-10', type: 'travel', label: 'Dhaka' };
+  const rows = tripImpact(p, shorter, '2026-08-17');
+  assert.equal(rows[0].before, projectFinish(LOE, '2026-08-17', { ...p, periods: JAN_TRIP }).date);
+  assert.equal(rows[0].after, projectFinish(LOE, '2026-08-17', { ...p, periods: [shorter] }).date);
+  assert.ok(rows[0].after < rows[0].before, `${rows[0].after} < ${rows[0].before}`);
+  assert.equal(p.periods.length, 1);                   // no stacking, no mutation
+  // A draft with a NEW id adds on top of the existing trip (before the finish).
+  const extra = { id: 'p2', start: '2026-10-05', end: '2026-10-18', type: 'off' };
+  const rows2 = tripImpact(p, extra, '2026-08-17');
+  assert.ok(rows2[0].after > rows2[0].before, `${rows2[0].after} > ${rows2[0].before}`);
+  assert.equal(p.periods.length, 1);
+  // An id-less draft is a plain add (the sheet has no id until the trip is saved).
+  const fresh = tripImpact({ ...p, periods: [] }, { start: '2026-10-05', end: '2026-10-18', type: 'off' },
+    '2026-08-17');
+  assert.ok(fresh[0].after > fresh[0].before, `${fresh[0].after} > ${fresh[0].before}`);
+  // A half-filled draft (no dates yet) is a no-op preview.
+  const rows3 = tripImpact(p, { start: '2027-04-05' }, '2026-08-17');
+  assert.equal(rows3[0].after, rows3[0].before);
 });
 
 test('clash: Science Tue 2:30-3:30 overlaps Hala Tue 2-3; suggestions avoid busy slots', () => {

@@ -1,6 +1,7 @@
 // Planner store + persistence. Mirrors ../state.js philosophy.
 // localStorage 'aoife_plan_v1'; KV via /api/plan-get + /api/plan-save.
-import { sanitizePlan, serializePlan, currentCur, todayStr, addDays, mondayOf } from './model.js';
+import { sanitizePlan, serializePlan, currentCur, todayStr, sortPeriods,
+         PERIOD_TYPES, ISO } from './model.js';
 import { seedPlan } from './seed.js';
 
 const PK = 'aoife_plan_v1';
@@ -15,7 +16,9 @@ export const planNotify = () => listeners.forEach(fn => fn());
 export function initPlan() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(PK)); } catch (e) {}
-  plan.data = saved ? sanitizePlan(saved) : seedPlan();
+  // The seed goes through sanitize too: every load path then holds a v2 plan
+  // (periods, dutyStart) with the same invariants, whatever it came from.
+  plan.data = sanitizePlan(saved || seedPlan());
 }
 
 export async function fetchPlanRemote() {
@@ -91,12 +94,55 @@ export function logTimed(eventId, activityId, status, date = todayStr()) {
   commit();
 }
 
-export function setWeekType(monday, type, label) {
-  const k = mondayOf(monday);
-  if (!type || type === 'teaching') delete plan.data.weeks[k];
-  else plan.data.weeks[k] = { type, ...(label ? { label } : {}) };
+// ── Time away (day-precise periods) ─────────────────────────
+const isISO = s => typeof s === 'string' && ISO.test(s);
+const okType = t => (PERIOD_TYPES.includes(t) ? t : 'travel');
+const periods = () => (plan.data.periods ||= []);
+// ids are identity (updatePeriod/deletePeriod find rows by them), so mint from
+// the max existing `p<n>` rather than the length — deleting must not collide.
+const nextPeriodId = () => `p${periods().reduce((m, p) => {
+  const x = /^p(\d+)$/.exec(p.id);
+  return x ? Math.max(m, Number(x[1])) : m;
+}, 0) + 1}`;
+
+export function addPeriod({ start, end, type, label } = {}) {
+  if (!isISO(start) || !isISO(end) || start > end) return null;
+  const per = { id: nextPeriodId(), start, end, type: okType(type),
+    ...(label ? { label: String(label) } : {}) };
+  periods().push(per);
+  sortPeriods(periods());
+  commit();
+  return per;
+}
+
+export function updatePeriod(id, patch = {}) {
+  const per = periods().find(p => p.id === id);
+  if (!per) return null;
+  const start = isISO(patch.start) ? patch.start : per.start;
+  const end = isISO(patch.end) ? patch.end : per.end;
+  if (start <= end) { per.start = start; per.end = end; }
+  if (PERIOD_TYPES.includes(patch.type)) per.type = patch.type;
+  if ('label' in patch) {
+    const l = String(patch.label ?? '').trim();
+    if (l) per.label = l; else delete per.label;
+  }
+  sortPeriods(periods());
+  commit();
+  return per;
+}
+
+export function deletePeriod(id) {
+  const i = periods().findIndex(p => p.id === id);
+  if (i < 0) return;
+  periods().splice(i, 1);
   commit();
 }
+
+// DEPRECATED — removed in Task B. year.js still imports these two (a missing
+// export is a load-time SyntaxError, which would take the whole app down), but
+// week marking and the anchor flip are gone from the model: inert no-ops.
+export function setWeekType() {}
+export function flipAnchor() {}
 
 export function setActivityStatus(id, status) {
   const act = getActivity(id);
@@ -106,13 +152,6 @@ export function setActivityStatus(id, status) {
 export function setTravelMode(id, mode) {
   const act = getActivity(id);
   if (act) { act.travel = mode === 'reduced' ? { mode, factor: 0.5 } : { mode }; commit(); }
-}
-
-export function flipAnchor() {
-  const pc = plan.data.parentCycle;
-  pc.anchorMonday = addDays(pc.anchorMonday, 7);
-  pc.confirmed = true;
-  commit();
 }
 
 export function addOverride(o) { plan.data.overrides.push(o); commit(); }

@@ -4,8 +4,9 @@ export function seedPlan() {
   return {
     version: 1,
     year: { label: '2026-27', start: '2026-08-17', end: '2027-08-31' },
-    parentCycle: { pattern: '7on7off', anchorMonday: '2026-08-17', confirmed: false },
-    weeks: {},
+    parentCycle: { pattern: '7on7off', anchorMonday: '2026-08-17',
+                   dutyStart: '2026-08-11', confirmed: false },
+    periods: [],
     activities: [
       { id: 'core-ruhamah', type: 'ongoing', status: 'active', cat: 'ruhamah', cls: 'r', chain: [] },
       { id: 'core-hala',    type: 'ongoing', status: 'active', cat: 'hala',    cls: 'h', chain: [] },
