@@ -92,6 +92,13 @@
 /* Away-day banner: same activity-neutral .pcard look, a hair more emphasis
    (centered, faint tint) so it reads as the headline for the day. */
 .abanner { text-align: center; background: var(--bg-input); }
+/* "This week" card: the teaching-week count plus one pace/streak line per
+   activity. Rows are text-left, chip-right, and wrap on narrow phones. */
+.twk { font-size: 12.5px; font-weight: 700; }
+.twline { display: flex; justify-content: space-between; align-items: baseline;
+          gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-sub); }
+.twk + .twline, .twline + .twline { margin-top: 6px; }
+.twline b { color: var(--text); font-weight: 600; }
 
 /* ── Subjects ── */
 .scard.dim { opacity: .65; }
@@ -114,8 +121,10 @@
    same box as the week grids — so its left % lands on the right week. The
    padding-top reserves the row where the "today" tag sits. */
 .ytw { position: relative; padding-top: 13px; }
+/* z-index keeps the today line legible THROUGH the selection band, which is
+   painted by the tap layer sitting above the tracks. */
 .ynow { position: absolute; top: 13px; bottom: 0; left: calc(100% * var(--tp, 0) / 100);
-        border-left: 1.5px dashed var(--now); pointer-events: none; }
+        border-left: 1.5px dashed var(--now); pointer-events: none; z-index: 3; }
 .ynow i { position: absolute; top: -13px; left: 2px; font-style: normal;
           font-size: 8.5px; font-weight: 700; letter-spacing: .04em; color: var(--now); }
 .track { margin-bottom: 12px; }
@@ -125,9 +134,10 @@
 .track .tl small { color: var(--text-muted); font-size: 10px; }
 .tgrid { display: grid; grid-template-columns: repeat(var(--n, 52), 1fr); gap: 1px; }
 /* background-COLOR, never the shorthand: an away week layers a hatch
-   background-image on top of the progress colour below it. */
+   background-image on top of the progress colour below it. The cells are pure
+   decoration now — .yhit below owns every pointer event on the tracks. */
 .tgrid i { height: 14px; border-radius: 2px; background-color: var(--bg-input);
-           cursor: pointer; touch-action: manipulation; }
+           pointer-events: none; }
 .tgrid i.plan { background-color: var(--eb, var(--bg-input)); }
 .tgrid i.fill { background-color: var(--el, var(--accent-soft)); }
 /* Away shading: full-height hatch for a whole week away, half-height for a
@@ -142,10 +152,19 @@
            background-repeat: no-repeat; background-position: bottom; }
 /* Red is the today line's colour, so the selected week uses plain ink. */
 .tgrid i.sel { outline: 1.5px solid var(--text); outline-offset: 0; }
+/* Tap layer: one transparent, full-height column per week over the tracks.
+   Same metrics as .tgrid (repeat(n, 1fr), 1px gap) so the columns sit exactly
+   on their cells — a fat target for a thumb where the cell itself is 14px. */
+.yhit { position: absolute; inset: 0; z-index: 2; display: grid;
+        grid-template-columns: repeat(var(--n, 52), 1fr); gap: 1px; }
+.yhit i { cursor: pointer; touch-action: manipulation; border-radius: 3px; }
+/* The selected column IS the highlight band: an accent tint at low opacity,
+   drawn across every track (the per-cell .sel outline keeps the edges crisp). */
+.yband { background-color: var(--accent-soft); opacity: .18; }
 .yaxis { display: grid; grid-template-columns: repeat(var(--n, 52), 1fr); font-size: 9px;
          color: var(--text-muted); letter-spacing: .05em; margin-top: 4px; overflow: hidden; }
-/* A short month (the part-months at either end of the year) gets clipped
-   rather than allowed to run into its neighbour. */
+/* Months under MIN_LABEL_SPAN columns drop their label in year.js; a labelled
+   month that is still tight gets clipped rather than running into its neighbour. */
 .yaxis span { overflow: hidden; white-space: nowrap; padding-right: 3px; }
 .yleg { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: center;
         margin-top: 8px; font-size: 10px; color: var(--text-muted); }
@@ -160,6 +179,12 @@
 .ycard .tnm { font-size: 13px; }
 .ycls { border: none; background: transparent; color: var(--text-muted);
         font-size: 13px; padding: 2px 6px; line-height: 1; }
+/* ‹ › week stepper: same quiet treatment as ✕, but a real 30px tap target. */
+.ynav { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.ystep { border: 1px solid var(--border); background: var(--bg-input); color: var(--text-sub);
+         font-size: 14px; line-height: 1; padding: 5px 9px; border-radius: 8px;
+         min-width: 30px; touch-action: manipulation; }
+.ystep:disabled { opacity: .35; }
 
 /* Time-away list */
 .yrow { display: flex; justify-content: space-between; gap: 10px; align-items: baseline;

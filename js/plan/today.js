@@ -5,7 +5,7 @@ import { DAYS, fmt, esc, CATS } from '../model.js';
 import { store, catLabel, evLabel } from '../state.js';
 import {
   todayStr, addDays, dayIdx, isWorkDay, dayStatus, dayAway, daysBetween, nextSession,
-  currentCur, cycleStats, doneOn, actTotal, okCls,
+  currentCur, cycleStats, doneOn, actTotal, okCls, teachingWeekNumber, dailyStreak,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 
@@ -82,6 +82,45 @@ function chips(dateStr) {
   return c.join('');
 }
 
+// ── "This week" card ────────────────────────────────────────
+// The weekly view of the same data the rest of the page shows day by day:
+// which teaching week this is, where each cycle activity stands against its
+// 2-week target, and any daily streak worth protecting. Deliberately NOT
+// suppressed on away days — a streak matters most while travelling, which is
+// exactly what dailyStreak's away-day bridging is for.
+const MIN_STREAK = 3;              // below this a "streak" is just two good days
+const LAST_DAYS = 3;               // warn only inside the cycle's last 3 days
+
+// done >= targetMin -> "on pace"; otherwise stay neutral until the cycle is
+// nearly over, because being 1 of 3 on day two says nothing yet.
+function paceChip(cs, dateStr) {
+  if (cs.done >= cs.targetMin) return `<span class="pchip ok">on pace</span>`;
+  return dateStr >= addDays(cs.end, -(LAST_DAYS - 1)) ? `<span class="pchip warn">behind</span>` : '';
+}
+
+export function thisWeekHtml(dateStr) {
+  const p = plan.data;
+  const lines = [];
+  const tw = teachingWeekNumber(p, dateStr);
+  if (tw != null) lines.push(`<div class="twk">Teaching week ${tw}</div>`);
+
+  for (const a of p.activities.filter(a => a.status === 'active' && a.rhythm?.kind === 'cycle')) {
+    const cs = cycleStats(a, dateStr, p.parentCycle, p.log);
+    const target = `${cs.targetMin}${cs.targetMax > cs.targetMin ? `–${cs.targetMax}` : ''}`;
+    lines.push(`<div class="twline"><span><b>${esc(a.name || a.id)}</b> — ${cs.done} of ${
+      target} this cycle</span>${paceChip(cs, dateStr)}</div>`);
+  }
+
+  for (const a of p.activities.filter(a => a.status === 'active' && a.rhythm?.kind === 'daily')) {
+    const n = dailyStreak(p.log, a.id, p.periods, dateStr);
+    if (n >= MIN_STREAK)
+      lines.push(`<div class="twline"><span><b>${esc(a.name || a.id)}</b> — 🔥 ${n}-day streak</span></div>`);
+  }
+
+  if (!lines.length) return '';    // nothing to say -> no empty card
+  return `<div class="psec">This week</div><div class="pcard">${lines.join('')}</div>`;
+}
+
 export function renderToday() {
   const el = document.getElementById('view-today');
   if (!el || !plan.data) return;
@@ -90,6 +129,7 @@ export function renderToday() {
   const status = dayStatus(plan.data.periods, today);
 
   let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}</div></div>`;
+  h += thisWeekHtml(today);
 
   let items = [];
   if (status.away) {

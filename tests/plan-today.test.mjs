@@ -29,7 +29,7 @@ globalThis.document = {
 
 const { store } = await import('../js/state.js');
 const { plan } = await import('../js/plan/state.js');
-const { renderToday, fmtUntil, dailyVisible } = await import('../js/plan/today.js');
+const { renderToday, fmtUntil, dailyVisible, thisWeekHtml } = await import('../js/plan/today.js');
 
 // ── Pure helpers ─────────────────────────────────────────────
 test('fmtUntil: days under 2 weeks, weeks beyond', () => {
@@ -90,8 +90,11 @@ test('renderToday: (a) normal day — Mama chip via isWorkDay, timed block + bot
   assert.match(html, /class="tblock/);
   assert.match(html, /Quran reading/);
   assert.doesNotMatch(html, /abanner/);
-  assert.match(html, /Singapore Math/);
-  assert.match(html, /Logic of English/);
+  // The daily rows are matched by data-act, not by name: activity names now
+  // ALSO appear in the "This week" card above (teaching week / pace / streak),
+  // so a bare name match would no longer prove the row itself rendered.
+  assert.match(html, /data-act="sm"/);
+  assert.match(html, /data-act="loe"/);
 });
 
 test('renderToday: (b) travel day mid-period — banner shown, timed blocks hidden, reduced daily stays, paused daily hides', () => {
@@ -104,8 +107,8 @@ test('renderToday: (b) travel day mid-period — banner shown, timed blocks hidd
   assert.match(html, /✈ Dhaka · day 3 of 8/);
   assert.doesNotMatch(html, /class="tblock/);
   assert.doesNotMatch(html, /Quran reading/);
-  assert.match(html, /Singapore Math/);                    // reduced -> still shows
-  assert.doesNotMatch(html, /Logic of English/);            // pause -> hidden
+  assert.match(html, /data-act="sm"/);                     // reduced -> still shows
+  assert.doesNotMatch(html, /data-act="loe"/);             // pause -> hidden
 });
 
 test('renderToday: (c) off-type day — banner shown, no dailies section at all', () => {
@@ -116,8 +119,8 @@ test('renderToday: (c) off-type day — banner shown, no dailies section at all'
   assert.match(html, /abanner/);
   assert.match(html, /⏸ Off · day 1 of 1/);
   assert.doesNotMatch(html, /Daily · no time slot/);
-  assert.doesNotMatch(html, /Singapore Math/);
-  assert.doesNotMatch(html, /Logic of English/);
+  assert.doesNotMatch(html, /data-act="sm"/);
+  assert.doesNotMatch(html, /data-act="loe"/);
 });
 
 test('renderToday: next-trip chip skips a period whose own start day is shadowed by an off period', () => {
@@ -159,4 +162,67 @@ test('renderToday: (d) tomorrow away — tomorrow strip shows the trip instead o
   assert.doesNotMatch(html, /abanner/);                    // today itself is not away
   assert.match(html, /Tomorrow: ✈ Ski trip/);
   assert.doesNotMatch(html, /Should be hidden/);
+});
+
+// ── "This week" card ─────────────────────────────────────────
+// thisWeekHtml takes the date, so these assert real cycle/streak arithmetic on
+// fixed dates instead of whatever day the suite happens to run on.
+const loeDone = dates => dates.map(date => ({ date, activityId: 'loe', status: 'done' }));
+
+test('thisWeekHtml: teaching week + cycle pace line; the chip stays neutral early in the cycle', () => {
+  loadPlan([]);
+  const h = thisWeekHtml('2026-08-18');                   // cycle runs Aug 17–30
+  assert.match(h, /<div class="psec">This week<\/div>/);
+  assert.match(h, /Teaching week 1/);
+  assert.match(h, /<b>Logic of English<\/b> — 0 of 3–4 this cycle/);
+  assert.doesNotMatch(h, /pchip ok/);
+  assert.doesNotMatch(h, /pchip warn/);                   // 0 of 3 on day 2 says nothing yet
+});
+
+test('thisWeekHtml: warn only inside the cycle’s last 3 days, ok as soon as the target is met', () => {
+  loadPlan([]);
+  assert.match(thisWeekHtml('2026-08-27'), /0 of 3–4 this cycle<\/span><\/div>/);  // day 11: still neutral
+  assert.match(thisWeekHtml('2026-08-28'), /pchip warn/);                          // last 3 days
+  assert.match(thisWeekHtml('2026-08-30'), /pchip warn/);
+  loadPlan([]);
+  plan.data.log.push(...loeDone(['2026-08-17', '2026-08-18', '2026-08-19']));
+  const ok = thisWeekHtml('2026-08-19');
+  assert.match(ok, /3 of 3–4 this cycle/);
+  assert.match(ok, /pchip ok">on pace/);
+});
+
+test('thisWeekHtml: a daily activity earns a streak line at 3 days (Singapore stays silent while planned)', () => {
+  loadPlan([]);
+  // The fixture SM is `active`; in production Singapore Math is still `planned`,
+  // so this line only appears the day the family activates it.
+  plan.data.log.push(...['2026-08-17', '2026-08-18'].map(date =>
+    ({ date, activityId: 'sm', status: 'done' })));
+  assert.doesNotMatch(thisWeekHtml('2026-08-18'), /streak/);            // 2 days is not a streak
+  plan.data.log.push({ date: '2026-08-19', activityId: 'sm', status: 'done' });
+  assert.match(thisWeekHtml('2026-08-19'), /<b>Singapore Math<\/b> — 🔥 3-day streak/);
+  plan.data.activities.find(a => a.id === 'sm').status = 'planned';
+  assert.doesNotMatch(thisWeekHtml('2026-08-19'), /streak/);            // planned -> no line
+});
+
+test('thisWeekHtml: majority-away week drops the teaching-week line but keeps the card', () => {
+  loadPlan([{ id: 'p1', start: '2026-08-24', end: '2026-08-30', type: 'travel', label: 'Dhaka' }]);
+  const h = thisWeekHtml('2026-08-26');
+  assert.doesNotMatch(h, /Teaching week/);
+  assert.match(h, /Logic of English/);                    // pace still worth stating on the road
+});
+
+test('thisWeekHtml: nothing to say -> no card at all', () => {
+  loadPlan([]);
+  plan.data.activities = [];
+  assert.equal(thisWeekHtml('2026-08-10'), '');           // before year.start, no activities
+});
+
+test('renderToday: the This week card renders right after the date header', () => {
+  store.events = [];
+  loadPlan([]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  const head = html.indexOf('class="phead"');
+  const card = html.indexOf('>This week<');
+  assert.ok(head >= 0 && card > head, 'This week card must follow the date header');
 });

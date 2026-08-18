@@ -102,8 +102,22 @@ function trackFor(a, wks, away, today) {
     <div class="tgrid" style="--n:${wks.length}">${cells}</div></div>`;
 }
 
+// ── Tap layer ───────────────────────────────────────────────
+// The track cells are 14px tall — far too small a target for a finger, and
+// ~350 of them meant ~350 click listeners per render. One transparent column
+// per week, full height across every track, sits on top instead: fat targets,
+// ONE delegated listener (see wire()), and the selected column doubles as the
+// highlight band. It repeats the .tgrid metrics exactly (repeat(n, 1fr) with a
+// 1px gap), so a column and the cells under it line up to the pixel.
+// aria-hidden: this is a pointer affordance over a view-only chart; the info
+// card it opens carries the real controls (‹ › ✕, Edit trip).
+function hitHtml(wks) {
+  return `<div class="yhit" style="--n:${wks.length}" aria-hidden="true">${wks
+    .map(w => `<i data-w="${esc(w)}"${w === openWeek ? ' class="yband"' : ''}></i>`).join('')}</div>`;
+}
+
 // Month labels under the tracks, each spanning its own weeks so they line up.
-function axisHtml(wks) {
+export function monthGroups(wks) {
   const groups = [];
   for (const w of wks) {
     const m = D(w).getMonth();
@@ -111,8 +125,18 @@ function axisHtml(wks) {
     if (last && last.m === m) last.n++;
     else groups.push({ m, n: 1 });
   }
-  return `<div class="yaxis" style="--n:${wks.length}">${groups
-    .map(g => `<span style="grid-column:span ${g.n}">${MON[g.m]}</span>`).join('')}</div>`;
+  return groups;
+}
+
+// A month that owns fewer than MIN_LABEL_SPAN week-columns — the part-months at
+// either end of the school year — keeps its column span (the axis has to stay
+// aligned with the tracks) but drops its LABEL: on a phone the year's first
+// partial Aug and the full Sep next to it overprint each other otherwise.
+export const MIN_LABEL_SPAN = 3;
+export function axisHtml(wks) {
+  return `<div class="yaxis" style="--n:${wks.length}">${monthGroups(wks)
+    .map(g => `<span style="grid-column:span ${g.n}">${g.n < MIN_LABEL_SPAN ? '' : MON[g.m]}</span>`)
+    .join('')}</div>`;
 }
 
 const legendHtml = () =>
@@ -126,8 +150,13 @@ function cardHtml(wks, away) {
   const i = wks.indexOf(openWeek);
   if (i < 0) return '';
   const aw = away[i];
+  // ‹ › nudge the selection one week either way — tap roughly with a thumb,
+  // then adjust exactly. Disabled at the ends of the year so they never lie.
   let h = `<div class="pcard ycard"><div class="trow"><span class="tnm">Week of ${esc(fmtRange(openWeek, addDays(openWeek, 6)))}</span>
-    <button type="button" class="ycls" id="ycard-x" aria-label="Close">✕</button></div>`;
+    <span class="ynav">
+      <button type="button" class="ystep" data-ystep="-1" aria-label="Previous week"${i === 0 ? ' disabled' : ''}>‹</button>
+      <button type="button" class="ystep" data-ystep="1" aria-label="Next week"${i === wks.length - 1 ? ' disabled' : ''}>›</button>
+      <button type="button" class="ycls" id="ycard-x" aria-label="Close">✕</button></span></div>`;
   if (!aw.total) {
     h += `<div class="pmeta">School all week</div>
       <div class="sctl"><button type="button" data-yadd="${openWeek}">+ Time away this week</button></div>`;
@@ -259,6 +288,18 @@ function openEdit(id) {
 
 function closeSheet() { sheet = null; delArmed = false; renderYear(); }
 
+// One week back/forward from the open card (‹ ›, ArrowLeft/ArrowRight).
+// Clamped: stepping past either end of the year is a no-op, not a wrap.
+function stepWeek(delta) {
+  const wks = yearWeeks();
+  const i = wks.indexOf(openWeek);
+  if (i < 0) return;
+  const j = Math.max(0, Math.min(wks.length - 1, i + delta));
+  if (j === i) return;
+  openWeek = wks[j];
+  renderYear();
+}
+
 // ── Document-level dismissal (bound only while something is open) ──
 // Both handlers are stable references, so addEventListener is idempotent —
 // calling this on every render neither stacks nor leaks listeners.
@@ -269,7 +310,7 @@ function onDocTap(e) {
   // under the family's finger.
   if (sheet || openWeek == null) return;
   const t = e.target;
-  if (t && t.closest && (t.closest('.ycard') || t.closest('.tgrid'))) return;
+  if (t && t.closest && (t.closest('.ycard') || t.closest('.yhit'))) return;
   openWeek = null;
   renderYear();
 }
@@ -277,9 +318,19 @@ function onDocTap(e) {
 function onDocKey(e) {
   // Escape closes the sheet, and the info card underneath it with it; with no
   // sheet open it closes the card on its own.
-  if (e.key !== 'Escape' || (!sheet && openWeek == null)) return;
-  sheet = null; delArmed = false; openWeek = null;
-  renderYear();
+  if (e.key === 'Escape' && (sheet || openWeek != null)) {
+    sheet = null; delArmed = false; openWeek = null;
+    renderYear();
+    return;
+  }
+  // Arrows step the open card one week. Never while the sheet is up: its date
+  // fields own the arrow keys, and never from inside a field for the same reason.
+  if (sheet || openWeek == null) return;
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  e.preventDefault();                       // or the page scrolls sideways too
+  stepWeek(e.key === 'ArrowRight' ? 1 : -1);
 }
 
 function bindDismiss() {
@@ -317,7 +368,9 @@ export function renderYear() {
     <div class="pcard ytracks"><div class="ytw" style="--tp:${todayPct.toFixed(2)}">
     <div class="ynow"><i>today</i></div>`;
   for (const a of [...rows, core]) h += trackFor(a, wks, away, today);
-  h += `</div>${axisHtml(wks)}${legendHtml()}</div>`;
+  // The tap layer is written LAST inside .ytw so it paints over the cells it
+  // covers (the today line keeps its own z-index above the band).
+  h += `${hitHtml(wks)}</div>${axisHtml(wks)}${legendHtml()}</div>`;
 
   // Everything that is not running yet collapses to one line — the Subjects
   // tab owns those decisions, the Year page just says they exist.
@@ -358,10 +411,17 @@ export function renderYear() {
 function wire(el) {
   const $ = id => document.getElementById(id);
 
-  el.querySelectorAll('.tgrid i').forEach(c => c.addEventListener('click', () => {
-    openWeek = openWeek === c.dataset.w ? null : c.dataset.w;    // tapping the same cell closes
+  // ONE delegated listener for all ~55 week columns (this used to be one
+  // listener per track cell — ~350 of them, re-bound on every render).
+  const hit = el.querySelector('.yhit');
+  if (hit) hit.addEventListener('click', e => {
+    const col = e.target.closest ? e.target.closest('[data-w]') : null;
+    if (!col) return;
+    openWeek = openWeek === col.dataset.w ? null : col.dataset.w;  // same column closes
     renderYear();
-  }));
+  });
+  el.querySelectorAll('[data-ystep]').forEach(b =>
+    b.addEventListener('click', () => stepWeek(Number(b.dataset.ystep))));
   el.querySelectorAll('[data-yedit]').forEach(b =>
     b.addEventListener('click', () => openEdit(b.dataset.yedit)));
   // The list rows are divs with role=button/tabindex=0, so the browser gives

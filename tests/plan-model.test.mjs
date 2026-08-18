@@ -428,3 +428,69 @@ test('doneOn finds a done log entry for a date', () => {
   assert.equal(doneOn(log, 'loe', '2026-08-16'), true);
   assert.equal(doneOn(log, 'loe', '2026-08-15'), false);
 });
+
+// ── "This week" helpers (Today card) ─────────────────────────
+import { teachingWeekNumber, dailyStreak } from '../js/plan/model.js';
+
+const YR = { label: 'y', start: '2026-08-17', end: '2027-08-31' };   // 08-17 is a Monday
+const twPlan = periods => ({ year: YR, periods });
+
+test('teachingWeekNumber: 1 at year.start, and any day of that week', () => {
+  const p = twPlan([]);
+  assert.equal(teachingWeekNumber(p, '2026-08-17'), 1);
+  assert.equal(teachingWeekNumber(p, '2026-08-21'), 1);          // Friday of week 1
+  assert.equal(teachingWeekNumber(p, '2026-08-24'), 2);
+  assert.equal(teachingWeekNumber(p, '2026-09-07'), 4);
+});
+
+test('teachingWeekNumber: a majority-away week returns null AND does not advance the count', () => {
+  const trip = twPlan([{ id: 'p1', start: '2026-08-24', end: '2026-08-30', type: 'travel' }]);
+  assert.equal(teachingWeekNumber(trip, '2026-08-26'), null);     // the trip week itself
+  assert.equal(teachingWeekNumber(trip, '2026-08-31'), 2);        // resumes at 2, not 3
+  assert.equal(teachingWeekNumber(trip, '2026-09-07'), 3);
+});
+
+test('teachingWeekNumber: 3 away days still teach, 4 do not (same rule as targetStats)', () => {
+  const three = twPlan([{ id: 'p1', start: '2026-08-24', end: '2026-08-26', type: 'travel' }]);
+  assert.equal(teachingWeekNumber(three, '2026-08-24'), 2);       // 4 school days left
+  assert.equal(teachingWeekNumber(three, '2026-08-31'), 3);
+  const four = twPlan([{ id: 'p1', start: '2026-08-24', end: '2026-08-27', type: 'off' }]);
+  assert.equal(teachingWeekNumber(four, '2026-08-24'), null);
+  assert.equal(teachingWeekNumber(four, '2026-08-31'), 2);        // the away week is skipped
+});
+
+test('teachingWeekNumber: null before the year starts, and on a malformed plan', () => {
+  assert.equal(teachingWeekNumber(twPlan([]), '2026-08-10'), null);
+  assert.equal(teachingWeekNumber({ year: { start: 'nope' }, periods: [] }, '2026-08-17'), null);
+  assert.equal(teachingWeekNumber(null, '2026-08-17'), null);
+  assert.equal(teachingWeekNumber(twPlan([]), 'nope'), null);
+});
+
+const doneDays = (dates, id = 'sm') => dates.map(date => ({ date, activityId: id, status: 'done' }));
+
+test('dailyStreak: a plain run counts back from today, only this activity, only done', () => {
+  const log = doneDays(['2026-08-15', '2026-08-16', '2026-08-17']);
+  assert.equal(dailyStreak(log, 'sm', [], '2026-08-17'), 3);
+  assert.equal(dailyStreak(log, 'loe', [], '2026-08-17'), 0);     // another activity's run
+  const partial = [...log, { date: '2026-08-18', activityId: 'sm', status: 'partial' }];
+  assert.equal(dailyStreak(partial, 'sm', [], '2026-08-18'), 3);  // 'partial' is not 'done'
+});
+
+test('dailyStreak: an unchecked morning keeps yesterday’s streak; a plain missed day ends it', () => {
+  const log = doneDays(['2026-08-15', '2026-08-16', '2026-08-17']);
+  assert.equal(dailyStreak(log, 'sm', [], '2026-08-18'), 3);      // today not ticked YET
+  assert.equal(dailyStreak(log, 'sm', [], '2026-08-19'), 0);      // a whole day went by
+});
+
+test('dailyStreak: an away day with no entry bridges the run; the same gap at home breaks it', () => {
+  const log = doneDays(['2026-08-14', '2026-08-15', '2026-08-17', '2026-08-18']);
+  const away = [{ id: 'p1', start: '2026-08-16', end: '2026-08-16', type: 'travel' }];
+  assert.equal(dailyStreak(log, 'sm', away, '2026-08-18'), 4);    // travel day bridged
+  assert.equal(dailyStreak(log, 'sm', [], '2026-08-18'), 2);      // no trip -> broken
+});
+
+test('dailyStreak: empty or malformed log is 0', () => {
+  assert.equal(dailyStreak([], 'sm', [], '2026-08-18'), 0);
+  assert.equal(dailyStreak(null, 'sm', [], '2026-08-18'), 0);
+  assert.equal(dailyStreak([{ activityId: 'sm', status: 'done' }], 'sm', [], '2026-08-18'), 0);
+});

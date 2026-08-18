@@ -13,8 +13,8 @@ globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 for (const k of ['alert', 'confirm', 'prompt'])
   globalThis[k] = () => { throw new Error(`${k}() must never be called by the planner`); };
 
-const { fmtRange, perName, awayCls, weekAway, nextWorkStart } =
-  await import('../js/plan/year.js');
+const { fmtRange, perName, awayCls, weekAway, nextWorkStart, monthGroups, axisHtml,
+        MIN_LABEL_SPAN } = await import('../js/plan/year.js');
 
 // ── fmtRange ────────────────────────────────────────────────
 test('fmtRange: collapses the month only when both ends share month AND year', () => {
@@ -115,4 +115,26 @@ test('nextWorkStart: always resolves inside the 15-day scan (never null)', () =>
     const from = `2026-09-${String(i + 1).padStart(2, '0')}`;
     assert.notEqual(nextWorkStart(CYCLE, from), null, `no start found from ${from}`);
   }
+});
+
+// ── Month axis: crowded part-months lose their label, never their column ──
+test('monthGroups: consecutive weeks collapse into one span per calendar month', () => {
+  const wks = ['2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05'];
+  assert.deepEqual(monthGroups(wks), [{ m: 7, n: 1 }, { m: 8, n: 4 }, { m: 9, n: 1 }]);
+  assert.deepEqual(monthGroups([]), []);
+});
+
+test('axisHtml: a month under MIN_LABEL_SPAN columns keeps its slot but drops its label', () => {
+  assert.equal(MIN_LABEL_SPAN, 3);
+  const wks = ['2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05'];
+  const html = axisHtml(wks);
+  // The alignment grid is unchanged: every group still spans its own weeks.
+  assert.match(html, /style="--n:6"/);
+  assert.match(html, /<span style="grid-column:span 1"><\/span>/);
+  assert.match(html, /<span style="grid-column:span 4">Sep<\/span>/);
+  assert.doesNotMatch(html, />Aug</);                    // 1 week at the start
+  assert.doesNotMatch(html, />Oct</);                    // 1 week at the end
+  // Exactly 3 columns is the threshold, so it still labels.
+  assert.match(axisHtml(['2026-11-02', '2026-11-09', '2026-11-16']), />Nov</);
+  assert.doesNotMatch(axisHtml(['2026-11-02', '2026-11-09']), />Nov</);
 });

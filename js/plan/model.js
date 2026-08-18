@@ -282,6 +282,51 @@ export function targetStats(act, plan, log, dateStr) {
   return { done, target: act.target || 0, expected, behind: Math.max(0, expected - done) };
 }
 
+// ── "This week" helpers (the Today card) ────────────────────
+// Teaching-week counter, 1-based from year.start. Same definition of a teaching
+// week as targetStats: 4+ plain school days, i.e. awayDaysInWeek <= 3. A
+// majority-away week is skipped and does NOT advance the count, so the number
+// answers "how many real school weeks in", not "how many weeks on the calendar".
+// null = the week of `dateStr` is itself majority-away, or sits before the year
+// started (the card then omits the line rather than printing something false).
+export function teachingWeekNumber(plan, dateStr) {
+  const start = plan?.year?.start;
+  if (!isISO(start) || !isISO(dateStr)) return null;
+  const target = mondayOf(dateStr);
+  let w = mondayOf(start), n = 0, guard = 0;
+  if (target < w) return null;
+  while (w <= target) {
+    if (guard++ >= WALK_CAP) return null;         // malformed year: no number at all
+    const teaching = awayDaysInWeek(plan?.periods, w) <= 3;
+    if (teaching) n++;
+    if (w === target) return teaching ? n : null;
+    w = addDays(w, 7);
+  }
+  return null;
+}
+
+// Consecutive-day run of `done` entries for one activity, ending at `today` —
+// or at YESTERDAY when today isn't ticked yet, so a morning before the day's
+// work never reads as a broken streak.
+// An away day with no entry BRIDGES the run instead of ending it: on travel
+// Singapore Math drops to every other day by design, and a rhythm the plan
+// itself prescribes must not cost Aoife her streak. A plain (not-away) missed
+// day ends it.
+export function dailyStreak(log, actId, periods, today) {
+  const done = new Set();
+  for (const e of Array.isArray(log) ? log : [])
+    if (e && e.activityId === actId && e.status === 'done' && isISO(e.date)) done.add(e.date);
+  if (!done.size || !isISO(today)) return 0;
+  let d = done.has(today) ? today : addDays(today, -1);
+  let n = 0;
+  for (let i = 0; i < WALK_CAP * 7; i++) {        // same belt-and-braces cap as the week walks
+    if (done.has(d)) n++;
+    else if (!dayAway(periods, d)) break;         // a plain missed day ends the run
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
 // ── Clash detection over template events ────────────────────
 export const findClashes = (events, slot) =>
   events.filter(e => e.day === slot.day && e.start < slot.end && e.end > slot.start);
