@@ -157,6 +157,40 @@ test('applyOverlay: repeated apply stays at one dot per block (idempotent sweep)
   assert.equal(dots[0]._html, '✗');
 });
 
+test('applyOverlay: weekday-agreement guard drops a dot whose logged date no longer matches the event\'s current day', () => {
+  store.events = [
+    { id: 'e4', cat: 'hala', day: 2, start: 10, end: 11, name: 'Hala' },   // now lives on Wednesday
+  ];
+  loadPlan([
+    { date: MON, eventId: 'e4', status: 'done' },   // stale: logged back when it was still on Monday
+  ]);
+  const { doc, evtEls } = makeGrid(store.events);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  assert.equal(dotsOf(evtEls.e4).length, 0);
+});
+
+test('applyOverlay: two entries for the same event on different weekdays — only the one agreeing with the current day dots', () => {
+  const WED = addDays(MON, 2);
+  store.events = [
+    { id: 'e5', cat: 'art', day: 2, start: 10, end: 11, name: 'Art' },      // currently Wednesday
+  ];
+  loadPlan([
+    { date: MON, eventId: 'e5', status: 'missed' },  // stale Monday entry -> guard drops it
+    { date: WED, eventId: 'e5', status: 'done' },     // agrees with the block's current day -> dots
+  ]);
+  const { doc, evtEls } = makeGrid(store.events);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  const dots = dotsOf(evtEls.e5);
+  assert.equal(dots.length, 1);
+  assert.equal(dots[0].className, 'ov-dot ov-done');
+});
+
 test('applyOverlay: log entries without eventId (dailies, planner slots) stay undecorated', () => {
   store.events = [
     { id: 'e1', cat: 'quran', day: 0, start: 10, end: 11, name: 'Quran' },

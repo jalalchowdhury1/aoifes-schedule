@@ -117,22 +117,24 @@ function paceChip(act, cs, dateStr) {
 // name-resolution the timed blocks already do (timedFor) rather than a
 // second lookup table, so a renamed activity or event shows its CURRENT
 // name, matching everywhere else on this page.
-function receiptName(e, timedItems) {
+// Returns {name, idx} or null to skip the entry silently. `idx` is the
+// entry's position in timedItems (today's start-time-sorted schedule), so
+// the receipt can render chronologically; entries that never lived in that
+// schedule (dailies, or an event/activity moved/deleted since) get the
+// sentinel `timedItems.length`, sorting after every real slot.
+function receiptEntry(e, timedItems) {
+  const last = timedItems.length;
   if (e.eventId) {
-    const hit = timedItems.find(it => it.eventId === e.eventId);
-    if (hit) return hit.name;
+    const idx = timedItems.findIndex(it => it.eventId === e.eventId);
+    if (idx >= 0) return { name: timedItems[idx].name, idx };
     const ev = store.events.find(x => x.id === e.eventId);
-    return ev ? evLabel(ev) : null;         // event deleted entirely -> skip silently
+    return ev ? { name: evLabel(ev), idx: last } : null;   // deleted entirely -> skip silently
   }
-  if (e.timed && e.activityId) {
-    const hit = timedItems.find(it => it.activityId === e.activityId);
-    if (hit) return hit.name;
+  if (e.activityId) {                       // covers both timed onGrid slots and daily/paced checks
+    const idx = timedItems.findIndex(it => it.activityId === e.activityId);
+    if (idx >= 0) return { name: timedItems[idx].name, idx };
     const a = plan.data.activities.find(x => x.id === e.activityId);
-    return a ? (a.name || catLabel(a.cat)) : null;
-  }
-  if (e.activityId) {                       // daily/paced: no eventId, no timed flag
-    const a = plan.data.activities.find(x => x.id === e.activityId);
-    return a ? (a.name || catLabel(a.cat)) : null;
+    return a ? { name: a.name || catLabel(a.cat), idx: last } : null;
   }
   return null;
 }
@@ -143,15 +145,16 @@ export function yesterdayHtml(dateStr) {
   if (status.away)
     return `<div class="tmwrow">Yesterday: ${AWAY_ICON[status.type] || '✈'} ${esc(awayLabel(status))}</div>`;
   const timedItems = timedFor(dateStr);
-  const parts = [];
+  const entries = [];
   for (const e of p.log.filter(x => x.date === dateStr)) {
-    const name = receiptName(e, timedItems);
-    if (!name) continue;
+    const r = receiptEntry(e, timedItems);
+    if (!r) continue;
     const icon = e.status === 'done' ? '✓' : e.status === 'partial' ? '◐' : '✗';
-    parts.push(`${icon} ${esc(name)}`);
+    entries.push({ idx: r.idx, html: `${icon} ${esc(r.name)}` });
   }
-  if (!parts.length) return '';             // nothing logged and not away -> no empty line
-  return `<div class="tmwrow">Yesterday: ${parts.join(' · ')}</div>`;
+  if (!entries.length) return '';           // nothing logged and not away -> no empty line
+  entries.sort((a, b) => a.idx - b.idx);    // schedule order; unknowns/dailies last, stable
+  return `<div class="tmwrow">Yesterday: ${entries.map(x => x.html).join(' · ')}</div>`;
 }
 
 export function thisWeekHtml(dateStr) {

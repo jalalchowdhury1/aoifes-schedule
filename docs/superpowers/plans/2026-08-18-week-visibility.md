@@ -39,3 +39,18 @@ Below the tomorrow strip, same styling family (`.tmwrow`), render a receipt for
 
 Bare `node --test` green; `node --check`; print states unchanged (only if plan.css touched);
 combined spec+quality review; push tag `planner-v2.2`; confirm live.
+
+## Review addendum: weekday-agreement guard (grid vs. receipt asymmetry)
+
+Review round found a gap in §1: if a template block is dragged to a different weekday
+mid-week after a log entry was made against it, the original filter (`eventId` + date-in-
+week) would still dot the block — in its *new* column, on a day the entry never happened,
+and potentially stacked against a newer entry for the same event. Fixed by adding a
+weekday-agreement guard: an entry only decorates the block when `dayIdx(e.date) === ev.day`
+(the entry's logged date and the event's current weekday must agree). A moved block simply
+loses its stale dot until re-logged. This is a deliberate asymmetry with §2's Yesterday
+receipt, which does **not** re-check weekday agreement: the grid enforces it because a
+column is itself a claim about which day a block lives on, and a stale/wrong-column dot
+would misrepresent that claim — but a receipt is a plain text list with no column to
+contradict, so it keeps naming the (possibly since-moved) activity by whatever name resolves
+today, exactly as designed in §2's fallback.

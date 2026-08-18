@@ -322,6 +322,21 @@ test('yesterdayHtml: an event moved off that weekday still resolves via the raw 
   assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ✓ Quran reading</div>');
 });
 
+test('yesterdayHtml: renders in schedule order, not tap/log order — a late-tapped 9am block still comes first', () => {
+  const Y = '2026-08-17';                                   // Monday, dayIdx 0
+  store.events = [
+    { id: 'e-pm', cat: 'quran', day: dayIdx(Y), start: 16, end: 17, name: 'Afternoon block' },
+    { id: 'e-am', cat: 'quran', day: dayIdx(Y), start: 9, end: 10, name: 'Morning block' },
+  ];
+  loadPlan([]);
+  // The family taps the 4pm block done first, then goes back and taps the
+  // 9am block later — the log records them in that (reversed) order.
+  plan.data.log.push({ date: Y, eventId: 'e-pm', status: 'done', timed: true });
+  plan.data.log.push({ date: Y, eventId: 'e-am', status: 'done', timed: true });
+  assert.equal(yesterdayHtml(Y),
+    '<div class="tmwrow">Yesterday: ✓ Morning block · ✓ Afternoon block</div>');
+});
+
 test('renderToday: the Yesterday receipt renders below the Tomorrow strip', () => {
   const Y = addDays(TODAY, -1);
   const T = addDays(TODAY, 1);
