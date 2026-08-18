@@ -1,8 +1,8 @@
 // Read-only decorations on the classic week grid: today-status dots and a
 // clash banner. Never mutates events; only appends elements into rendered DOM.
-import { todayIndex, fmt, esc, DAYS } from '../model.js';
+import { fmt, esc, DAYS } from '../model.js';
 import { store, catLabel } from '../state.js';
-import { todayStr, findClashes } from './model.js';
+import { todayStr, mondayOf, addDays, findClashes } from './model.js';
 import { plan } from './state.js';
 
 // Event ids are stored data; escape them before they enter a CSS selector.
@@ -14,12 +14,12 @@ export function applyOverlay() {
   const grid = document.getElementById('grid');
   if (!grid) return;
   grid.querySelectorAll('.ov-dot').forEach(n => n.remove());
-  const today = todayStr();
-  const tIdx = todayIndex(new Date().getDay());
+  const mon = mondayOf(todayStr());
+  const sun = addDays(mon, 6);
   for (const e of plan.data.log) {
-    if (e.date !== today || !e.eventId) continue;
+    if (!e.eventId || e.date < mon || e.date > sun) continue;
     const ev = store.events.find(x => x.id === e.eventId);
-    if (!ev || ev.day !== tIdx) continue;
+    if (!ev) continue;
     grid.querySelectorAll(`.evt[data-id="${cssEsc(e.eventId)}"]`).forEach(el => {
       const d = document.createElement('span');
       d.className = `ov-dot ov-${e.status}`;

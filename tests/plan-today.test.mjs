@@ -29,7 +29,7 @@ globalThis.document = {
 
 const { store } = await import('../js/state.js');
 const { plan } = await import('../js/plan/state.js');
-const { renderToday, fmtUntil, dailyVisible, thisWeekHtml } = await import('../js/plan/today.js');
+const { renderToday, fmtUntil, dailyVisible, thisWeekHtml, yesterdayHtml } = await import('../js/plan/today.js');
 
 // ── Pure helpers ─────────────────────────────────────────────
 test('fmtUntil: days under 2 weeks, weeks beyond', () => {
@@ -258,4 +258,77 @@ test('renderToday: on an away day the This week card renders AFTER the banner', 
   const banner = html.indexOf('abanner');
   const card = html.indexOf('>This week<');
   assert.ok(banner >= 0 && card > banner, 'the banner is the headline; the card follows it');
+});
+
+// ── "Yesterday" receipt ───────────────────────────────────────
+// yesterdayHtml takes the date directly (like thisWeekHtml), so these run on
+// fixed dates rather than whatever day the suite happens to run on.
+test('yesterdayHtml: mixed statuses — timed event, timed onGrid activity, and a daily/paced entry', () => {
+  const Y = '2026-08-17';                                   // Monday, dayIdx 0
+  const TACT = {
+    id: 'tact', name: 'Ruhamah — ELA/Math', type: 'paced', status: 'active', onGrid: true,
+    rhythm: { kind: 'daily' }, slots: [{ day: dayIdx(Y), start: 13, end: 14 }], chain: [],
+  };
+  store.events = [{ id: 'e1', cat: 'quran', day: dayIdx(Y), start: 10, end: 11, name: 'Quran reading' }];
+  plan.data = sanitizePlan({
+    year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], activities: [SM, LOE, TACT],
+    log: [
+      { date: Y, eventId: 'e1', status: 'done', timed: true },
+      { date: Y, activityId: 'tact', status: 'partial', timed: true },
+      { date: Y, activityId: 'loe', status: 'missed' },       // daily/paced: no eventId, no timed flag
+    ],
+    overrides: [],
+  });
+  assert.equal(yesterdayHtml(Y),
+    '<div class="tmwrow">Yesterday: ✓ Quran reading · ◐ Ruhamah — ELA/Math · ✗ Logic of English</div>');
+});
+
+test('yesterdayHtml: away day short-circuits to the trip line, ignoring anything logged that day', () => {
+  const Y = '2026-08-20';
+  loadPlan([{ id: 'p1', start: Y, end: addDays(Y, 2), type: 'travel', label: 'Ski trip' }]);
+  plan.data.log.push({ date: Y, activityId: 'loe', status: 'done' });
+  assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ✈ Ski trip</div>');
+});
+
+test('yesterdayHtml: off-type away day uses the pause icon', () => {
+  const Y = '2026-08-20';
+  loadPlan([{ id: 'p1', start: Y, end: Y, type: 'off', label: 'Family break' }]);
+  assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ⏸ Family break</div>');
+});
+
+test('yesterdayHtml: no log entries and not away -> renders nothing (no guilt-tripping empty line)', () => {
+  loadPlan([]);
+  assert.equal(yesterdayHtml('2026-08-17'), '');
+});
+
+test('yesterdayHtml: a fully-deleted event is skipped silently rather than showing a blank name', () => {
+  const Y = '2026-08-17';
+  store.events = [];                                        // e1 no longer exists anywhere
+  loadPlan([]);
+  plan.data.log.push({ date: Y, eventId: 'e1', status: 'done', timed: true });
+  assert.equal(yesterdayHtml(Y), '');
+});
+
+test('yesterdayHtml: an event moved off that weekday still resolves via the raw evLabel fallback', () => {
+  const Y = '2026-08-17';                                   // Monday, dayIdx 0
+  store.events = [{ id: 'e1', cat: 'quran', day: dayIdx(Y) + 1, start: 10, end: 11, name: 'Quran reading' }];
+  loadPlan([]);
+  plan.data.log.push({ date: Y, eventId: 'e1', status: 'done', timed: true });
+  assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ✓ Quran reading</div>');
+});
+
+test('renderToday: the Yesterday receipt renders below the Tomorrow strip', () => {
+  const Y = addDays(TODAY, -1);
+  const T = addDays(TODAY, 1);
+  store.events = [{ id: 'e1', cat: 'quran', day: dayIdx(Y), start: 10, end: 11, name: 'Quran reading' }];
+  loadPlan([{ id: 'p9', start: T, end: T, type: 'off', label: 'Tomorrow off' }]);
+  plan.data.log.push({ date: Y, eventId: 'e1', status: 'done', timed: true });
+  renderToday();
+  const html = viewToday.innerHTML;
+  assert.match(html, /Tomorrow: ⏸ Tomorrow off/);
+  assert.match(html, /Yesterday: ✓ Quran reading/);
+  assert.ok(html.indexOf('Tomorrow:') < html.indexOf('Yesterday:'),
+    'the Yesterday receipt must follow the Tomorrow strip');
 });

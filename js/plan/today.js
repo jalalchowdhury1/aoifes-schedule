@@ -111,6 +111,49 @@ function paceChip(act, cs, dateStr) {
   return dateStr >= addDays(cs.end, -(LAST_DAYS - 1)) ? `<span class="pchip warn">behind</span>` : '';
 }
 
+// ── "Yesterday" receipt ─────────────────────────────────────
+// A short read-only recap of what actually got logged the day before, so a
+// missed status is visible without digging into Year/Subjects. Reuses the
+// name-resolution the timed blocks already do (timedFor) rather than a
+// second lookup table, so a renamed activity or event shows its CURRENT
+// name, matching everywhere else on this page.
+function receiptName(e, timedItems) {
+  if (e.eventId) {
+    const hit = timedItems.find(it => it.eventId === e.eventId);
+    if (hit) return hit.name;
+    const ev = store.events.find(x => x.id === e.eventId);
+    return ev ? evLabel(ev) : null;         // event deleted entirely -> skip silently
+  }
+  if (e.timed && e.activityId) {
+    const hit = timedItems.find(it => it.activityId === e.activityId);
+    if (hit) return hit.name;
+    const a = plan.data.activities.find(x => x.id === e.activityId);
+    return a ? (a.name || catLabel(a.cat)) : null;
+  }
+  if (e.activityId) {                       // daily/paced: no eventId, no timed flag
+    const a = plan.data.activities.find(x => x.id === e.activityId);
+    return a ? (a.name || catLabel(a.cat)) : null;
+  }
+  return null;
+}
+
+export function yesterdayHtml(dateStr) {
+  const p = plan.data;
+  const status = dayStatus(p.periods, dateStr);
+  if (status.away)
+    return `<div class="tmwrow">Yesterday: ${AWAY_ICON[status.type] || '✈'} ${esc(awayLabel(status))}</div>`;
+  const timedItems = timedFor(dateStr);
+  const parts = [];
+  for (const e of p.log.filter(x => x.date === dateStr)) {
+    const name = receiptName(e, timedItems);
+    if (!name) continue;
+    const icon = e.status === 'done' ? '✓' : e.status === 'partial' ? '◐' : '✗';
+    parts.push(`${icon} ${esc(name)}`);
+  }
+  if (!parts.length) return '';             // nothing logged and not away -> no empty line
+  return `<div class="tmwrow">Yesterday: ${parts.join(' · ')}</div>`;
+}
+
 export function thisWeekHtml(dateStr) {
   const p = plan.data;
   const lines = [];
@@ -192,6 +235,7 @@ export function renderToday() {
     const tmw = timedFor(tomorrow);
     if (tmw.length) h += `<div class="tmwrow">Tomorrow: ${tmw.map(t => `${esc(t.name)} ${fmt(t.start)}`).join(' · ')}</div>`;
   }
+  h += yesterdayHtml(addDays(today, -1));
 
   el.innerHTML = h;
   el.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', e => {
