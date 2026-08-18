@@ -84,6 +84,12 @@ export function togglePaced(actId, date = todayStr()) {
 // Log a timed block (template event or planner slot) for a date: done|partial|missed.
 // Tapping the same status again clears it.
 export function logTimed(eventId, activityId, status, date = todayStr()) {
+  // Refuse an ownerless write. With neither key the pushed entry has nothing to
+  // find it by, and `match`'s activityId branch would compare `undefined ===
+  // undefined` against every other keyless timed entry on the date — one tap
+  // would then appear to toggle an unrelated block. sanitizePlan drops such
+  // rows on the next load anyway, so writing one only corrupts the session.
+  if (!eventId && !activityId) return;
   const match = e => e.date === date &&
     (eventId ? e.eventId === eventId : e.activityId === activityId && e.timed);
   const i = plan.data.log.findIndex(match);

@@ -72,6 +72,9 @@ via MutationObserver.
   activities[{id,type,status,cls,onGrid,slots,rhythm,travel,goal,target,note,chain[
   {id,name,pattern:'simple'|'tb-wb',firstUnit,lastUnit,lessons,tests,done,titles}]}],
   overrides[{date,action,...}], log[{date,activityId|eventId,status,...}]}
+- Overrides may carry `{id, name, src}` written by the Telegram bot
+  (aoife-school-bot); an override's id doubles as the eventId in log entries.
+  `logTimed` refuses ownerless writes; `statusOf` requires a non-null key.
 - **`weeks` is REMOVED (v2, 2026-08-17).** Time away is day-precise: a `periods`
   list of inclusive date ranges, kept sorted by start. `sanitizePlan` migrates any
   legacy `weeks{monday:{type,label}}` blob (each marked week → a 7-day Mon..Sun

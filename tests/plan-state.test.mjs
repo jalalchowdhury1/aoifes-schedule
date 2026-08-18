@@ -12,7 +12,7 @@ globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 globalThis.document = { dispatchEvent: () => {} };
 const S = await import('../js/plan/state.js');
-const { plan, initPlan, togglePaced, addPeriod, updatePeriod, deletePeriod } = S;
+const { plan, initPlan, togglePaced, logTimed, addPeriod, updatePeriod, deletePeriod } = S;
 
 const curOf = (p, actId, curId) =>
   p.activities.find(a => a.id === actId).chain.find(c => c.id === curId);
@@ -150,6 +150,26 @@ test('togglePaced: exhausted chain round-trips with no negative counts', () => {
   assert.equal(curOf(plan.data, 'loe', 'loe-d').done, 20);
 
   togglePaced('loe', D);
+  assert.deepEqual(snap(plan.data), before);
+});
+
+// ── logTimed: bot-interop keys (planner-v2.4) ───────────────
+// A Telegram-written one-off has no activityId; its override `id` doubles as
+// the eventId, so a website tap must write that same shape. A call with
+// NEITHER key is refused: the row would have nothing to find it by, and
+// match()'s activityId branch would then compare `undefined === undefined`
+// against every other keyless timed entry on the date.
+test('logTimed: an override id logs as an eventId, toggles off, and refuses ownerless writes', () => {
+  initPlan();
+  const rows = () => plan.data.log.filter(e => e.date === D);
+  logTimed('x1', null, 'done', D);
+  assert.deepEqual(rows(), [{ date: D, status: 'done', timed: true, eventId: 'x1' }]);
+  logTimed('x1', null, 'done', D);                    // same status again -> toggle off
+  assert.deepEqual(rows(), []);
+
+  const before = snap(plan.data);
+  logTimed(null, null, 'done', D);                    // no key at all -> nothing written
+  assert.deepEqual(rows(), []);
   assert.deepEqual(snap(plan.data), before);
 });
 

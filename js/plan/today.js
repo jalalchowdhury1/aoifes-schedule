@@ -54,8 +54,18 @@ function timedFor(dateStr) {
   for (const [i, o] of plan.data.overrides.entries())
     if (o.date === dateStr && o.action === 'add') {
       const a = plan.data.activities.find(x => x.id === o.activityId);
-      items.push({ key: `ov:${i}`, activityId: o.activityId, cls: okCls(a?.cls),
-                   name: (a?.name || 'Extra') + ' · makeup', start: o.start, end: o.end, note: o.note || '' });
+      // An override's own `id` IS its identity in the log: that is how the
+      // Telegram bot writes and reads a one-off ({eventId: 'x<n>'}). Without
+      // carrying it here the row had NO key at all, so statusOf's activityId
+      // branch matched `undefined === undefined` against the first other timed
+      // entry on the date, and a website tap wrote an ownerless row that
+      // logTimed could never find again. A bot-written `name` wins over the
+      // makeup label; `note` is suppressed when it only repeats the name.
+      items.push({ key: `ov:${o.id || i}`, eventId: o.id || undefined,
+                   activityId: o.activityId, cls: okCls(a?.cls),
+                   name: o.name || (a?.name || 'Extra') + ' · makeup',
+                   start: o.start, end: o.end,
+                   note: o.note && o.note !== o.name ? o.note : '' });
     }
   const skips = new Set(plan.data.overrides
     .filter(o => o.date === dateStr && o.action === 'skip')
@@ -64,8 +74,14 @@ function timedFor(dateStr) {
     .sort((a, b) => a.start - b.start);
 }
 
+// A non-null key is REQUIRED to match. The activityId branch used to run for
+// keyless rows too, and `undefined === undefined` is true in JS — so an item
+// with no ids at all matched the first other timed log entry on the date that
+// also lacked an activityId (typically a template event's own entry), and the
+// block rendered as already-logged. `it.activityId != null` closes that trap.
 const statusOf = (dateStr, it) => plan.data.log.find(e => e.date === dateStr &&
-  (it.eventId ? e.eventId === it.eventId : e.activityId === it.activityId && e.timed))?.status;
+  (it.eventId ? e.eventId === it.eventId
+              : it.activityId != null && e.activityId === it.activityId && e.timed))?.status;
 
 function chips(dateStr) {
   const p = plan.data;

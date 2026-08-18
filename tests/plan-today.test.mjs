@@ -337,6 +337,46 @@ test('yesterdayHtml: renders in schedule order, not tap/log order — a late-tap
     '<div class="tmwrow">Yesterday: ✓ Morning block · ✓ Afternoon block</div>');
 });
 
+// ── Bot interop: an override carries its own identity ────────
+// The Telegram bot (aoife-school-bot) writes a one-off as an override with its
+// OWN `id` ('x<n>') and a `name`, never an activityId, and logs it back as
+// {eventId: 'x1'}. Before planner-v2.4 timedFor built that row with no key at
+// all, so statusOf fell into the activityId branch and `undefined ===
+// undefined` matched the first other timed entry on the date — the block
+// rendered as already-logged, borrowed from a template event.
+// Reads the class list of one .tblock by its data-key, so "which block got
+// st-done" is asserted per block rather than anywhere in the page.
+function tblockCls(html, key) {
+  for (const seg of html.split('<div class="tblock ').slice(1)) {
+    const q = seg.indexOf('"');
+    if (seg.slice(q).startsWith(`" data-key="${key}"`)) return seg.slice(0, q);
+  }
+  return null;
+}
+
+test('renderToday: a bot-written override renders under its own name and is never cross-matched', () => {
+  store.events = [{ id: 'e1', cat: 'quran', day: TODAY_DI, start: 10, end: 11, name: 'Quran reading' }];
+  loadPlan([]);
+  plan.data.overrides.push({ date: TODAY, action: 'add', id: 'x1', name: 'Arya art',
+                             start: 15.5, end: 16.5, src: 'tg', note: 'Arya art' });
+  plan.data.log.push({ date: TODAY, eventId: 'e1', status: 'missed', timed: true });
+  renderToday();
+  let html = viewToday.innerHTML;
+  assert.match(html, /Arya art/);
+  assert.doesNotMatch(html, /makeup/);                    // the bot's name wins over the label
+  assert.doesNotMatch(html, /Extra/);
+  assert.equal((html.match(/Arya art/g) || []).length, 1);   // note repeats the name -> suppressed
+  assert.equal(tblockCls(html, 'ov:x1'), 'ot');           // no st- class: NOT logged
+  assert.match(tblockCls(html, 'ev:e1'), /st-missed/);
+
+  // Now the bot logs it the only way it can — by the override's own id.
+  plan.data.log.push({ date: TODAY, status: 'done', timed: true, eventId: 'x1' });
+  renderToday();
+  html = viewToday.innerHTML;
+  assert.match(tblockCls(html, 'ov:x1'), /st-done/);
+  assert.match(tblockCls(html, 'ev:e1'), /st-missed/);    // the event keeps its own status
+});
+
 test('renderToday: the Yesterday receipt renders below the Tomorrow strip', () => {
   const Y = addDays(TODAY, -1);
   const T = addDays(TODAY, 1);
