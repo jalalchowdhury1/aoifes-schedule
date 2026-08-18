@@ -33,7 +33,8 @@ Static vanilla app, no build step, no dependencies, no framework:
 - js/plan/today.js — Today view
 - js/plan/year.js — Year view
 - js/plan/subjects.js — Subjects view
-- js/plan/overlay.js — read-only week-grid decorations + clash banner
+- js/plan/overlay.js — read-only status dots on BOTH #grid and #dayview + clash
+  banner; a MutationObserver re-applies them after any re-render (see below)
 - api/plan-get.js — GET aoife_plan (or ?prev=1 for undo copy)
 - api/plan-save.js — copy current -> aoife_plan_prev, then SET new
 - css/plan.css — all planner styles (tokens.css vars reused)
@@ -84,6 +85,10 @@ Static vanilla app, no build step, no dependencies, no framework:
   "Cancel" → "Tap again to cancel", disarmed by any other interaction); validation
   errors render inline as `.form-err` (`.form-err.warn` for advisory notices).
   tests/plan-today.test.mjs and tests/plan-year.test.mjs poison all three globals.
+- The mobile Day view (#dayview, frozen js/dayview.js) is a parallel render path —
+  any grid visual (dots, badges) must also cover #dayview; it re-renders outside
+  onChange (60s timer in main.js + day-tab taps), which is why overlay.js re-applies
+  via MutationObserver.
 - `sanitizePlan` (js/plan/model.js) drops malformed records on both load paths and
   preserves unknown fields (forward-compatible).
 - Claude sessions may edit this blob directly via the endpoints (bulk-load

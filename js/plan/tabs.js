@@ -7,7 +7,7 @@ import { onChange } from '../state.js';
 import { renderToday } from './today.js';
 import { renderYear } from './year.js';
 import { renderSubjects } from './subjects.js';
-import { applyOverlay } from './overlay.js';
+import { applyOverlay, initOverlay } from './overlay.js';
 
 const TK = 'aoife_ptab';
 const TABS = [
@@ -38,6 +38,9 @@ function renderViews() {
   // — and therefore renderGrid(), which replaces the grid's innerHTML — may run
   // AFTER this listener. Overlaying synchronously would decorate DOM that is
   // about to be thrown away, so the dots vanish on first paint.
+  // The overlay's MutationObserver would also catch that rebuild; this explicit
+  // call is kept so first paint never depends on observer timing (and the
+  // overlay's own reentrancy flag makes the duplicate apply cheap).
   queueMicrotask(applyOverlay);
 }
 
@@ -52,6 +55,9 @@ export function initPlanner() {
   });
   onPlanChange(renderViews);
   onChange(renderViews);            // template changes re-render planner views too
+  // Watch #grid/#dayview so the dots survive re-renders that bypass these two
+  // hooks entirely (main.js's 60s timer, day-tab taps in js/dayview.js).
+  initOverlay();
   setTab(t);
   fetchPlanRemote();
 }
