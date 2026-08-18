@@ -226,3 +226,36 @@ test('renderToday: the This week card renders right after the date header', () =
   const card = html.indexOf('>This week<');
   assert.ok(head >= 0 && card > head, 'This week card must follow the date header');
 });
+
+// ── Capacity-aware pace chip (review correction) ─────────────
+// The cycle that matters here is Aug 17–30 (anchorMonday 2026-08-17): week 1
+// is a work week (perOnWeek 1), week 2 a home week (perOffWeek 2.5).
+test('thisWeekHtml: a cycle with no capacity left reads "paused" and can never warn', () => {
+  loadPlan([{ id: 'p1', start: '2026-08-17', end: '2026-08-30', type: 'off', label: 'Family break' }]);
+  for (const day of ['2026-08-18', '2026-08-28', '2026-08-30']) {   // incl. the last 3 days
+    const h = thisWeekHtml(day);
+    assert.match(h, /<span class="pchip">paused<\/span>/);
+    assert.doesNotMatch(h, /pchip warn/);
+    assert.doesNotMatch(h, /pchip ok/);
+  }
+});
+
+test('thisWeekHtml: a trip shrinks the target, so one lesson is "on pace" where three were needed', () => {
+  const trip = [{ id: 'p1', start: '2026-08-24', end: '2026-08-30', type: 'travel', label: 'Dhaka' }];
+  loadPlan(trip);                                   // LoE pauses on travel -> half the cycle gone
+  plan.data.log.push({ date: '2026-08-19', activityId: 'loe', status: 'done' });
+  assert.match(thisWeekHtml('2026-08-30'), /pchip ok">on pace/);
+  loadPlan([]);                                     // same single lesson, no trip
+  plan.data.log.push({ date: '2026-08-19', activityId: 'loe', status: 'done' });
+  assert.match(thisWeekHtml('2026-08-30'), /pchip warn/);
+});
+
+test('renderToday: on an away day the This week card renders AFTER the banner', () => {
+  store.events = [];
+  loadPlan([{ id: 'p1', start: TODAY, end: addDays(TODAY, 3), type: 'off', label: 'Break' }]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  const banner = html.indexOf('abanner');
+  const card = html.indexOf('>This week<');
+  assert.ok(banner >= 0 && card > banner, 'the banner is the headline; the card follows it');
+});

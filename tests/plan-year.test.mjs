@@ -125,7 +125,8 @@ test('monthGroups: consecutive weeks collapse into one span per calendar month',
 });
 
 test('axisHtml: a month under MIN_LABEL_SPAN columns keeps its slot but drops its label', () => {
-  assert.equal(MIN_LABEL_SPAN, 3);
+  // 4, not 3: at 390px three columns are ~15px, too little for a 3-letter label.
+  assert.equal(MIN_LABEL_SPAN, 4);
   const wks = ['2026-08-31', '2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05'];
   const html = axisHtml(wks);
   // The alignment grid is unchanged: every group still spans its own weeks.
@@ -134,7 +135,9 @@ test('axisHtml: a month under MIN_LABEL_SPAN columns keeps its slot but drops it
   assert.match(html, /<span style="grid-column:span 4">Sep<\/span>/);
   assert.doesNotMatch(html, />Aug</);                    // 1 week at the start
   assert.doesNotMatch(html, />Oct</);                    // 1 week at the end
-  // Exactly 3 columns is the threshold, so it still labels.
-  assert.match(axisHtml(['2026-11-02', '2026-11-09', '2026-11-16']), />Nov</);
-  assert.doesNotMatch(axisHtml(['2026-11-02', '2026-11-09']), />Nov</);
+  // Exactly 4 columns is the threshold; a 3-column month is NOT labelled.
+  assert.match(axisHtml(['2026-11-02', '2026-11-09', '2026-11-16', '2026-11-23']), />Nov</);
+  const three = axisHtml(['2026-11-02', '2026-11-09', '2026-11-16']);
+  assert.doesNotMatch(three, />Nov</);
+  assert.match(three, /<span style="grid-column:span 3"><\/span>/);   // slot kept
 });

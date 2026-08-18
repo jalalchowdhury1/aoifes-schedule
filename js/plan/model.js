@@ -290,8 +290,9 @@ export function targetStats(act, plan, log, dateStr) {
 // null = the week of `dateStr` is itself majority-away, or sits before the year
 // started (the card then omits the line rather than printing something false).
 export function teachingWeekNumber(plan, dateStr) {
-  const start = plan?.year?.start;
+  const start = plan?.year?.start, end = plan?.year?.end;
   if (!isISO(start) || !isISO(dateStr)) return null;
+  if (isISO(end) && dateStr > end) return null;   // past the school year: no number
   const target = mondayOf(dateStr);
   let w = mondayOf(start), n = 0, guard = 0;
   if (target < w) return null;
@@ -311,17 +312,26 @@ export function teachingWeekNumber(plan, dateStr) {
 // An away day with no entry BRIDGES the run instead of ending it: on travel
 // Singapore Math drops to every other day by design, and a rhythm the plan
 // itself prescribes must not cost Aoife her streak. A plain (not-away) missed
-// day ends it.
+// day ends it outright.
+// The bridge is BOUNDED at MAX_BRIDGE consecutive missed away days — one
+// every-other-day gap plus a day of slack. Unbounded, a 5-week Dhaka trip with
+// nothing logged would still be advertising a streak earned before the flight,
+// which is a lie the fire emoji makes worse. Any `done` day resets the count.
+export const MAX_BRIDGE = 2;
 export function dailyStreak(log, actId, periods, today) {
   const done = new Set();
   for (const e of Array.isArray(log) ? log : [])
     if (e && e.activityId === actId && e.status === 'done' && isISO(e.date)) done.add(e.date);
   if (!done.size || !isISO(today)) return 0;
-  let d = done.has(today) ? today : addDays(today, -1);
-  let n = 0;
+  let d = today, n = 0, bridged = 0;
   for (let i = 0; i < WALK_CAP * 7; i++) {        // same belt-and-braces cap as the week walks
-    if (done.has(d)) n++;
-    else if (!dayAway(periods, d)) break;         // a plain missed day ends the run
+    if (done.has(d)) { n++; bridged = 0; }
+    else if (dayAway(periods, d)) {
+      if (bridged >= MAX_BRIDGE) break;           // the trip has swallowed the run
+      bridged++;                                  // an away today spends bridge like any other
+    }
+    else if (d !== today) break;                  // a plain missed day ends the run
+    // else: today itself, still unticked this morning — no cost, no credit
     d = addDays(d, -1);
   }
   return n;

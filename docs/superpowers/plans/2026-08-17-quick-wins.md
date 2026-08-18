@@ -32,13 +32,24 @@ New pure helpers in model.js (both tested):
 - `dailyStreak(log, actId, periods, today)` → consecutive-day count of `done` entries for
   the activity ending at `today` (or `yesterday` if today is unchecked — a morning must not
   read as a broken streak). A missing day does NOT break the streak when that day was an
-  away day (`dayAway ≠ null`) — travel's every-other-day rhythm keeps streaks alive.
+  away day (`dayAway ≠ null`) — travel's every-other-day rhythm keeps streaks alive — but
+  the bridge is **BOUNDED**: at most `MAX_BRIDGE = 2` *consecutive* missed away days keep a
+  streak alive (one every-other-day gap plus one day of slack), and any `done` day resets
+  the counter. A plain (non-away) missed day still breaks the run immediately. Both away
+  types (`travel` and `off`) bridge identically. The bound is what stops a 34-day trip with
+  zero entries from preserving a stale streak — the old run is gone by day 3 of the trip —
+  and it stops the unchecked-morning grace from stacking on top of a trip.
 
-Render in today.js, after the date-header card, a `.pcard` "THIS WEEK" section:
-- "Teaching week N" (omit if null)
+Render in today.js, after the date-header card, a `.pcard` "THIS WEEK" section (on an away
+day the `.abanner` is the headline, so the card renders AFTER the banner):
+- "Teaching week N" (omit if null — including when `date` is past `year.end`)
 - One line per active cycle-rhythm activity: "Logic of English — 2 of 3–4 this cycle"
-  with an ok/warn chip (done ≥ targetMin → ok "on pace"; else neutral until the cycle's
-  last 3 days, warn only then).
+  with a **capacity-aware** ok/warn chip. The cycle's real capacity is
+  `cycleCap = weekCapacity(act, cs.start, periods, cycle) + weekCapacity(act, cs.start + 7d, …)`
+  and `fullCap` is the same sum computed against `periods = []`:
+  - `cycleCap <= 0` → neutral chip "paused" (a paused cycle can NEVER warn);
+  - else `target = max(1, round(cs.targetMin × cycleCap / fullCap))`, ok "on pace" when
+    `done ≥ target`, otherwise neutral until the cycle's last 3 days, warn only then.
 - One line per active daily-rhythm activity with streak ≥ 3: "Singapore Math — 🔥 12-day
   streak". (Singapore is still `planned`, so this line appears the day it's activated —
   state that in the report, it is NOT a bug that it's absent now.)
@@ -47,10 +58,24 @@ Render in today.js, after the date-header card, a `.pcard` "THIS WEEK" section:
 ## Tests
 
 - teachingWeekNumber: week 1 at year.start; away-week skipped (majority-away week returns
-  null and doesn't increment the count for later weeks); resumes after a trip.
+  null and doesn't increment the count for later weeks); resumes after a trip; null past
+  `year.end`.
 - dailyStreak: plain run; today-unchecked-morning keeps yesterday's streak; single away-day
-  gap bridged; non-away gap breaks; empty log → 0.
+  gap bridged; non-away gap breaks; empty log → 0; **bounded bridge** — a 34-day trip with
+  no entries drops to 0 by day 3, an every-other-day pattern DURING a trip keeps counting,
+  a plain missed day after a trip breaks, a 20-day `off` block with nothing → 0.
 - Existing 70 stay green.
+
+## Review corrections (2026-08-17, quality review of d4ab903)
+
+Applied after the first implementation and re-reviewed against this spec: month-label
+threshold `MIN_LABEL_SPAN` 3 → **4** (a 3-column month still collides at 390px); the
+capacity-aware pace chip above (a cycle spent entirely on an off block must read "paused",
+never "behind"); the bounded `MAX_BRIDGE = 2` streak bridge above; `teachingWeekNumber`
+returns null past `year.end`; `.track .tl` is layered above the hit layer so subject names
+stay selectable; the hit layer drops `aria-hidden` and exposes ONE keyboard-reachable
+column (the current week, else the first) as `role="button" tabindex="0"` with
+Enter/Space opening its card.
 
 ## Verify & ship
 

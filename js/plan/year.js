@@ -109,11 +109,18 @@ function trackFor(a, wks, away, today) {
 // ONE delegated listener (see wire()), and the selected column doubles as the
 // highlight band. It repeats the .tgrid metrics exactly (repeat(n, 1fr) with a
 // 1px gap), so a column and the cells under it line up to the pixel.
-// aria-hidden: this is a pointer affordance over a view-only chart; the info
-// card it opens carries the real controls (‹ › ✕, Edit trip).
+// Keyboard: exposing 55 tab stops would be hostile, so exactly ONE column is
+// reachable — this week's, or the first if the year hasn't started — as a
+// role=button with Enter/Space (wire()). From there the arrow keys walk the
+// year and Escape closes, so the whole layer is operable without a pointer.
 function hitHtml(wks) {
-  return `<div class="yhit" style="--n:${wks.length}" aria-hidden="true">${wks
-    .map(w => `<i data-w="${esc(w)}"${w === openWeek ? ' class="yband"' : ''}></i>`).join('')}</div>`;
+  const mon = mondayOf(todayStr());
+  const kb = wks.includes(mon) ? mon : wks[0];
+  return `<div class="yhit" style="--n:${wks.length}">${wks.map(w => {
+    const cls = w === openWeek ? ' class="yband"' : '';
+    const key = w === kb ? ' role="button" tabindex="0" aria-label="Select week"' : '';
+    return `<i data-w="${esc(w)}"${cls}${key}></i>`;
+  }).join('')}</div>`;
 }
 
 // Month labels under the tracks, each spanning its own weeks so they line up.
@@ -132,7 +139,9 @@ export function monthGroups(wks) {
 // either end of the school year — keeps its column span (the axis has to stay
 // aligned with the tracks) but drops its LABEL: on a phone the year's first
 // partial Aug and the full Sep next to it overprint each other otherwise.
-export const MIN_LABEL_SPAN = 3;
+// 4, not 3: at 390px a column is ~5px, so a 3-column month gets ~15px for a
+// 3-letter label at 9px type — still clipped, still colliding with its neighbour.
+export const MIN_LABEL_SPAN = 4;
 export function axisHtml(wks) {
   return `<div class="yaxis" style="--n:${wks.length}">${monthGroups(wks)
     .map(g => `<span style="grid-column:span ${g.n}">${g.n < MIN_LABEL_SPAN ? '' : MON[g.m]}</span>`)
@@ -418,6 +427,16 @@ function wire(el) {
     const col = e.target.closest ? e.target.closest('[data-w]') : null;
     if (!col) return;
     openWeek = openWeek === col.dataset.w ? null : col.dataset.w;  // same column closes
+    renderYear();
+  });
+  // The one keyboard-reachable column is an <i role=button>, so the browser
+  // focuses it but gives it none of a real button's Enter/Space activation —
+  // same gap the time-away list rows have, handled the same way.
+  const kb = el.querySelector('.yhit i[role="button"]');
+  if (kb) kb.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();                     // Space would otherwise page-scroll
+    openWeek = openWeek === kb.dataset.w ? null : kb.dataset.w;
     renderYear();
   });
   el.querySelectorAll('[data-ystep]').forEach(b =>

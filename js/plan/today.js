@@ -6,6 +6,7 @@ import { store, catLabel, evLabel } from '../state.js';
 import {
   todayStr, addDays, dayIdx, isWorkDay, dayStatus, dayAway, daysBetween, nextSession,
   currentCur, cycleStats, doneOn, actTotal, okCls, teachingWeekNumber, dailyStreak,
+  weekCapacity,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 
@@ -91,10 +92,22 @@ function chips(dateStr) {
 const MIN_STREAK = 3;              // below this a "streak" is just two good days
 const LAST_DAYS = 3;               // warn only inside the cycle's last 3 days
 
-// done >= targetMin -> "on pace"; otherwise stay neutral until the cycle is
-// nearly over, because being 1 of 3 on day two says nothing yet.
-function paceChip(cs, dateStr) {
-  if (cs.done >= cs.targetMin) return `<span class="pchip ok">on pace</span>`;
+// The chip is measured against what the cycle could ACTUALLY hold, not the
+// nominal target: a fortnight spent on a trip or an off block has less room,
+// and a cycle with no room at all reads "paused" and can never say "behind" —
+// the plan itself cancelled that work, so scolding the family for it is a bug.
+// Above zero the target scales with the surviving capacity; done >= it is "on
+// pace", otherwise stay neutral until the cycle is nearly over, because being
+// 1 of 3 on day two says nothing yet.
+function paceChip(act, cs, dateStr) {
+  const p = plan.data;
+  const cap = ps => weekCapacity(act, cs.start, ps, p.parentCycle)
+                  + weekCapacity(act, addDays(cs.start, 7), ps, p.parentCycle);
+  const cycleCap = cap(p.periods), fullCap = cap([]);
+  if (cycleCap <= 0) return `<span class="pchip">paused</span>`;
+  const target = fullCap > 0
+    ? Math.max(1, Math.round(cs.targetMin * cycleCap / fullCap)) : cs.targetMin;
+  if (cs.done >= target) return `<span class="pchip ok">on pace</span>`;
   return dateStr >= addDays(cs.end, -(LAST_DAYS - 1)) ? `<span class="pchip warn">behind</span>` : '';
 }
 
@@ -108,7 +121,7 @@ export function thisWeekHtml(dateStr) {
     const cs = cycleStats(a, dateStr, p.parentCycle, p.log);
     const target = `${cs.targetMin}${cs.targetMax > cs.targetMin ? `–${cs.targetMax}` : ''}`;
     lines.push(`<div class="twline"><span><b>${esc(a.name || a.id)}</b> — ${cs.done} of ${
-      target} this cycle</span>${paceChip(cs, dateStr)}</div>`);
+      target} this cycle</span>${paceChip(a, cs, dateStr)}</div>`);
   }
 
   for (const a of p.activities.filter(a => a.status === 'active' && a.rhythm?.kind === 'daily')) {
@@ -129,13 +142,15 @@ export function renderToday() {
   const status = dayStatus(plan.data.periods, today);
 
   let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}</div></div>`;
-  h += thisWeekHtml(today);
-
+  // On an away day the banner IS the headline for the day, so the weekly
+  // summary falls in behind it; on a normal day it sits right under the date.
+  const week = thisWeekHtml(today);
   let items = [];
   if (status.away) {
     h += `<div class="pcard abanner"><div class="phead">${AWAY_ICON[status.type] || '✈'} ${
-      esc(awayLabel(status))} · day ${status.dayN} of ${status.total}</div></div>`;
+      esc(awayLabel(status))} · day ${status.dayN} of ${status.total}</div></div>${week}`;
   } else {
+    h += week;
     items = timedFor(today);
     for (const it of items) {
       const st = statusOf(today, it);

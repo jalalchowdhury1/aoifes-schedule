@@ -430,7 +430,7 @@ test('doneOn finds a done log entry for a date', () => {
 });
 
 // ── "This week" helpers (Today card) ─────────────────────────
-import { teachingWeekNumber, dailyStreak } from '../js/plan/model.js';
+import { teachingWeekNumber, dailyStreak, MAX_BRIDGE } from '../js/plan/model.js';
 
 const YR = { label: 'y', start: '2026-08-17', end: '2027-08-31' };   // 08-17 is a Monday
 const twPlan = periods => ({ year: YR, periods });
@@ -459,8 +459,10 @@ test('teachingWeekNumber: 3 away days still teach, 4 do not (same rule as target
   assert.equal(teachingWeekNumber(four, '2026-08-31'), 2);        // the away week is skipped
 });
 
-test('teachingWeekNumber: null before the year starts, and on a malformed plan', () => {
+test('teachingWeekNumber: null before the year starts, past year.end, and on a malformed plan', () => {
   assert.equal(teachingWeekNumber(twPlan([]), '2026-08-10'), null);
+  assert.equal(teachingWeekNumber(twPlan([]), '2027-08-31'), 55);      // last day of the year
+  assert.equal(teachingWeekNumber(twPlan([]), '2027-09-01'), null);    // one day past it
   assert.equal(teachingWeekNumber({ year: { start: 'nope' }, periods: [] }, '2026-08-17'), null);
   assert.equal(teachingWeekNumber(null, '2026-08-17'), null);
   assert.equal(teachingWeekNumber(twPlan([]), 'nope'), null);
@@ -493,4 +495,47 @@ test('dailyStreak: empty or malformed log is 0', () => {
   assert.equal(dailyStreak([], 'sm', [], '2026-08-18'), 0);
   assert.equal(dailyStreak(null, 'sm', [], '2026-08-18'), 0);
   assert.equal(dailyStreak([{ activityId: 'sm', status: 'done' }], 'sm', [], '2026-08-18'), 0);
+});
+
+// ── Bounded away-day bridge (review correction) ──────────────
+// An away day with nothing logged keeps a streak alive, but only for
+// MAX_BRIDGE consecutive days: a 5-week trip with zero entries must not still
+// be advertising the run the family earned before the flight.
+const range = (from, n, id = 'sm') =>
+  Array.from({ length: n }, (_, i) => ({ date: addDays(from, i), activityId: id, status: 'done' }));
+
+const TRIP34 = [{ id: 'p1', start: '2026-09-07', end: '2026-10-10', type: 'travel', label: 'Dhaka' }];
+const RUN12 = range('2026-08-26', 12);                 // Aug 26 – Sep 6, ends the day before
+
+test('dailyStreak: MAX_BRIDGE is 2 — a 34-day trip with no entries drops the run by day 3', () => {
+  assert.equal(MAX_BRIDGE, 2);
+  assert.equal(dailyStreak(RUN12, 'sm', TRIP34, '2026-09-06'), 12);   // last day before the trip
+  assert.equal(dailyStreak(RUN12, 'sm', TRIP34, '2026-09-07'), 12);   // trip day 1
+  assert.equal(dailyStreak(RUN12, 'sm', TRIP34, '2026-09-08'), 12);   // day 2 — bridge spent
+  assert.equal(dailyStreak(RUN12, 'sm', TRIP34, '2026-09-09'), 0);    // day 3 — bridge exceeded
+  assert.equal(dailyStreak(RUN12, 'sm', TRIP34, '2026-10-10'), 0);    // and stays gone
+});
+
+test('dailyStreak: every-other-day work DURING a trip keeps the run counting', () => {
+  const log = ['2026-09-07', '2026-09-09', '2026-09-11', '2026-09-13']
+    .map(date => ({ date, activityId: 'sm', status: 'done' }));
+  assert.equal(dailyStreak(log, 'sm', TRIP34, '2026-09-13'), 4);      // one-day gaps bridge
+  assert.equal(dailyStreak(log, 'sm', TRIP34, '2026-09-14'), 4);      // morning after, unticked
+  assert.equal(dailyStreak(log, 'sm', TRIP34, '2026-09-15'), 4);      // two missed away days
+  assert.equal(dailyStreak(log, 'sm', TRIP34, '2026-09-16'), 0);      // three -> gone
+});
+
+test('dailyStreak: a plain missed day after the trip breaks the run immediately', () => {
+  const log = [...range('2026-10-08', 3)];             // Oct 8, 9, 10 (trip ends Oct 10)
+  assert.equal(dailyStreak(log, 'sm', TRIP34, '2026-10-11'), 3);      // morning grace at home
+  assert.equal(dailyStreak(log, 'sm', TRIP34, '2026-10-12'), 0);      // a whole home day missed
+});
+
+test('dailyStreak: a 20-day off block with nothing logged is 0, same as travel', () => {
+  const off = [{ id: 'p9', start: '2026-11-02', end: '2026-11-21', type: 'off' }];
+  const run = range('2026-10-24', 10);                 // Oct 24 – Nov 2 ... ends on day 1 of the block
+  assert.equal(dailyStreak(run, 'sm', off, '2026-11-02'), 10);
+  assert.equal(dailyStreak(run, 'sm', off, '2026-11-04'), 10);        // bridge holds 2 days
+  assert.equal(dailyStreak(run, 'sm', off, '2026-11-05'), 0);
+  assert.equal(dailyStreak(run, 'sm', off, '2026-11-21'), 0);
 });
