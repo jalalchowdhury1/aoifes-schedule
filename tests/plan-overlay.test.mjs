@@ -330,6 +330,11 @@ test('applyOverlay: renders the clash banner exactly once and updates it in plac
 // synchronous re-entry no-ops instead of recursing. What it CANNOT prove is
 // real asynchronous record delivery and CPU behaviour over time — that is the
 // 61-second browser check in the plan addendum.
+// Also NOT covered here: applyOverlay's `isDragging()` early return. Flipping it
+// needs an ESM module mock of the frozen js/grid.js, and `mock.module()` requires
+// --experimental-test-module-mocks, which would break the mandated bare
+// `node --test`. Pinned by a real pointerdown/move/up drag in the browser check
+// instead (zero dot writes while the button is down) — see the plan addendum.
 class FakeMutationObserver {
   static instances = [];
   constructor(cb) {

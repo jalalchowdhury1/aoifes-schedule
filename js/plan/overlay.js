@@ -2,6 +2,7 @@
 // and a clash banner. Never mutates events; only appends elements into rendered DOM.
 import { fmt, esc, DAYS } from '../model.js';
 import { store, catLabel } from '../state.js';
+import { isDragging } from '../grid.js';
 import { todayStr, mondayOf, addDays, dayIdx, findClashes } from './model.js';
 import { plan } from './state.js';
 
@@ -20,10 +21,19 @@ const containers = () =>
   CONTAINER_IDS.map(id => document.getElementById(id)).filter(Boolean);
 
 let observer = null;
-let applying = false;   // reentrancy guard: never react to our own dot writes
+// Reentrancy guard. With a real browser's ASYNCHRONOUS record delivery this is
+// unreachable (measured: 0 hits) — the callback can never run while we are
+// mid-apply, which is exactly why draining takeRecords() below is the load-
+// bearing half. It stays for defense-in-depth and because the test stub
+// delivers records synchronously, where it IS the thing that stops recursion.
+let applying = false;
 let pending = false;    // microtask coalescing: one re-apply per burst
 
 export function applyOverlay() {
+  // Mid-drag renderGrid() rebuilds fire the observer; re-rendering the clash
+  // banner mid-drag shifts layout under the cursor and corrupts drop math
+  // (drops recorded ±0.5h off — measured). Dots return at drag end via onUp→notify.
+  if (isDragging()) return;
   if (applying) return;
   if (!plan.data) return;
   const roots = containers();

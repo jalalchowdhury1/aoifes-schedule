@@ -40,6 +40,11 @@ Static vanilla app, no build step, no dependencies, no framework:
 - css/plan.css — all planner styles (tokens.css vars reused)
 - scripts/planner-backup.sh — nightly Drive snapshot of both KV blobs
 
+The mobile Day view (#dayview, frozen js/dayview.js) is a parallel render path —
+any grid visual (dots, badges) must also cover #dayview; it re-renders outside
+onChange (60s timer in main.js + day-tab taps), which is why overlay.js re-applies
+via MutationObserver.
+
 ## Data contract (NEVER break)
 - KV key `aoifes_schedule`; localStorage `aoife_v3`
 - Shape: {events:[{id:"e<n>",cat,day:0-6 Mon-first,start,end,note,name}], altSun:bool, catLabels:{}}
@@ -85,10 +90,6 @@ Static vanilla app, no build step, no dependencies, no framework:
   "Cancel" → "Tap again to cancel", disarmed by any other interaction); validation
   errors render inline as `.form-err` (`.form-err.warn` for advisory notices).
   tests/plan-today.test.mjs and tests/plan-year.test.mjs poison all three globals.
-- The mobile Day view (#dayview, frozen js/dayview.js) is a parallel render path —
-  any grid visual (dots, badges) must also cover #dayview; it re-renders outside
-  onChange (60s timer in main.js + day-tab taps), which is why overlay.js re-applies
-  via MutationObserver.
 - `sanitizePlan` (js/plan/model.js) drops malformed records on both load paths and
   preserves unknown fields (forward-compatible).
 - Claude sessions may edit this blob directly via the endpoints (bulk-load

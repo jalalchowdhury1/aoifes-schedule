@@ -100,4 +100,32 @@ wait both the Day-view dot and the two week-grid dots are still there**, with ex
 3 dot writes during that window (one re-apply for the one timer tick) — no observer
 feedback loop. Print re-checked for `ptab=week`, `ptab=today` and no-attr: `#dayview`
 and `.ov-dot` are `display:none`, `.grid-outer` is visible, one letter-landscape page,
-byte-identical across all three. No CSS was touched.
+identical length and identical content modulo PDF `/ID` + creation-date metadata
+(Chromium PDFs aren't byte-reproducible) across all three. No CSS was touched.
+
+### Review round: skip the re-apply mid-drag
+
+The observer made `applyOverlay` reachable from a place it never was before: a
+`renderGrid()` that runs *during* a drag — `onMove` calls it on **every**
+`pointermove`. `renderClashBanner()` inserts/updates `#ov-clash` **above**
+`.grid-outer`, and the dragged event's own position changes the clash set, so the
+banner grows/collapses mid-drag and reflows the grid under the cursor. `ptr.rects` was
+snapshotted at drag *start*, so the drop is scored against stale geometry: the block
+lands half an hour off where it was aimed. `applyOverlay` therefore returns early on
+`isDragging()` (imported from the frozen js/grid.js, which is side-effect-free at
+module scope). Nothing is lost: `onUp` calls `notify()`, which re-renders and
+re-applies the dots at drag end.
+
+Measured, dragging a 10–11 block down two hours past a clashing activity slot
+(headless Chromium, desktop pointer, same page served with and without the guard):
+
+| | dot writes during drag | banner height mid-drag | grid shift under cursor | drop error |
+|---|---|---|---|---|
+| without the guard | 48 | 31.4px → 0 | 39.4px (0.60h) | **+0.5h** |
+| with the guard | 0 | 31.4px → 31.4px | 0.0px | 0.0h |
+
+Both runs end with the dot back on the block, confirming `onUp`→`notify()` restores it.
+
+Not unit-tested: flipping `isDragging()` needs an ESM module mock, and
+`mock.module()` requires `--experimental-test-module-mocks`, which would break the
+mandated bare `node --test`. The browser comparison above is the pin instead.
