@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { todayStr, addDays, dayIdx, sanitizePlan } from '../js/plan/model.js';
+import { todayStr, addDays, dayIdx, sanitizePlan, isWorkDay } from '../js/plan/model.js';
 
 // today.js imports js/plan/state.js, which touches localStorage/fetch/document
 // at module scope on commit() (see tests/plan-state.test.mjs). renderToday()
@@ -83,10 +83,13 @@ test('renderToday: (a) normal day — Mama chip via isWorkDay, timed block + bot
   loadPlan([]);
   renderToday();
   const html = viewToday.innerHTML;
-  // 2026-08-11 is the real dutyStart in prod; today (2026-08-17, Monday) is a
-  // work day under it (last day of the Tue->Mon stretch).
-  assert.match(html, /Mama: work day/);
-  assert.doesNotMatch(html, /Mama: home day/);
+  // 2026-08-11 is the real dutyStart in prod (see loadPlan's parentCycle);
+  // derive the expected chip from the same model the app uses rather than
+  // pinning it to a specific weekday, so this test stays green every day.
+  const expected = isWorkDay({ dutyStart: '2026-08-11' }, TODAY) ? 'Mama: work day' : 'Mama: home day';
+  const other = expected === 'Mama: work day' ? 'Mama: home day' : 'Mama: work day';
+  assert.match(html, new RegExp(expected));
+  assert.doesNotMatch(html, new RegExp(other));
   assert.match(html, /class="tblock/);
   assert.match(html, /Quran reading/);
   assert.doesNotMatch(html, /abanner/);
