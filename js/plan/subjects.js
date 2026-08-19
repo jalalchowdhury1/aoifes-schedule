@@ -79,7 +79,10 @@ function timelineHtml(a) {
         else if (dd > 0) chip = `<span class="pchip ok">${dw} wk${dw > 1 ? 's' : ''} early</span>`;
         else chip = `<span class="pchip warn">${dw} wk${dw > 1 ? 's' : ''} late</span>`;
       }
-      right = `plan ${b ? fmtDate(b) : '—'} · now ${r.finish ? fmtDate(r.finish) : '—'}${chip ? ' ' + chip : ''}`;
+      // Each plan/now pair is one no-wrap segment so a narrow phone wraps
+      // between segments, never inside a date.
+      right = `<span class="tl-seg"><span class="tl-lbl">plan</span> ${b ? fmtDate(b) : '—'}</span>` +
+        `<span class="tl-seg"><span class="tl-lbl">now</span> ${r.finish ? fmtDate(r.finish) : '—'}</span>${chip}`;
     }
     return `<div class="${cls}"><span class="tl-nm">${esc(r.label)}</span><span class="tl-dt">${right}</span></div>`;
   }).join('');

@@ -120,16 +120,21 @@
 .sctl-l { font-size: 11px; color: var(--text-sub); display: flex; gap: 5px; align-items: center; margin: 0; }
 .sctl-l select { width: auto; font-size: 12px; padding: 4px 6px; }
 
-/* 📅 Timeline (Subjects): per-chapter plan-vs-now rows */
-.tl { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
-.tl-row { display: flex; justify-content: space-between; align-items: baseline;
-  flex-wrap: wrap; gap: 2px 8px; font-size: 11px; color: var(--text-sub);
-  padding: 3px 6px; border-radius: 6px; }
-.tl-row.cur { background: var(--bg-input); font-weight: 600; }
-.tl-nm { flex: 1 1 auto; min-width: 0; }
-.tl-dt { flex: 0 0 auto; display: inline-flex; flex-wrap: wrap; gap: 2px 5px;
-  align-items: baseline; max-width: 100%; }   /* wraps internally on 320px phones instead of bleeding past the card */
-.tl-ok { color: var(--ok); font-weight: 700; }
+/* 📅 Timeline (Subjects): per-chapter plan-vs-now rows.
+   Deliberate two-line stack — chapter name, then a dates line — so a narrow
+   phone never depends on flex-wrap luck; hairlines between rows for scanning. */
+.tl { margin-top: 8px; }
+.tl-row { padding: 7px 2px 6px; }
+.tl-row + .tl-row { border-top: 1px solid var(--line); }
+.tl-nm { display: block; font-size: 12px; color: var(--text); line-height: 1.35; }
+.tl-dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px;
+  margin-top: 3px; font-size: 11px; color: var(--text-sub); }
+.tl-seg { white-space: nowrap; }        /* a plan/now pair never breaks mid-date */
+.tl-lbl { color: var(--text-muted); font-size: 10px; }
+.tl-row.cur { background: var(--bg-input); border-left: 3px solid var(--el, var(--border));
+  border-radius: 0 6px 6px 0; padding-left: 8px; padding-right: 6px; }
+.tl-row.cur .tl-nm { font-weight: 600; }
+.tl-ok { color: var(--ok); font-weight: 700; font-size: 11px; }
 
 /* ── Year (v2: view-only tracks + time-away list + sheet) ── */
 .ytracks { position: relative; }
