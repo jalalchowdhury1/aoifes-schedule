@@ -104,7 +104,10 @@ via MutationObserver.
   GET /api/plan-get?prev=1 (undo) or a dated file from Drive
   "Aoife Planner Backups", then POST it back via /api/plan-save.
 - Rollback tags: v2-pre-planner (before any planner code), planner-v1 (first planner
-  release, week-marking model) and planner-v2 (day-precise time-away redesign).
+  release, week-marking model), planner-v2 (day-precise time-away redesign),
+  planner-v2.1 (year tap targets/This-Week card), planner-v2.2 (week dots +
+  Yesterday receipt), planner-v2.3 (Day-view dots + observer), planner-v2.4
+  (bot interop), planner-v2.5 (live re-sync + one-off ghosts + write merge).
 
 ## Live re-sync (planner-v2.5, 2026-08-18)
 Both blobs are written from OUTSIDE this browser (the Telegram bot writes
@@ -124,8 +127,12 @@ bot's "Arya art" one-off nor a status it had logged.
 - **Planner blob** (`syncPlan`): applies only when `pendingSaves === 0` AND
   (no local save yet OR `remote.savedAt >= lastLocalSaveAt`, the ISO stamp we
   wrote). A missing/garbled remote `savedAt` counts as OLDER once we have
-  written. `lastLocalSaveAt` is stamped at write time, so a save that never
-  lands leaves remote "older" and local wins until one does.
+  written. `lastLocalSaveAt` is stamped at write time. A save that never landed
+  sets `saveFailed`; the NEXT sync round re-posts the exact failed bytes
+  (`lastAttempt` replay) BEFORE reading remote, so an offline tap is published,
+  not discarded, once the tab is back online (~≤120s). savedAt values are
+  compared as `Date.parse` epochs, never as strings (the Python bot writes a
+  different fractional-digit width than the browser).
 - **Schedule blob has NO `savedAt` — deliberate.** VERIFIED that the read path
   ignores unknown top-level keys (fetchRemote reads only events/altSun/
   catLabels; `sanitizeEvents` only filters the events array), but `serialize()`
@@ -136,19 +143,45 @@ bot's "Arya art" one-off nor a status it had logged.
   DIFFERING fetched blob is by definition the newer one. Hence the extra
   `saveFailed` flag (a POST that rejected or returned non-2xx keeps local
   authoritative until one lands — the planner gets this free from `savedAt`).
-- **`holdSync(fn)`** (js/state.js): a view registers a predicate for an
-  interaction a fetched blob must not interrupt, so state.js never imports the
-  frozen view layer. Two are registered in tabs.js: `isDragging` (mid-drag the
-  store is ahead of KV with no save yet, and a re-render under the cursor
-  corrupts drop math — commit 49ba699) and an open editor (`!locked && (addMode
-  || selId)`, whose inputs are read on change/blur). Neither latches.
+- **`holdSync(fn)`** (js/sync.js — shared registry, consulted by BOTH stores):
+  a view registers a predicate for an interaction a fetched blob must not
+  interrupt; neither store imports the frozen view layer. Three are registered
+  in tabs.js: `isDragging` (a re-render under the cursor corrupts drop math —
+  commit 49ba699), `!locked && addMode` (half-filled add form), and
+  document.activeElement being an INPUT/SELECT/TEXTAREA (protects the legend
+  rename and the Year sheet mid-typing). A merely SELECTED block does not hold.
+  None of these latch — each clears itself when the interaction ends.
 - **Identical blobs are dropped before notify()** (`serializePlan` / `serialize`
   compare), so a poll never re-renders under the family's scroll, tab or typing.
 - Fetch errors are silent and never clobber local state; offline is normal.
-- **Freshness caption**: `syncInfo.at` advances on every round that REACHED KV
-  (applied or not — the question it answers is "is this tab stale?"), and Today
-  renders `· synced 3:42pm` under the date. A no-change round patches that one
-  node (`paintSynced`) instead of re-rendering the view.
+- **Freshness caption**: per-blob stamps in js/sync.js (`markSynced`); Today
+  renders `· synced 3:42pm` from `syncedAt()` = the OLDER of the two blobs'
+  last-reached-KV stamps, so a tab whose template sync is failing cannot hide
+  behind a fresh planner round. A no-change round patches that one node
+  (`paintSynced`) instead of re-rendering the view.
+
+## Concurrent writes & merge (planner-v2.5)
+Two writers share these blobs every evening: family phones (whole-blob POST from
+a tab snapshot) and the Telegram bot (aoife-school-bot). Whole-blob writes mean
+a stale snapshot can erase another writer's entry (measured pre-merge windows:
+≤120s for a visible tab, ~0.3–0.7s on tab wake, unbounded for a hidden tab).
+
+- `savePlan` sends `{data, base}` where `base` = the savedAt of the blob this
+  tab last applied. api/plan-save.js (planner-owned, NOT the frozen api/save.js)
+  compares epochs: when `base` ≠ current.savedAt it runs `mergePlanWrites`
+  (pure, canonical in js/plan/model.js, imported by the endpoint) — unions into
+  the incoming blob any of current's overrides rows (key: id, else
+  date|action|start|end|name fingerprint) and log rows (key: date +
+  eventId||activityId) that the incoming snapshot is missing, and bumps the
+  matching curriculum `done` counter for unioned log rows so the denormalized
+  count stays consistent with the log.
+- **Protected: appends** (the realistic collision — two ✓s, a bot add + a tab
+  tap). **Not protected: concurrent deletions** — an un-tap racing another
+  writer may be resurrected by the union. Accepted trade-off: a resurrected
+  tick is visible and re-fixable; a silently deleted entry is neither.
+- A body WITHOUT `base` (the bot's single fast writes, Claude sessions, old
+  clients) keeps plain overwrite semantics — the bot reads-then-writes within
+  ~1s, so its exposure is the sub-second window only.
 
 ## One-off blocks on the grid (planner-v2.5)
 A dated override (`action:'add'` with numeric `start`/`end`) for the CURRENT

@@ -180,6 +180,67 @@ export function sanitizePlan(raw) {
 
 export const serializePlan = p => JSON.stringify(p);
 
+// ── Concurrent-write merge (server side) ────────────────────
+// Two writers share one blob: this browser and the Telegram bot. A save carries
+// the `savedAt` of the blob it was edited on top of (`base`); when KV has moved
+// on since, api/plan-save calls this instead of blind last-write-wins.
+//
+// It is an APPEND union, deliberately narrow: rows present in `current` but
+// absent from `incoming` are carried over, because in practice both writers
+// only ever ADD — a tap logs a row, the bot writes a one-off. Nothing else is
+// reconciled: `incoming` wins outright on activities, periods, parentCycle and
+// every other field, since those are edited in one place at a time.
+//
+// KNOWN LIMIT — deletion resurrection: an untick (log splice) or a deleted
+// override that races another writer's save comes back, because "absent from
+// incoming" cannot tell "they deleted it" from "they never saw it". The family
+// re-taps; nothing is lost, something is restored. That trade is deliberate:
+// losing a logged session is silent, an unexpected ✓ is visible. See AGENTS.md.
+export function mergePlanWrites(current, incoming) {
+  if (!incoming || typeof incoming !== 'object') return incoming;
+  if (!current || typeof current !== 'object') return incoming;
+
+  // An override written by the bot has an id; one hand-written by a script may
+  // not, so fall back to the shape of the row itself.
+  const ovKey = o => (o && o.id != null && o.id !== ''
+    ? `id:${o.id}`
+    : `fp:${o?.date}|${o?.action}|${o?.start}|${o?.end}|${o?.name}`);
+  // One status per thing per day is the log's own invariant (logTimed replaces
+  // in place), so (date, owner) is the row's identity.
+  const logKey = e => `${e?.date}|${e?.eventId || e?.activityId || ''}`;
+
+  const inOv = Array.isArray(incoming.overrides) ? incoming.overrides : [];
+  const curOv = Array.isArray(current.overrides) ? current.overrides : [];
+  const inLog = Array.isArray(incoming.log) ? incoming.log : [];
+  const curLog = Array.isArray(current.log) ? current.log : [];
+
+  const haveOv = new Set(inOv.map(ovKey));
+  const haveLog = new Set(inLog.map(logKey));
+  const addOv = curOv.filter(o => !haveOv.has(ovKey(o)));
+  const addLog = curLog.filter(e => !haveLog.has(logKey(e)));
+  if (!addOv.length && !addLog.length) return incoming;    // nothing to carry over
+
+  const out = { ...incoming, overrides: [...inOv, ...addOv], log: [...inLog, ...addLog] };
+
+  // A paced check advances a curriculum's `done` in the same write that logs
+  // it. Re-attaching the row alone would leave the chain one session behind, so
+  // each carried-over row replays its own increment. Never mutates `incoming`.
+  const bumps = addLog.filter(e => e && e.curriculum);
+  if (bumps.length) {
+    out.activities = (Array.isArray(incoming.activities) ? incoming.activities : []).map(a => ({ ...a }));
+    for (const row of bumps) {
+      const act = out.activities.find(a => (row.activityId
+        ? a.id === row.activityId
+        : Array.isArray(a.chain) && a.chain.some(c => c && c.id === row.curriculum)));
+      if (!act || !Array.isArray(act.chain)) continue;
+      if (!act.chain.some(c => c && c.id === row.curriculum)) continue;
+      act.chain = act.chain.map(c =>
+        (c && c.id === row.curriculum ? { ...c, done: (c.done || 0) + 1 } : c));
+    }
+  }
+  return out;
+}
+
 // ── Weekly capacity: how many sessions this activity expects in a week ──
 // `periods` is the day-precise time-away list — always an array (sanitizePlan
 // guarantees it on both load paths); every caller in the app passes plan.periods.
