@@ -14,7 +14,9 @@ for (const k of ['alert', 'confirm', 'prompt'])
   globalThis[k] = () => { throw new Error(`${k}() must never be called by the planner`); };
 
 const { fmtRange, perName, awayCls, weekAway, nextWorkStart, monthGroups, axisHtml,
-        MIN_LABEL_SPAN } = await import('../js/plan/year.js');
+        MIN_LABEL_SPAN, coreRows, shortName, weekAttHtml } = await import('../js/plan/year.js');
+const { store } = await import('../js/state.js');
+const { plan } = await import('../js/plan/state.js');
 
 // ── fmtRange ────────────────────────────────────────────────
 test('fmtRange: collapses the month only when both ends share month AND year', () => {
@@ -140,4 +142,86 @@ test('axisHtml: a month under MIN_LABEL_SPAN columns keeps its slot but drops it
   const three = axisHtml(['2026-11-02', '2026-11-09', '2026-11-16']);
   assert.doesNotMatch(three, />Nov</);
   assert.match(three, /<span style="grid-column:span 3"><\/span>/);   // slot kept
+});
+
+// ── Core attendance rows (per-subject, replaces the old synthetic Core row) ──
+// The rows are DERIVED from the template, so a category with no recurring
+// blocks (Art, Mama Classes) never gets one and no second list has to be kept.
+const ACTS = [
+  { id: 'core-ruhamah', type: 'ongoing', status: 'active', cat: 'ruhamah', cls: 'r' },
+  { id: 'core-hala',    type: 'ongoing', status: 'active', cat: 'hala',    cls: 'h' },
+  { id: 'core-quran',   type: 'ongoing', status: 'active', cat: 'quran',   cls: 'q' },
+  { id: 'core-art',     type: 'ongoing', status: 'active', cat: 'art',     cls: 'a' },
+  { id: 'core-mama',    type: 'ongoing', status: 'active', cat: 'barakot', cls: 'b' },
+  { id: 'loe',   name: 'Logic of English', type: 'paced', status: 'active', cls: 'b' },
+  { id: 'gone',  type: 'ongoing', status: 'parked', cat: 'quran', cls: 'q' },
+];
+const EVENTS = [
+  { id: 'e999' },                                          // the corrupt live record
+  { id: 'q1', cat: 'quran', day: 0, start: 10, end: 11 },
+  { id: 'q3', cat: 'quran', day: 2, start: 10, end: 11 },
+  { id: 'q5', cat: 'quran', day: 4, start: 10, end: 11 },
+  { id: 'r1', cat: 'ruhamah', day: 0, start: 11, end: 13 },
+  { id: 'r2', cat: 'ruhamah', day: 1, start: 11, end: 12 },
+  { id: 'h2', cat: 'hala', day: 1, start: 14, end: 15 },
+];
+
+test('coreRows: active ongoing activities whose category is actually on the grid', () => {
+  const rows = coreRows(ACTS, EVENTS).map(a => a.id);
+  // Art and Mama Classes have no recurring blocks in this template, so no row;
+  // a paced subject belongs to the progress tracks, not here; parked is out.
+  assert.deepEqual(rows, ['core-ruhamah', 'core-hala', 'core-quran']);
+  // Put an Art block on the grid and its row appears — no code change needed.
+  assert.deepEqual(
+    coreRows(ACTS, [...EVENTS, { id: 'a1', cat: 'art', day: 4, start: 15, end: 16 }]).map(a => a.id),
+    ['core-ruhamah', 'core-hala', 'core-quran', 'core-art']);
+  // Empty / malformed inputs are rows-less, never a throw.
+  assert.deepEqual(coreRows(ACTS, []), []);
+  assert.deepEqual(coreRows(null, EVENTS), []);
+  assert.deepEqual(coreRows(ACTS, null), []);
+});
+
+test('shortName: the part before the em dash, whole name when there is none', () => {
+  assert.equal(shortName('Ruhama — ELA/Math'), 'Ruhama');
+  assert.equal(shortName('Miss Hala — Arabic/Islamic Studies'), 'Miss Hala');
+  assert.equal(shortName('Quran'), 'Quran');
+  // Never returns an empty label: a name with nothing before the dash keeps
+  // the whole string rather than collapsing to a nameless row.
+  assert.equal(shortName('— Nothing before it'), '— Nothing before it');
+  assert.equal(shortName(''), '');
+});
+
+// ── The info card's attendance line ─────────────────────────
+const WK = '2026-08-17';                       // a Monday
+const ok = (date, eventId) => ({ date, eventId, status: 'done', timed: true });
+const setup = (over = {}) => {
+  store.events = EVENTS;
+  store.catLabels = {};
+  plan.data = { year: { label: 'y', start: WK, end: '2027-08-31' },
+                activities: ACTS, periods: [], overrides: [], log: [], ...over };
+};
+
+test('weekAttHtml: one "subject done/expected" per core row, in track order', () => {
+  setup({ log: [ok('2026-08-17', 'r1'), ok('2026-08-18', 'r2'), ok('2026-08-17', 'q1')] });
+  assert.equal(weekAttHtml(WK, '2026-08-18'),
+    '<div class="pmeta">Ruhama 2/2 · Miss Hala 0/1 · Quran 1/3</div>');
+});
+
+test('weekAttHtml: a week that has not happened yet says nothing', () => {
+  setup({ log: [] });
+  assert.equal(weekAttHtml('2026-08-24', '2026-08-18'), '');
+  // The CURRENT week counts as begun, even on its Monday.
+  assert.match(weekAttHtml(WK, WK), /Quran 0\/3/);
+});
+
+test('weekAttHtml: away days shrink the denominators, a full week away drops the line', () => {
+  setup({ periods: [{ id: 'p1', start: '2026-08-17', end: '2026-08-18', type: 'travel' }],
+          log: [ok('2026-08-19', 'q3')] });
+  // Mon+Tue gone: Ruhama and Hala have nothing left this week and drop out,
+  // and Quran is down to Wed+Fri, of which only Wednesday was ticked.
+  assert.equal(weekAttHtml(WK, '2026-08-21'), '<div class="pmeta">Quran 1/2</div>');
+  setup({ periods: [{ id: 'p2', start: '2026-08-15', end: '2026-08-30', type: 'off' }] });
+  assert.equal(weekAttHtml(WK, '2026-08-21'), '');
+  plan.data = null;
+  assert.equal(weekAttHtml(WK, '2026-08-21'), '');
 });

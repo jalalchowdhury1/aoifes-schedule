@@ -398,6 +398,51 @@ export function dailyStreak(log, actId, periods, today) {
   return n;
 }
 
+// ── Core attendance: template sessions expected vs logged done ──
+// The Year view's core rows answer "how much of this subject's regular week
+// actually happened". Both halves are counted from primary data — the template
+// and the log — never from a denormalized counter:
+//   expected = the category's template events whose weekday falls on a day of
+//              this week that is NOT away and NOT cancelled by a `skip`
+//              override. A fully-away week therefore expects nothing, which is
+//              what stops a trip from reading as a wall of missed sessions.
+//   done     = log rows dated Mon..Sun with status 'done' whose eventId is one
+//              of those template events. A dated one-off (`action:'add'`) logs
+//              against its OWN id, so it can never inflate a template's count.
+// `done` is deliberately NOT filtered by away day: work the family did anyway
+// on a travel day is work, and the kinder failure mode is to credit it (same
+// reasoning as dailyStreak's away-day bridge). The cost is that `done` can
+// exceed `expected`, which the Year view reads as a full week — correct — and
+// that a WHOLLY away week with sessions logged still shows expected 0. That
+// last case is unreachable from the app (the Today view shows no timed blocks
+// on an away day, so there is nothing to tap) and is accepted.
+// `plan` is the whole blob rather than three arguments: periods, overrides and
+// log are always read together here, and splitting them only invited a caller
+// to forget one (an omitted `overrides` silently over-counts `expected`).
+export function weekAttendance(events, plan, weekStart, cat) {
+  // A null category must match NOTHING. `e.cat === cat` would otherwise let
+  // `undefined === undefined` pair a category-less caller with the corrupt
+  // {id:'e999'} record the live blob still carries — the same trap that made
+  // today.js's statusOf tick unrelated blocks (see its `it.activityId != null`).
+  if (cat == null) return { expected: 0, done: 0 };
+  const evs = (Array.isArray(events) ? events : []).filter(e =>
+    e && e.cat === cat && Number.isInteger(e.day) && e.day >= 0 && e.day <= 6);
+  const overrides = Array.isArray(plan?.overrides) ? plan.overrides : [];
+  const log = Array.isArray(plan?.log) ? plan.log : [];
+  const ids = new Set(evs.map(e => e.id));
+  let expected = 0;
+  for (const e of evs) {
+    const date = addDays(weekStart, e.day);
+    if (dayAway(plan?.periods, date)) continue;
+    if (overrides.some(o => o && o.action === 'skip' && o.date === date && o.eventId === e.id)) continue;
+    expected++;
+  }
+  const end = addDays(weekStart, 6);
+  const done = log.filter(x => x && x.status === 'done' && x.eventId != null &&
+    ids.has(x.eventId) && x.date >= weekStart && x.date <= end).length;
+  return { expected, done };
+}
+
 // ── Clash detection over template events ────────────────────
 export const findClashes = (events, slot) =>
   events.filter(e => e.day === slot.day && e.start < slot.end && e.end > slot.start);

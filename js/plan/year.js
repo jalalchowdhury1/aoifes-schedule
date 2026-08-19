@@ -5,10 +5,11 @@
 // phones, where a native dialog is easy to mis-tap and impossible to style.
 // Deleting is a two-tap button; validation errors render inline as .form-err.
 import { esc } from '../model.js';
+import { store, catLabel } from '../state.js';
 import {
   todayStr, addDays, mondayOf, weeksBetween, daysBetween, dayStatus,
   weekCapacity, actTotal, actDone, projectFinish, tripImpact, isWorkDay,
-  okCls, WALK_CAP,
+  weekAttendance, okCls, WALK_CAP,
 } from './model.js';
 import { plan, addPeriod, updatePeriod, deletePeriod } from './state.js';
 
@@ -73,33 +74,80 @@ export const awayCls = aw =>
   !aw.total ? '' : (aw.off > aw.travel ? 'offw' : 'trip') + (aw.total === 7 ? '' : '-part');
 
 // ── Tracks ──────────────────────────────────────────────────
+// Away hatching and the selection outline are identical on every row, whatever
+// drew the cell underneath them, so both kinds of track finish a cell here.
+function cellHtml(cls, aw, w) {
+  const ac = awayCls(aw);
+  if (ac) cls.push(ac);
+  if (w === openWeek) cls.push('sel');
+  return `<i class="${cls.join(' ')}" data-w="${w}"></i>`;
+}
+
+const trackShell = (cls, name, sub, cells) =>
+  `<div class="track ${cls ? okCls(cls) : ''}"><div class="tl"><b>${esc(name)}</b><small>${esc(sub)}</small></div>
+    <div class="tgrid" style="--n:${cells.length}">${cells.join('')}</div></div>`;
+
 function trackFor(a, wks, away, today) {
   const p = plan.data;
   const total = actTotal(a);
   const paced = a.type === 'paced' && a.status === 'active' && total > 0;
   let remainingDone = actDone(a);
   const mon = mondayOf(today);
-  let cells = '';
-  wks.forEach((w, i) => {
-    const aw = away[i];
+  const cells = wks.map((w, i) => {
     const cls = [];
     if (paced) {
       const cap = weekCapacity(a, w, p.periods, p.parentCycle);
       if (w <= mon && remainingDone > 0) { cls.push('fill'); remainingDone -= cap; }
       else if (cap > 0) cls.push('plan');
-    } else if (a.status === 'active' && aw.total < 7) {
+    } else if (a.status === 'active' && away[i].total < 7) {
       cls.push(w <= mon ? 'fill' : 'plan');
     }
-    const ac = awayCls(aw);
-    if (ac) cls.push(ac);
-    if (w === openWeek) cls.push('sel');
-    cells += `<i class="${cls.join(' ')}" data-w="${w}"></i>`;
+    return cellHtml(cls, away[i], w);
   });
   const fin = paced ? projectFinish(a, today, p) : null;
   const sub = fin ? (fin.done ? 'finished 🎉' : `→ ${fmtDay(fin.date)}`)
     : a.type === 'paced' && total === 0 ? 'counts pending' : '';
-  return `<div class="track ${a.cls ? okCls(a.cls) : ''}"><div class="tl"><b>${esc(a.name || a.id)}</b><small>${esc(sub)}</small></div>
-    <div class="tgrid" style="--n:${wks.length}">${cells}</div></div>`;
+  return trackShell(a.cls, a.name || a.id, sub, cells);
+}
+
+// ── Core attendance rows (replaces the old synthetic "Core" row) ──
+// One row per core subject instead of one lump: "Core — ELA·Math·Arabic·Quran"
+// filled solid for every past week whatever actually happened, which made it
+// decoration. These cells are counted from the template and the log.
+//
+// The rows are DERIVED, never listed: every ACTIVE `ongoing` activity whose
+// category actually appears in the weekly template. That is why Art and Mama
+// Classes stay off this page — they have no recurring blocks to attend — and
+// why putting a new category on the grid is enough to grow a row here, with no
+// code change and no second list to keep in sync.
+export function coreRows(activities, events) {
+  const cats = new Set((Array.isArray(events) ? events : [])
+    .filter(e => e && e.cat != null).map(e => e.cat));
+  return (Array.isArray(activities) ? activities : []).filter(a =>
+    a && a.type === 'ongoing' && a.status === 'active' && a.cat != null && cats.has(a.cat));
+}
+
+// The same title rule as everywhere else (Subjects cards, the grid, the calendar
+// sync): the activity's own name, else the legend's label for its category. A
+// rename in the legend therefore reaches this page too.
+const coreName = a => a.name || catLabel(a.cat);
+
+function coreTrack(a, wks, away, today) {
+  const p = plan.data, mon = mondayOf(today);
+  const cells = wks.map((w, i) => {
+    const { expected, done } = weekAttendance(store.events, p, w, a.cat);
+    const cls = [];
+    // A week that expects nothing — the whole week away, or the subject not on
+    // the grid at all — claims no colour, only its hatch. Anything else is at
+    // least planned; a week that has begun then shows how much of it landed.
+    if (expected > 0) {
+      if (w > mon || done === 0) cls.push('plan');
+      else if (done >= expected) cls.push('fill');
+      else cls.push('plan', 'att-part');
+    }
+    return cellHtml(cls, away[i], w);
+  });
+  return trackShell(a.cls, coreName(a), '', cells);
 }
 
 // ── Tap layer ───────────────────────────────────────────────
@@ -149,8 +197,29 @@ export function axisHtml(wks) {
 }
 
 const legendHtml = () =>
-  `<div class="yleg"><span><i class="yl fill"></i>done</span><span><i class="yl plan"></i>planned</span>
+  `<div class="yleg"><span><i class="yl fill"></i>done</span><span><i class="yl att-part"></i>some done</span>
+    <span><i class="yl plan"></i>planned</span>
     <span><i class="yl trip"></i>travel</span><span><i class="yl offw"></i>off</span></div>`;
+
+// "Ruhama — ELA/Math" -> "Ruhama". Three subjects share one line on a 390px
+// phone, where the full legend names do not fit; the part before the em dash is
+// what the family calls each of them anyway. A name without one is kept whole.
+export const shortName = n => String(n).split('—')[0].trim() || String(n).trim();
+
+// The card's attendance line: "Quran 1/3 · Ruhama 2/5 · Miss Hala 1/3", the
+// numbers behind the coloured cells directly above it. Only for a week that has
+// already begun — "Quran 0/3" for a week that has not happened yet would read
+// as three missed sessions. Subjects with nothing scheduled that week are
+// dropped rather than printed as 0/0.
+export function weekAttHtml(weekStart, today) {
+  if (!plan.data || weekStart > mondayOf(today)) return '';
+  const p = plan.data;
+  const parts = coreRows(p.activities, store.events).map(a => {
+    const { expected, done } = weekAttendance(store.events, p, weekStart, a.cat);
+    return expected ? `${esc(shortName(coreName(a)))} ${done}/${expected}` : '';
+  }).filter(Boolean);
+  return parts.length ? `<div class="pmeta">${parts.join(' · ')}</div>` : '';
+}
 
 // ── Week info card (read-only; the only way it changes data is by
 //    opening the sheet, which the family still has to confirm with Save) ──
@@ -167,11 +236,11 @@ function cardHtml(wks, away) {
       <button type="button" class="ystep" data-ystep="1" aria-label="Next week"${i === wks.length - 1 ? ' disabled' : ''}>›</button>
       <button type="button" class="ycls" id="ycard-x" aria-label="Close">✕</button></span></div>`;
   if (!aw.total) {
-    h += `<div class="pmeta">School all week</div>
+    h += `<div class="pmeta">School all week</div>${weekAttHtml(openWeek, todayStr())}
       <div class="sctl"><button type="button" data-yadd="${openWeek}">+ Time away this week</button></div>`;
   } else {
     const names = aw.list.map(x => `${ICON[x.type]} ${esc(perName(x))}`).join(' · ');
-    h += `<div class="pmeta">${plural(aw.total, 'away day')} · ${names}</div>
+    h += `<div class="pmeta">${plural(aw.total, 'away day')} · ${names}</div>${weekAttHtml(openWeek, todayStr())}
       <div class="sctl">${aw.list.map(x => `<button type="button" data-yedit="${esc(x.id)}">${
         aw.list.length > 1 ? `Edit ${ICON[x.type]} ${esc(perName(x))}` : 'Edit trip'}</button>`).join('')}</div>`;
   }
@@ -370,13 +439,13 @@ export function renderYear() {
 
   const rows = p.activities.filter(a =>
     ['paced', 'target', 'external'].includes(a.type) && a.status === 'active');
-  const core = { id: 'core', name: 'Core — ELA·Math·Arabic·Quran', cls: 'r', type: 'ongoing', status: 'active' };
 
   let h = `<div class="pcard"><div class="phead">${esc(p.year.label)} · year-round</div>
     <div class="pmeta"><span class="pchip">tap a week for details</span></div></div>
     <div class="pcard ytracks"><div class="ytw" style="--tp:${todayPct.toFixed(2)}">
     <div class="ynow"><i>today</i></div>`;
-  for (const a of [...rows, core]) h += trackFor(a, wks, away, today);
+  for (const a of rows) h += trackFor(a, wks, away, today);
+  for (const a of coreRows(p.activities, store.events)) h += coreTrack(a, wks, away, today);
   // The tap layer is written LAST inside .ytw so it paints over the cells it
   // covers (the today line keeps its own z-index above the band).
   h += `${hitHtml(wks)}</div>${axisHtml(wks)}${legendHtml()}</div>`;

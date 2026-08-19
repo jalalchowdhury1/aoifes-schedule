@@ -111,7 +111,42 @@ via MutationObserver.
   release, week-marking model), planner-v2 (day-precise time-away redesign),
   planner-v2.1 (year tap targets/This-Week card), planner-v2.2 (week dots +
   Yesterday receipt), planner-v2.3 (Day-view dots + observer), planner-v2.4
-  (bot interop), planner-v2.5 (live re-sync + one-off ghosts + write merge).
+  (bot interop), planner-v2.5 (live re-sync + one-off ghosts + write merge),
+  planner-v2.6 (per-subject attendance rows on the Year view).
+
+## Year view: per-subject attendance rows (planner-v2.6, 2026-08-18)
+The Year page used to end in one synthetic row, "Core — ELA·Math·Arabic·Quran",
+filled solid for every past week no matter what actually happened — decoration,
+not data. It is replaced by ONE ROW PER CORE SUBJECT, counted from the template
+and the log by the pure `weekAttendance(events, plan, weekStart, cat)`
+(js/plan/model.js): `expected` = that category's template events whose weekday
+lands on a day of the week that is neither away nor cancelled by a `skip`
+override; `done` = that week's `status:'done'` log rows whose eventId is one of
+them. `done` is NOT away-filtered (work done on a travel day still counts, same
+spirit as dailyStreak's bridge); a one-off logs against its own override id, so
+it can never inflate a subject.
+- **The rows are DERIVED, never listed** (`coreRows` in js/plan/year.js): every
+  ACTIVE `ongoing` activity whose `cat` actually appears in the weekly template.
+  Art and Mama Classes therefore stay off this page — no recurring blocks to
+  attend — and putting a category on the grid grows its row with no code change
+  and no second list to keep in sync. Titles use the app-wide rule
+  `name || catLabels[cat] || CATS[cat].label`, so a legend rename reaches this
+  page exactly like it reaches the calendar sync.
+- **Cells**: `fill` when done ≥ expected, `plan` + `att-part` (half) when some
+  landed, `plan` when none did or the week is still ahead, and nothing at all
+  when expected is 0 — a wholly-away week draws hatch only, so a trip never
+  reads as a wall of misses. Away hatching and the selection outline unchanged.
+- **`att-part` is a ::after on the TOP half, not a background-image on the
+  bottom.** A cell can be partly done AND partly away, and `background-image`
+  holds one layer: a bottom-aligned colour would silently erase the
+  bottom-aligned partial hatch, or be erased by it. Splitting the halves keeps
+  both signals readable, and a FULL-week hatch can never collide because a
+  wholly away week is never marked partial. VERIFIED in both themes.
+- The week info card gains one line — `Ruhama 2/5 · Miss Hala 1/3 · Quran 1/3`
+  (`shortName` = the part before the em dash) — for weeks that have begun only:
+  `0/3` on a week that has not happened yet would read as three missed sessions.
+- The tracks stay VIEW-ONLY: a tap opens the card and saves nothing (verified by
+  watching for any /api/plan-save request during the headless run).
 
 ## Live re-sync (planner-v2.5, 2026-08-18)
 Both blobs are written from OUTSIDE this browser (the Telegram bot writes

@@ -157,6 +157,21 @@
 .tgrid i.offw-part { background-image: repeating-linear-gradient(135deg, var(--text-sub) 0 2px, transparent 2px 3.5px); }
 .tgrid i.trip-part, .tgrid i.offw-part { background-size: 100% 50%;
            background-repeat: no-repeat; background-position: bottom; }
+/* Core attendance: a week where SOME of the scheduled sessions were ticked.
+   The cell keeps the plan tint (--eb, from .plan) and takes the row's own
+   colour across its TOP half.
+   A ::after, not a background-image, and TOP-aligned, both for the same
+   reason: this cell can also be partly away (2 of 3 done in a week with two
+   travel days), and `background-image` holds ONE layer — a second rule setting
+   it would silently erase the hatch, or be erased by it. A pseudo-element in
+   the half the bottom-aligned hatch does not occupy keeps both readable. A
+   FULL-week hatch can never collide: a wholly-away week expects nothing, so it
+   is never marked partial in the first place (see weekAttendance).
+   --el is unset on .yl (the legend swatch has no category), hence the fallback. */
+.tgrid i.att-part, .yl.att-part { position: relative; }
+.tgrid i.att-part::after, .yl.att-part::after {
+           content: ''; position: absolute; inset: 0 0 50% 0;
+           background-color: var(--el, var(--accent-soft)); border-radius: 2px 2px 0 0; }
 /* Red is the today line's colour, so the selected week uses plain ink. */
 .tgrid i.sel { outline: 1.5px solid var(--text); outline-offset: 0; }
 /* Tap layer: one transparent, full-height column per week over the tracks.
@@ -181,7 +196,7 @@
 .yl { display: inline-block; width: 13px; height: 10px; border-radius: 2px;
       background-color: var(--bg-input); }
 .yl.fill { background-color: var(--accent-soft); }
-.yl.plan { background-color: var(--bg-input); border: 1px solid var(--border); }
+.yl.plan, .yl.att-part { background-color: var(--bg-input); border: 1px solid var(--border); }
 .ycoll { line-height: 1.5; }
 
 /* Week info card (read-only) */

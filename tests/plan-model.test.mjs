@@ -539,3 +539,110 @@ test('dailyStreak: a 20-day off block with nothing logged is 0, same as travel',
   assert.equal(dailyStreak(run, 'sm', off, '2026-11-05'), 0);
   assert.equal(dailyStreak(run, 'sm', off, '2026-11-21'), 0);
 });
+
+// ── weekAttendance: the Year page's per-subject core rows ────
+import { weekAttendance } from '../js/plan/model.js';
+
+// The live template, in miniature: Quran Mon/Wed/Fri, Ruhama Mon/Tue/Thu/Sat/Sun,
+// Miss Hala Tue/Wed/Thu — plus the corrupt {id:'e999'} record the real blob has
+// carried since v1, which must never be counted as a session.
+const TPL = [
+  { id: 'e999' },
+  { id: 'q1', cat: 'quran', day: 0, start: 10, end: 11 },
+  { id: 'q3', cat: 'quran', day: 2, start: 10, end: 11 },
+  { id: 'q5', cat: 'quran', day: 4, start: 10, end: 11 },
+  { id: 'r1', cat: 'ruhamah', day: 0, start: 11, end: 13 },
+  { id: 'r2', cat: 'ruhamah', day: 1, start: 11, end: 12 },
+  { id: 'r4', cat: 'ruhamah', day: 3, start: 11, end: 12 },
+  { id: 'r6', cat: 'ruhamah', day: 5, start: 11, end: 13 },
+  { id: 'r7', cat: 'ruhamah', day: 6, start: 11, end: 13 },
+  { id: 'h2', cat: 'hala', day: 1, start: 14, end: 15 },
+  { id: 'h3', cat: 'hala', day: 2, start: 14, end: 15 },
+  { id: 'h4', cat: 'hala', day: 3, start: 14, end: 15 },
+];
+const WK = '2026-08-17';                      // a Monday
+const ok = (date, eventId, status = 'done') => ({ date, eventId, status, timed: true });
+const att = (plan, cat, week = WK) => weekAttendance(TPL, plan, week, cat);
+
+test('weekAttendance: an empty log expects the full week and counts nothing done', () => {
+  const p = { periods: [], overrides: [], log: [] };
+  assert.deepEqual(att(p, 'quran'), { expected: 3, done: 0 });
+  assert.deepEqual(att(p, 'ruhamah'), { expected: 5, done: 0 });
+  assert.deepEqual(att(p, 'hala'), { expected: 3, done: 0 });
+  // A missing plan, or one with no lists at all, must not throw.
+  assert.deepEqual(weekAttendance(TPL, null, WK, 'quran'), { expected: 3, done: 0 });
+  assert.deepEqual(weekAttendance(null, {}, WK, 'quran'), { expected: 0, done: 0 });
+  // A category with no template events at all (Art) is a 0/0 row, not an error.
+  assert.deepEqual(att(p, 'art'), { expected: 0, done: 0 });
+  // A NULL category matches nothing — never the corrupt {id:'e999'} record,
+  // whose own `cat` is undefined too.
+  assert.deepEqual(att(p, undefined), { expected: 0, done: 0 });
+  assert.deepEqual(att(p, null), { expected: 0, done: 0 });
+});
+
+test('weekAttendance: every scheduled session ticked is a full week', () => {
+  const p = { periods: [], overrides: [],
+    log: [ok('2026-08-17', 'q1'), ok('2026-08-19', 'q3'), ok('2026-08-21', 'q5')] };
+  assert.deepEqual(att(p, 'quran'), { expected: 3, done: 3 });
+});
+
+test('weekAttendance: a partial week, and only `done` counts', () => {
+  const p = { periods: [], overrides: [], log: [
+    ok('2026-08-17', 'r1'),                    // Mon done
+    ok('2026-08-18', 'r2'),                    // Tue done
+    ok('2026-08-20', 'r4', 'partial'),         // Thu half-finished — not done
+    ok('2026-08-22', 'r6', 'missed'),          // Sat missed
+  ] };
+  assert.deepEqual(att(p, 'ruhamah'), { expected: 5, done: 2 });
+});
+
+test('weekAttendance: the log is windowed to Mon..Sun of the week asked for', () => {
+  const p = { periods: [], overrides: [], log: [
+    ok('2026-08-16', 'r7'),                    // the Sunday BEFORE this week
+    ok('2026-08-17', 'r1'),                    // in
+    ok('2026-08-23', 'r7'),                    // the Sunday of this week — in
+    ok('2026-08-24', 'r1'),                    // next Monday
+  ] };
+  assert.deepEqual(att(p, 'ruhamah'), { expected: 5, done: 2 });
+  assert.deepEqual(att(p, 'ruhamah', '2026-08-24'), { expected: 5, done: 1 });
+});
+
+test('weekAttendance: away days reduce `expected`, so a trip is never a wall of misses', () => {
+  // Mon–Wed away: Quran loses Mon+Wed (Fri survives), Hala loses Tue+Wed.
+  const p = { periods: [{ id: 'p1', start: '2026-08-17', end: '2026-08-19', type: 'travel' }],
+              overrides: [], log: [ok('2026-08-21', 'q5')] };
+  assert.deepEqual(att(p, 'quran'), { expected: 1, done: 1 });
+  assert.deepEqual(att(p, 'hala'), { expected: 1, done: 0 });
+  // A whole week away expects nothing at all — the row draws hatch only.
+  const off = { periods: [{ id: 'p2', start: '2026-08-15', end: '2026-08-30', type: 'off' }],
+                overrides: [], log: [] };
+  assert.deepEqual(att(off, 'quran'), { expected: 0, done: 0 });
+  assert.deepEqual(att(off, 'ruhamah'), { expected: 0, done: 0 });
+});
+
+test('weekAttendance: a `skip` override cancels that one session', () => {
+  const p = { periods: [], overrides: [
+    { date: '2026-08-19', action: 'skip', eventId: 'q3' },     // Wed Quran cancelled
+    { date: '2026-08-19', action: 'skip', eventId: 'h3' },     // Wed Hala cancelled
+  ], log: [ok('2026-08-17', 'q1'), ok('2026-08-21', 'q5')] };
+  assert.deepEqual(att(p, 'quran'), { expected: 2, done: 2 });  // 2 of 2 = a full week
+  assert.deepEqual(att(p, 'hala'), { expected: 2, done: 0 });
+  // A skip on a DIFFERENT date, or for a different event, changes nothing.
+  const other = { periods: [], overrides: [
+    { date: '2026-08-26', action: 'skip', eventId: 'q3' },      // next week
+    { date: '2026-08-19', action: 'skip', eventId: 'r4' },      // another subject
+    { date: '2026-08-19', action: 'add', eventId: 'q3' },       // not a skip
+  ], log: [] };
+  assert.deepEqual(att(other, 'quran'), { expected: 3, done: 0 });
+});
+
+test('weekAttendance: a dated one-off logs against its own id and never inflates a row', () => {
+  // The bot's "Arya art" one-off (override id x1) is logged done in this very
+  // week. It belongs to no template event, so no core row may count it.
+  const p = { periods: [],
+    overrides: [{ date: '2026-08-18', action: 'add', id: 'x1', name: 'Arya art', start: 15.5, end: 16.5 }],
+    log: [ok('2026-08-18', 'x1'), { date: '2026-08-18', activityId: 'loe', status: 'done' }] };
+  assert.deepEqual(att(p, 'quran'), { expected: 3, done: 0 });
+  assert.deepEqual(att(p, 'ruhamah'), { expected: 5, done: 0 });
+  assert.deepEqual(att(p, 'art'), { expected: 0, done: 0 });
+});
