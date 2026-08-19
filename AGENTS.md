@@ -317,6 +317,16 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   same marker. **Throttle and quota 403s are deliberately NOT caught**:
   `rateLimitExceeded`/`quotaExceeded` stay FAIL, because a sync that quietly
   stopped publishing must page someone.
+- **VERIFIED live 2026-08-18 22:56** (all three setup steps done that evening,
+  and the log shows the three WAITING states clearing in order): first real sync
+  inserted 12 events (11 template + the "Arya art" one-off; the corrupt `e999`
+  record was dropped as designed), `accessRole=writer`, every RRULE on the right
+  weekday, Google applying `-04:00` itself. Re-running immediately reported
+  `insert=0 patch=0 delete=0 unchanged=12` — **idempotent**. The
+  never-touch-their-events rule was proved live, not just in tests: an event
+  inserted WITHOUT the aoifeSync property (parked in 2020 so nobody saw it)
+  survived a full sync run untouched and was then removed. No `periods` existed
+  in the plan that night, so the all-day path has unit coverage only.
 - **launchd**: `com.jalal.aoife-gcal-sync` at 04:10 daily (overnight window per
   the house rule; after the 03:40 backup, before the 05:00 fleet check).
   `com.jalal.aoife-gcal-sync.plist` is committed at the repo root and installed
