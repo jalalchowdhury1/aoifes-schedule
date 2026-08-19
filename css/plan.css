@@ -127,7 +127,8 @@
   padding: 3px 6px; border-radius: 6px; }
 .tl-row.cur { background: var(--bg-input); font-weight: 600; }
 .tl-nm { flex: 1 1 auto; min-width: 0; }
-.tl-dt { flex: 0 0 auto; white-space: nowrap; display: inline-flex; gap: 5px; align-items: baseline; }
+.tl-dt { flex: 0 0 auto; display: inline-flex; flex-wrap: wrap; gap: 2px 5px;
+  align-items: baseline; max-width: 100%; }   /* wraps internally on 320px phones instead of bleeding past the card */
 .tl-ok { color: var(--ok); font-weight: 700; }
 
 /* ── Year (v2: view-only tracks + time-away list + sheet) ── */
