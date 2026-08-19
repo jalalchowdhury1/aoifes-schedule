@@ -120,6 +120,16 @@
 .sctl-l { font-size: 11px; color: var(--text-sub); display: flex; gap: 5px; align-items: center; margin: 0; }
 .sctl-l select { width: auto; font-size: 12px; padding: 4px 6px; }
 
+/* 📅 Timeline (Subjects): per-chapter plan-vs-now rows */
+.tl { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.tl-row { display: flex; justify-content: space-between; align-items: baseline;
+  flex-wrap: wrap; gap: 2px 8px; font-size: 11px; color: var(--text-sub);
+  padding: 3px 6px; border-radius: 6px; }
+.tl-row.cur { background: var(--bg-input); font-weight: 600; }
+.tl-nm { flex: 1 1 auto; min-width: 0; }
+.tl-dt { flex: 0 0 auto; white-space: nowrap; display: inline-flex; gap: 5px; align-items: baseline; }
+.tl-ok { color: var(--ok); font-weight: 700; }
+
 /* ── Year (v2: view-only tracks + time-away list + sheet) ── */
 .ytracks { position: relative; }
 /* The today line is absolutely positioned inside .ytw, which spans exactly the
