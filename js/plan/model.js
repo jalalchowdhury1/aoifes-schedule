@@ -127,6 +127,9 @@ export function timelineRows(act) {
   // const, this function only runs post-evaluation). Same belt-and-braces
   // reasoning as WALK_CAP's own comment: a fat-fingered lastUnit (or a huge
   // hand-built chain) must never build 500k row objects and hang a tab.
+  // Beyond the cap, per-row dates are computed from the visible rows only —
+  // the projectFinish agreement holds for real curricula (≤~30 rows), not
+  // for pathological spans.
   for (const c of act?.chain || []) {
     if (rows.length >= WALK_CAP) break;
     const total = sessionsCount(c);
@@ -150,10 +153,16 @@ export function timelineRows(act) {
   return rows;
 }
 
-// Per-row projected finish dates from the SAME week-walk as projectFinish, so
-// the last unfinished row lands on exactly projectFinish's date (unit-pinned):
-// the breakdown can never contradict the card's headline. A row's finish is
-// the Sunday of the week its cumulative remaining sessions are covered.
+// Per-row projected finish dates from the SAME week-walk as projectFinish.
+// INVARIANT (precise): the last unfinished row WITH SESSIONS DEFINED
+// (sessions > 0) lands on exactly projectFinish's date (unit-pinned) — the
+// breakdown can never contradict the card's headline. 0-session placeholder
+// rows (a chapter waiting for its counts) pass through with finish null and
+// are EXCLUDED from that contract, so a consumer must scan with
+// `reverse().find(r => !r.complete && r.sessions > 0)`, never a bare
+// `!r.complete` — the bare form can land on a trailing placeholder instead
+// of the real last row. A row's finish (when set) is the Sunday of the week
+// its cumulative remaining sessions are covered.
 export function chainTimeline(act, fromDate, plan, horizon = 300) {
   const rows = timelineRows(act).map(r =>
     ({ ...r, complete: r.sessions > 0 && r.done >= r.sessions, finish: null }));

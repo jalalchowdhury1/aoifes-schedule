@@ -702,7 +702,10 @@ test('chainTimeline: last unfinished row lands EXACTLY on projectFinish (the inv
     const p = { periods, parentCycle: TL_CYC };
     for (const act of [TL_SM, TL_LOE]) {
       const rows = chainTimeline(act, '2026-08-19', p);
-      const last = [...rows].reverse().find(r => !r.complete);
+      // The idiom any consumer should copy: sessions > 0 excludes trailing
+      // 0-session placeholder rows, which pass through with finish null and
+      // are outside this contract (see the regression test below).
+      const last = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
       assert.equal(last.finish, projectFinish(act, '2026-08-19', p).date,
         `${act.id} with ${periods.length} periods`);
     }
@@ -810,6 +813,25 @@ test('chainTimeline: a zero-session (waiting-for-counts) row passes through with
   assert.equal(ch2.complete, false);
   const ch1 = rows.find(r => r.key === 'ch1');
   assert.equal(ch1.finish, projectFinish(act, '2026-08-19', plan).date);
+});
+
+test('chainTimeline: the invariant idiom excludes a trailing 0-session placeholder (regression)', () => {
+  // Same shape as above, but exercised through the actual consumer idiom:
+  // a bare `!r.complete` scan would pick ch2 (finish null) and silently
+  // contradict projectFinish. `sessions > 0` must be part of the filter.
+  const act = { id: 'wait2', rhythm: { kind: 'daily' }, travel: { mode: 'pause' },
+    chain: [
+      { id: 'ch1', name: 'Ch 1', pattern: 'tb-wb', lessons: 3, tests: 0, done: 0 },   // 6 sessions, in progress
+      { id: 'ch2', name: 'Ch 2', pattern: 'tb-wb', lessons: 0, tests: 0, done: 0 },   // 0 sessions, LAST
+    ] };
+  const plan = { periods: [], parentCycle: TL_CYC };
+  const rows = chainTimeline(act, '2026-08-19', plan);
+  const last = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
+  assert.equal(last.key, 'ch1');
+  assert.equal(last.finish, projectFinish(act, '2026-08-19', plan).date);
+  const ch2 = rows.find(r => r.key === 'ch2');
+  assert.equal(ch2.finish, null);
+  assert.equal(ch2.complete, false);
 });
 
 test('timelineRows: negative done clamps to 0', () => {
