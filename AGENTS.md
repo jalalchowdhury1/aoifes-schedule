@@ -18,7 +18,10 @@ Static vanilla app, no build step, no dependencies, no framework:
 - css/print.css — letter-landscape print, always the week grid
 - js/model.js — PURE (no DOM); constants, fmt/snap/clamps, defaults, serialize, sanitizeEvents
 - js/state.js — store + persistence + all mutations; sanitizes events on both load
-  paths; `syncSchedule()` live re-sync + the `holdSync()` guard registry
+  paths; `syncSchedule()` live re-sync (+ failed-save retry)
+- js/sync.js — tiny shared spine for BOTH stores' live re-sync: the `holdSync()`
+  predicate registry and the per-blob freshness stamps. No dependencies, so
+  neither store has to import the other or the frozen view layer
 - js/grid.js — week grid render, drag/resize/select (fine pointers only)
 - js/dayview.js — mobile tabs + day column + Day/Week toggle
 - js/editor.js — edit panel (desktop) / bottom sheet (mobile), add form, legend
@@ -27,7 +30,7 @@ Static vanilla app, no build step, no dependencies, no framework:
 - api/get.js, api/save.js — Vercel functions -> Upstash KV. DO NOT TOUCH.
 - aoife_schedule_3.html — v1-era standalone snapshot (localStorage-only, no lock,
   no /api). Kept for history; it drifts from the live app by design. DO NOT TOUCH.
-- js/plan/model.js — PURE planner model: dates/weeks/cycle math, session sequences, capacities, projections, stats, clash, sanitize
+- js/plan/model.js — PURE planner model: dates/weeks/cycle math, session sequences, capacities, projections, stats, clash, sanitize, `mergePlanWrites` (the endpoint's concurrent-write union)
 - js/plan/state.js — planner store, localStorage aoife_plan_v1, /api/plan-* I/O,
   mutations, `syncPlan()` live re-sync + `syncInfo` (the Today freshness caption)
 - js/plan/seed.js — PURE: the initial aoife_plan blob (honest as of 2026-08-16)
@@ -40,7 +43,7 @@ Static vanilla app, no build step, no dependencies, no framework:
   BOTH #grid and #dayview + clash banner; a MutationObserver re-applies them
   after any re-render (see below)
 - api/plan-get.js — GET aoife_plan (or ?prev=1 for undo copy)
-- api/plan-save.js — copy current -> aoife_plan_prev, then SET new
+- api/plan-save.js — copy current -> aoife_plan_prev, merge concurrent writes when the body carries `base`, then SET new
 - css/plan.css — all planner styles (tokens.css vars reused)
 - scripts/planner-backup.sh — nightly Drive snapshot of both KV blobs
 
@@ -141,8 +144,10 @@ bot's "Arya art" one-off nor a status it had logged.
   are ordered structurally instead: every mutation saves immediately, so with no
   POST in flight and none failed, KV holds exactly what the tab holds and any
   DIFFERING fetched blob is by definition the newer one. Hence the extra
-  `saveFailed` flag (a POST that rejected or returned non-2xx keeps local
-  authoritative until one lands — the planner gets this free from `savedAt`).
+  `saveFailed` flag: a POST that rejected or returned non-2xx keeps local
+  authoritative AND makes the next round re-publish it before reading, exactly
+  like the planner's `lastAttempt` replay. (The planner gets the "local is
+  authoritative" half free from `savedAt`; both need the retry half.)
 - **`holdSync(fn)`** (js/sync.js — shared registry, consulted by BOTH stores):
   a view registers a predicate for an interaction a fetched blob must not
   interrupt; neither store imports the frozen view layer. Three are registered
@@ -168,7 +173,10 @@ a stale snapshot can erase another writer's entry (measured pre-merge windows:
 
 - `savePlan` sends `{data, base}` where `base` = the savedAt of the blob this
   tab last applied. api/plan-save.js (planner-owned, NOT the frozen api/save.js)
-  compares epochs: when `base` ≠ current.savedAt it runs `mergePlanWrites`
+  compares the stored stamp verbatim: when `base` ≠ current.savedAt (the stamp
+  is stored as written, so exact inequality is the honest test — epoch parsing
+  belongs on the client, where two writers' precisions meet) it runs
+  `mergePlanWrites`
   (pure, canonical in js/plan/model.js, imported by the endpoint) — unions into
   the incoming blob any of current's overrides rows (key: id, else
   date|action|start|end|name fingerprint) and log rows (key: date +
@@ -182,6 +190,14 @@ a stale snapshot can erase another writer's entry (measured pre-merge windows:
 - A body WITHOUT `base` (the bot's single fast writes, Claude sessions, old
   clients) keeps plain overwrite semantics — the bot reads-then-writes within
   ~1s, so its exposure is the sub-second window only.
+- The endpoint IMPORTS the canonical `mergePlanWrites` rather than carrying a
+  copy. VERIFIED on a real preview deployment (2026-08-18): the project runs
+  Node 24.x, whose ESM syntax detection loads these extension-ful relative
+  imports with no package.json — echo write, merge write and undo copy all
+  behaved, and tests/plan-merge.test.mjs fails loudly if anyone inlines a copy.
+- Restoring after a bad concurrent write: GET /api/plan-get?prev=1 is the copy
+  taken immediately before the write that landed (the merge does not change
+  that), then POST it back WITHOUT a `base` field so it is applied verbatim.
 
 ## One-off blocks on the grid (planner-v2.5)
 A dated override (`action:'add'` with numeric `start`/`end`) for the CURRENT
