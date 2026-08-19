@@ -16,20 +16,26 @@ for (const k of ['alert', 'confirm', 'prompt'])
 // Minimal DOM stub: renderToday() only ever touches #view-today, setting its
 // innerHTML and (for click wiring) calling querySelectorAll on it.
 class FakeEl {
-  constructor() { this._html = ''; }
+  constructor() { this._html = ''; this._text = ''; }
   set innerHTML(v) { this._html = v; }
   get innerHTML() { return this._html; }
+  set textContent(v) { this._text = v; }
+  get textContent() { return this._text; }
   querySelectorAll() { return []; }
 }
 const viewToday = new FakeEl();
+// The freshness caption is patched in place between full renders (paintSynced),
+// so the stub has to serve that one node too.
+const psync = new FakeEl();
 globalThis.document = {
-  getElementById: id => (id === 'view-today' ? viewToday : null),
+  getElementById: id => (id === 'view-today' ? viewToday : id === 'psync' ? psync : null),
   dispatchEvent: () => {},
 };
 
 const { store } = await import('../js/state.js');
-const { plan } = await import('../js/plan/state.js');
-const { renderToday, fmtUntil, dailyVisible, thisWeekHtml, yesterdayHtml } = await import('../js/plan/today.js');
+const { plan, syncInfo } = await import('../js/plan/state.js');
+const { renderToday, fmtUntil, dailyVisible, thisWeekHtml, yesterdayHtml,
+        syncedCaption, paintSynced } = await import('../js/plan/today.js');
 
 // ── Pure helpers ─────────────────────────────────────────────
 test('fmtUntil: days under 2 weeks, weeks beyond', () => {
@@ -389,4 +395,48 @@ test('renderToday: the Yesterday receipt renders below the Tomorrow strip', () =
   assert.match(html, /Yesterday: ✓ Quran reading/);
   assert.ok(html.indexOf('Tomorrow:') < html.indexOf('Yesterday:'),
     'the Yesterday receipt must follow the Tomorrow strip');
+});
+
+// ── Freshness caption ("· synced HH:MM") ────────────────────
+// The bot writes this plan from outside the browser, so a tab that has not
+// re-read in an hour is showing yesterday's truth. The caption is how that
+// becomes visible instead of silently wrong.
+test('syncedCaption: renders the local wall-clock time, and nothing at all before the first round', () => {
+  assert.equal(syncedCaption(null), '');
+  assert.equal(syncedCaption(undefined), '');
+  assert.equal(syncedCaption('not a date'), '');
+  // Built from LOCAL components on both sides, so the assertion holds in any TZ.
+  assert.equal(syncedCaption(new Date(2026, 7, 18, 15, 42).toISOString()), '· synced 3:42pm');
+  assert.equal(syncedCaption(new Date(2026, 7, 18, 15, 0)), '· synced 3pm');
+  assert.equal(syncedCaption(new Date(2026, 7, 18, 9, 5).toISOString()), '· synced 9:05am');
+});
+
+test('renderToday: the caption rides in the date header and reflects the last sync', () => {
+  store.events = [];
+  loadPlan([]);
+  syncInfo.at = null;
+  renderToday();
+  assert.match(viewToday.innerHTML, /<span id="psync" class="psync"><\/span>/,
+    'an unsynced tab claims nothing');
+
+  syncInfo.at = new Date(2026, 7, 18, 14, 7).toISOString();
+  renderToday();
+  const html = viewToday.innerHTML;
+  assert.match(html, /<span id="psync" class="psync">· synced 2:07pm<\/span>/);
+  assert.ok(html.indexOf('psync') < html.indexOf('tblock') || !html.includes('tblock'),
+    'the caption sits in the header card, above the day');
+});
+
+test('paintSynced: updates the caption in place, with no re-render of the view', () => {
+  store.events = [];
+  loadPlan([]);
+  syncInfo.at = new Date(2026, 7, 18, 14, 7).toISOString();
+  renderToday();
+  const before = viewToday.innerHTML;
+
+  syncInfo.at = new Date(2026, 7, 18, 16, 30).toISOString();
+  paintSynced();
+
+  assert.equal(psync.textContent, '· synced 4:30pm');
+  assert.equal(viewToday.innerHTML, before, 'a 120s poll must not rebuild the page under the family');
 });

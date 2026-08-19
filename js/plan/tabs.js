@@ -2,9 +2,10 @@
 // hide the schedule chrome and show a planner view. Print safety is guaranteed
 // by plan.css's own @media print block (hide planner UI, force .grid-outer
 // visible), not by .no-print alone — so printing from any tab yields the week grid.
-import { initPlan, fetchPlanRemote, onPlanChange } from './state.js';
-import { onChange } from '../state.js';
-import { renderToday } from './today.js';
+import { initPlan, syncPlan, onPlanChange } from './state.js';
+import { onChange, store, syncSchedule, holdSync } from '../state.js';
+import { isDragging } from '../grid.js';
+import { renderToday, paintSynced } from './today.js';
 import { renderYear } from './year.js';
 import { renderSubjects } from './subjects.js';
 import { applyOverlay, initOverlay } from './overlay.js';
@@ -44,6 +45,30 @@ function renderViews() {
   queueMicrotask(applyOverlay);
 }
 
+// ── Live re-sync scheduler ───────────────────────────────────
+// Both blobs are written from outside this browser (the Telegram bot writes the
+// planner blob; another phone writes the template), so an open tab must re-read
+// them or it silently shows a frozen snapshot. One scheduler drives both: the
+// data-safety guards live in the two stores, the ENVIRONMENT rules live here.
+// Nothing polls in a background tab — a phone left on the fridge would otherwise
+// burn battery all day for a page nobody is looking at.
+export const SYNC_MS = 120000;
+
+export const runSync = () =>
+  Promise.all([syncPlan(), syncSchedule()]).then(paintSynced, () => {});
+
+// Deps are injectable so the visibility rules are testable without a browser.
+export function initLiveSync(run = runSync,
+  { doc = document, win = window, every = setInterval } = {}) {
+  const visible = () => doc.visibilityState === 'visible';
+  // A phone returning from the lock screen or the app switcher fires
+  // visibilitychange; a desktop tab regaining focus fires window.focus. Both
+  // are the moment a stale tab is about to be read, so both re-sync at once.
+  doc.addEventListener('visibilitychange', () => { if (visible()) run(); });
+  win.addEventListener('focus', () => run());
+  every(() => { if (visible()) run(); }, SYNC_MS);
+}
+
 export function initPlanner() {
   initPlan();
   let t = null;
@@ -58,6 +83,14 @@ export function initPlanner() {
   // Watch #grid/#dayview so the dots survive re-renders that bypass these two
   // hooks entirely (main.js's 60s timer, day-tab taps in js/dayview.js).
   initOverlay();
+  // Two uncommitted-edit states on the template that a fetched blob must not
+  // walk over: a drag/resize in progress (the store is ahead of KV with no save
+  // yet, and re-rendering mid-drag corrupts drop math), and an open editor
+  // (its <input>s are read on change/blur, so a rebuild would drop what is
+  // being typed). Both clear themselves; neither latches.
+  holdSync(isDragging);
+  holdSync(() => !store.locked && (store.addMode || !!store.selId));
   setTab(t);
-  fetchPlanRemote();
+  syncPlan().then(paintSynced, () => {});   // boot load; main.js boots the template
+  initLiveSync();
 }

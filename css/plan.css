@@ -100,6 +100,11 @@
 .twk + .twline, .twline + .twline { margin-top: 6px; }
 .twline b { color: var(--text); font-weight: 600; }
 
+/* Freshness caption under the date header ("· synced 3:42pm"). Quiet by
+   design: it is only interesting when the family goes looking for it. */
+.psync { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.psync:empty { display: none; }
+
 /* ── Subjects ── */
 .scard.dim { opacity: .65; }
 .sdot { display: inline-block; width: 9px; height: 9px; border-radius: 99px;
@@ -240,3 +245,29 @@
                color: var(--danger-text); border-radius: 9px; padding: 7px 10px;
                font-size: 11px; line-height: 1.4; margin-bottom: 8px; }
 @media print { #ov-clash, .ov-dot { display: none !important; } }
+
+/* ── One-off (dated) blocks on the week grid and the Day view ──
+   A ghost, not an event: dashed and category-neutral so it never reads as part
+   of the recurring template, and inert (the app's drag/edit only ever moves the
+   template — a one-off is managed from Today or the bot). `.evt` supplies the
+   absolute positioning; overlay.js sets top/height off the column it landed in,
+   so the same rule fits the 66px grid and the 62px Day view. --el/--eb are
+   unset here on purpose (no category), hence the explicit colours below. */
+.evt.ov-oneoff {
+  border: 1px dashed var(--border); border-left: 3px dashed var(--text-muted);
+  background: var(--bg-input); color: var(--text-sub);
+  pointer-events: none; cursor: default; z-index: 6;
+  /* Inset from the left: a one-off often lands ON a recurring block (that is
+     usually why it exists), and the grid has no side-by-side lanes. Offsetting
+     it leaves the block underneath showing its coloured rail and a strip of
+     tint, so the pair reads as stacked rather than as a broken render. */
+  left: 10px;
+}
+.evt.ov-oneoff .et { color: var(--text); font-weight: 600; }
+.evt.ov-oneoff .en { color: var(--text-sub); }
+.ov-tag { position: absolute; right: 5px; bottom: 2px; font-size: 7.5px; font-weight: 700;
+          letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted);
+          pointer-events: none; }
+/* Print stays the clean template week: every overlay decoration is screen-only.
+   (A separate block from the one above so neither existing print rule moves.) */
+@media print { .ov-oneoff { display: none !important; } }

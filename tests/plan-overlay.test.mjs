@@ -13,9 +13,10 @@ for (const k of ['alert', 'confirm', 'prompt'])
 
 // ── Minimal fake DOM ─────────────────────────────────────────
 // overlay.js only ever issues a handful of query shapes against its containers
-// (".ov-dot", ".evt[data-id=\"X\"]", ".grid-outer") plus getElementById/
-// createElement/insertBefore, so a full CSS engine would be overkill — this
-// stub matches exactly what applyOverlay() and renderClashBanner() use.
+// (".ov-dot", ".ov-oneoff", ".ca", ".evt[data-id=\"X\"]", ".grid-outer") plus
+// getElementById/createElement/insertBefore/get-setAttribute and inline styles,
+// so a full CSS engine would be overkill — this stub matches exactly what
+// applyOverlay(), applyOneOffs() and renderClashBanner() use.
 function matchSel(node, sel) {
   const m = /^\.([\w-]+)(?:\[([\w-]+)="([^"]*)"\])?$/.exec(sel);
   if (!m) return false;
@@ -32,10 +33,13 @@ class FakeNode {
     this.parentNode = null;
     this.className = '';
     this.attrs = {};
+    this.style = {};              // inline styles: what overlay.js reads AND writes
     this._html = '';
   }
   get id() { return this.attrs.id; }
   set id(v) { this.attrs.id = v; }
+  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
   set innerHTML(v) { this._html = v; }
   get innerHTML() { return this._html; }
   set textContent(v) { this._html = v; }
@@ -75,11 +79,25 @@ function evtNode(id) {
 }
 
 // Both render paths, exactly as index.html lays them out:
-//   <div id="dayview" class="dayview">…the selected day's blocks…</div>
-//   <div class="grid-outer"><div id="grid">…every weekday's blocks…</div></div>
-// `dayEvents` defaults to the full set so a test can assert on both containers
-// without caring which day the Day view happens to be showing.
-function makeDom(events, dayEvents = events) {
+//   <div id="dayview" class="dayview">…the selected day's column…</div>
+//   <div class="grid-outer"><div id="grid">…seven columns…</div></div>
+// Each column is a `.ca[data-day]` whose inline height is (E-S)*ph, exactly as
+// js/grid.js and js/dayview.js draw it — that height is how overlay.js recovers
+// pixels-per-hour (66 on the grid, 62 in the Day view) without importing either
+// frozen module. `dayEvents` defaults to the full set so a dot test can assert
+// on both containers without caring which day the Day view is showing.
+const SPAN = 17 - 9;              // E - S, the drawn band
+const GRID_PH = 66, DAY_PH = 62;  // js/model.js SPH, js/dayview.js DPH
+
+function caNode(day, ph) {
+  const ca = new FakeNode('div');
+  ca.className = 'ca';
+  ca.attrs['data-day'] = String(day);
+  ca.style.height = `${SPAN * ph}px`;
+  return ca;
+}
+
+function makeDom(events, dayEvents = events, dayviewDay = dayEvents[0]?.day ?? 0) {
   const root = new FakeNode('body');
   const dayview = new FakeNode('div');
   dayview.id = 'dayview';
@@ -92,24 +110,29 @@ function makeDom(events, dayEvents = events) {
   root.appendChild(outer);
   outer.appendChild(grid);
 
-  const els = { grid: {}, day: {} };
-  for (const ev of events) els.grid[ev.id] = grid.appendChild(evtNode(ev.id));
-  for (const ev of dayEvents) els.day[ev.id] = dayview.appendChild(evtNode(ev.id));
+  const cols = {};
+  for (let d = 0; d < 7; d++) cols[d] = grid.appendChild(caNode(d, GRID_PH));
+  const dayCol = dayview.appendChild(caNode(dayviewDay, DAY_PH));
+
+  const els = { grid: {}, day: {}, cols, dayCol };
+  for (const ev of events) els.grid[ev.id] = cols[ev.day ?? 0].appendChild(evtNode(ev.id));
+  for (const ev of dayEvents) els.day[ev.id] = dayCol.appendChild(evtNode(ev.id));
 
   const doc = {
     getElementById: id => root._all().concat(root).find(n => n.attrs && n.attrs.id === id) || null,
     createElement: tag => new FakeNode(tag),
     querySelector: sel => root.querySelector(sel),
   };
-  return { doc, root, grid, dayview, outer, els };
+  return { doc, root, grid, dayview, outer, els, cols, dayCol };
 }
 
 // Rebuild a container the way renderGrid()/renderDayView() do: throw the old
-// blocks (dots and all) away and lay down fresh ones.
-function rebuild(container, events) {
+// column away (blocks, dots, ghosts and all) and lay down a fresh one.
+function rebuild(container, events, ph = DAY_PH, day = events[0]?.day ?? 0) {
   for (const c of [...container.children]) c.remove();
+  const ca = container.appendChild(caNode(day, ph));
   const out = {};
-  for (const ev of events) out[ev.id] = container.appendChild(evtNode(ev.id));
+  for (const ev of events) out[ev.id] = ca.appendChild(evtNode(ev.id));
   return out;
 }
 
@@ -119,11 +142,11 @@ const { applyOverlay, initOverlay } = await import('../js/plan/overlay.js');
 
 function dotsOf(el) { return el.children.filter(c => (c.className || '').split(/\s+/).includes('ov-dot')); }
 
-function loadPlan(log) {
+function loadPlan(log, overrides = [], activities = []) {
   plan.data = sanitizePlan({
     year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
     parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
-    periods: [], activities: [], log, overrides: [],
+    periods: [], activities, log, overrides,
   });
 }
 
@@ -319,6 +342,198 @@ test('applyOverlay: renders the clash banner exactly once and updates it in plac
   const bars = outer.parentNode.children.filter(n => n.attrs.id === 'ov-clash');
   assert.equal(bars.length, 1);
   assert.equal(bars[0]._html, '');
+});
+
+// ── One-off (dated) blocks ───────────────────────────────────
+// A dated override is what the Telegram bot writes ("Arya art 3pm Wednesday").
+// It is not part of the recurring template, so it renders as a read-only ghost
+// in the column for its date — on the week grid AND in the Day view, which is
+// what the family actually looks at on a phone (standing directive).
+const WED = addDays(MON, 2);
+const NEXT_WED = addDays(MON, 9);
+const ghostsOf = el => el.querySelectorAll('.ov-oneoff');
+const artOneOff = (over = {}) =>
+  ({ id: 'x1', date: WED, action: 'add', start: 15, end: 16, name: 'Arya art', ...over });
+
+test('one-off: this week\'s dated override renders as a ghost in its own column, in BOTH #grid and #dayview', () => {
+  store.events = [];
+  loadPlan([], [artOneOff()]);
+  const { doc, grid, dayview, cols, dayCol } = makeDom([], [], 2);   // Day view parked on Wednesday
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  const g = ghostsOf(grid), d = ghostsOf(dayview);
+  assert.equal(g.length, 1);
+  assert.equal(d.length, 1);
+  assert.equal(g[0].parentNode, cols[2], 'week grid: Wednesday column');
+  assert.equal(d[0].parentNode, dayCol, 'day view: the rendered column');
+  // Positioned off the column's own height, so each container gets its own
+  // pixels-per-hour: 3pm–4pm is (15-9)*ph + 1 with a (1h * ph) - 2 body.
+  assert.equal(g[0].style.top, `${(15 - 9) * GRID_PH + 1}px`);
+  assert.equal(g[0].style.height, `${GRID_PH - 2}px`);
+  assert.equal(d[0].style.top, `${(15 - 9) * DAY_PH + 1}px`);
+  assert.equal(d[0].style.height, `${DAY_PH - 2}px`);
+  // Reuses .evt for layout, adds .ov-oneoff for the dashed neutral treatment.
+  assert.equal(g[0].className, 'evt ov-oneoff');
+  assert.match(g[0].innerHTML, /Arya art/);
+  assert.match(g[0].innerHTML, /3pm&ndash;4pm/);
+  assert.match(g[0].innerHTML, /one-off/);
+  // NOT data-id: that attribute is the template's identity and the dot sweep
+  // queries it — a ghost must never be mistaken for a draggable event.
+  assert.equal(g[0].getAttribute('data-oneoff'), 'x1');
+  assert.equal(g[0].getAttribute('data-id'), null);
+});
+
+test('one-off: a Day view parked on another day shows no ghost, while the week grid still does', () => {
+  store.events = [];
+  loadPlan([], [artOneOff()]);
+  const { doc, grid, dayview } = makeDom([], [], 0);          // Day view on Monday
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  assert.equal(ghostsOf(grid).length, 1);
+  assert.equal(ghostsOf(dayview).length, 0);
+});
+
+test('one-off: an override outside the current week never renders', () => {
+  store.events = [];
+  loadPlan([], [artOneOff({ id: 'x2', date: NEXT_WED }), artOneOff({ id: 'x3', date: LAST_WEEK_SUN })]);
+  const { doc, grid, dayview } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  assert.equal(ghostsOf(grid).length, 0);
+  assert.equal(ghostsOf(dayview).length, 0);
+});
+
+test('one-off: a logged one-off carries its status dot (eventId === the override id)', () => {
+  store.events = [];
+  loadPlan([{ date: WED, eventId: 'x1', status: 'done' }], [artOneOff()]);
+  const { doc, grid, dayview } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  for (const [where, root] of [['grid', grid], ['dayview', dayview]]) {
+    const dots = dotsOf(ghostsOf(root)[0]);
+    assert.equal(dots.length, 1, `${where}: one dot`);
+    assert.equal(dots[0].className, 'ov-dot ov-done');
+    assert.equal(dots[0]._html, '✓');
+  }
+});
+
+test('one-off: an unlogged one-off, and an entry logged on another date, get no dot', () => {
+  store.events = [];
+  loadPlan([{ date: addDays(WED, 1), eventId: 'x1', status: 'missed' }], [artOneOff()]);
+  const { doc, grid } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  assert.equal(dotsOf(ghostsOf(grid)[0]).length, 0);
+});
+
+test('one-off: repeated apply stays at exactly one ghost per container (idempotent sweep)', () => {
+  store.events = [];
+  loadPlan([{ date: WED, eventId: 'x1', status: 'partial' }], [artOneOff()]);
+  const { doc, grid, dayview } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+  applyOverlay();
+  applyOverlay();
+
+  for (const [where, root] of [['grid', grid], ['dayview', dayview]]) {
+    const g = ghostsOf(root);
+    assert.equal(g.length, 1, `${where}: exactly one ghost`);
+    assert.equal(dotsOf(g[0]).length, 1, `${where}: exactly one dot on it`);
+  }
+  // The ghost's own dot leaves with the ghost: no orphans anywhere.
+  assert.equal(grid.querySelectorAll('.ov-dot').length, 1);
+});
+
+test('one-off: a retracted override disappears on the next sweep', () => {
+  store.events = [];
+  loadPlan([], [artOneOff()]);
+  const { doc, grid, dayview } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+  assert.equal(ghostsOf(grid).length, 1);
+
+  loadPlan([], []);
+  applyOverlay();
+
+  assert.equal(ghostsOf(grid).length, 0);
+  assert.equal(ghostsOf(dayview).length, 0);
+});
+
+test('one-off: skips and timeless overrides never draw a block', () => {
+  store.events = [];
+  loadPlan([], [
+    { id: 'x4', date: WED, action: 'skip', eventId: 'e1' },
+    { id: 'x5', date: WED, action: 'add' },                       // no times: Today-list only
+    { id: 'x6', date: WED, action: 'add', start: 15, end: 15 },   // zero length
+    { id: 'x7', date: WED, action: 'add', start: '15', end: '16' }, // strings, not hours
+  ]);
+  const { doc, grid } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  assert.equal(ghostsOf(grid).length, 0);
+});
+
+test('one-off: an out-of-band block is dropped, an overhanging one is clamped to the drawn grid', () => {
+  store.events = [];
+  loadPlan([], [
+    { id: 'x8', date: WED, action: 'add', start: 7, end: 8.5, name: 'Before school' },   // ends before 9
+    { id: 'x9', date: WED, action: 'add', start: 16, end: 19, name: 'Long evening' },    // runs past 5pm
+  ]);
+  const { doc, grid } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  const g = ghostsOf(grid);
+  assert.equal(g.length, 1, 'the fully-outside one is dropped, not squashed onto 9am');
+  assert.equal(g[0].style.top, `${(16 - 9) * GRID_PH + 1}px`);
+  assert.equal(g[0].style.height, `${(17 - 16) * GRID_PH - 2}px`, 'clamped at the 5pm edge');
+  assert.match(g[0].innerHTML, /4pm&ndash;7pm/, 'the label still states the real times');
+});
+
+test('one-off: the name is escaped and falls back to the activity it makes up for', () => {
+  store.events = [];
+  loadPlan([], [
+    { id: 'x10', date: WED, action: 'add', start: 10, end: 11, activityId: 'loe' },
+    { id: 'x11', date: WED, action: 'add', start: 12, end: 13, name: '<img src=x onerror=alert(1)>' },
+  ], [{ id: 'loe', type: 'paced', name: 'Logic of English' }]);
+  const { doc, grid } = makeDom([], [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  const [a, b] = ghostsOf(grid);
+  assert.match(a.innerHTML, /Logic of English/);
+  assert.match(b.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.equal(b.innerHTML.includes('<img'), false);
+});
+
+test('one-off: a ghost never gets a template dot, and a template block never gets a ghost\'s', () => {
+  store.events = [{ id: 'x1', cat: 'quran', day: 2, start: 9, end: 10, name: 'Quran' }];
+  // Pathological: a template event whose id collides with the override's id.
+  loadPlan([{ date: WED, eventId: 'x1', status: 'done' }], [artOneOff()]);
+  const { doc, grid, els } = makeDom(store.events, [], 2);
+  globalThis.document = doc;
+
+  applyOverlay();
+
+  assert.equal(dotsOf(els.grid.x1).length, 1, 'the template block is decorated by the dot sweep');
+  assert.equal(dotsOf(ghostsOf(grid)[0]).length, 1, 'the ghost carries its own, from its own lookup');
+  assert.equal(grid.querySelectorAll('.evt[data-id="x1"]').length, 1, 'the ghost is not queryable as an event');
 });
 
 // ── MutationObserver re-apply ────────────────────────────────

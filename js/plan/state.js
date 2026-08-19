@@ -8,7 +8,18 @@ const PK = 'aoife_plan_v1';
 
 export const plan = { data: null };
 
-let dirty = false;
+// ── Live re-sync bookkeeping (planner-v2.5) ──────────────────
+// `dirty` used to latch true on the first local save and then blocked EVERY
+// later remote application for the life of the tab — which is exactly how the
+// bot's first write ended up invisible on an open family tab. Replaced by an
+// in-flight counter plus the timestamp of our own last write.
+let pendingSaves = 0;         // POSTs in flight (decremented in a finally)
+let lastLocalSaveAt = null;   // the `savedAt` we stamped on our most recent save
+// When this tab last heard back from KV — the Today caption's "· synced HH:MM".
+// It answers "is what I'm looking at stale?", so it advances on every round that
+// REACHED the server, whether or not the blob turned out to be new.
+export const syncInfo = { at: null };
+
 const listeners = new Set();
 export const onPlanChange = fn => listeners.add(fn);
 export const planNotify = () => listeners.forEach(fn => fn());
@@ -21,29 +32,60 @@ export function initPlan() {
   plan.data = sanitizePlan(saved || seedPlan());
 }
 
-export async function fetchPlanRemote() {
+// Pull the shared blob and apply it if it is safe to do so. Called at boot and
+// then on every visibility/focus/poll round (js/plan/tabs.js). Returns true only
+// when a genuinely different blob was applied.
+//
+// The blob is written from outside this browser (the Telegram bot), so a tab
+// that never re-reads is silently wrong. It is also written by US, so a fetched
+// blob is applied only when BOTH hold:
+//   * pendingSaves === 0 — with a POST in flight the read may still return the
+//     pre-write blob, and applying it would undo the family's own tap.
+//   * no local save yet, OR remote.savedAt >= the savedAt we stamped on our last
+//     save — anything older is our own write echoing back late (or a failed
+//     save's pre-image) and must never overwrite what we hold.
+// A missing/garbled remote savedAt counts as OLDER once we have written: the
+// only writers that strip it are not the app, and losing a tap is worse than
+// waiting for the next round. Identical blobs are dropped before planNotify(),
+// so a poll never re-renders under the family's scroll or open sheet.
+export async function syncPlan() {
+  let data;
   try {
     const res = await fetch('/api/plan-get');
-    const data = await res.json();
-    if (!dirty && data && !data.error) {
-      plan.data = sanitizePlan(data);
-      planNotify();
-    } else if (!dirty && data && data.error === 'empty') {
-      savePlan();                    // first run: publish the seed to KV
-    }
-  } catch (e) {}
+    data = await res.json();
+  } catch (e) { return false; }         // offline is normal: never clobber
+  syncInfo.at = new Date().toISOString();
+  if (data && data.error === 'empty') {
+    // First run only: publish the seed. Never after a local save — a wiped KV
+    // must not be re-seeded over whatever this tab has since written.
+    if (!pendingSaves && !lastLocalSaveAt) savePlan();
+    return false;
+  }
+  if (!data || data.error) return false;
+  if (pendingSaves) return false;                       // our own write is in flight
+  if (lastLocalSaveAt &&
+      !(typeof data.savedAt === 'string' && data.savedAt >= lastLocalSaveAt)) return false;
+  const next = sanitizePlan(data);
+  if (plan.data && serializePlan(next) === serializePlan(plan.data)) return false;
+  plan.data = next;
+  planNotify();
+  return true;
 }
 
 export function savePlan() {
-  dirty = true;
-  plan.data.savedAt = new Date().toISOString();
+  const at = new Date().toISOString();
+  plan.data.savedAt = at;
+  lastLocalSaveAt = at;               // stamped at write time, not at completion:
+                                      // a save that never lands leaves remote
+                                      // older than us, which blocks application.
   const str = serializePlan(plan.data);
   try { localStorage.setItem(PK, str); } catch (e) {}
+  pendingSaves++;
   fetch('/api/plan-save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data: str }),
-  }).catch(() => {});
+  }).catch(() => {}).finally(() => { pendingSaves--; });   // never latches
   try { document.dispatchEvent(new CustomEvent('aoife:saved')); } catch (e) {}
 }
 

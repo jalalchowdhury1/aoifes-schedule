@@ -1,6 +1,7 @@
-// Read-only decorations on the rendered schedule: status dots on logged blocks
-// and a clash banner. Never mutates events; only appends elements into rendered DOM.
-import { fmt, esc, DAYS } from '../model.js';
+// Read-only decorations on the rendered schedule: status dots on logged blocks,
+// dated one-off blocks, and a clash banner. Never mutates events; only appends
+// elements into rendered DOM.
+import { fmt, esc, DAYS, S, E } from '../model.js';
 import { store, catLabel } from '../state.js';
 import { isDragging } from '../grid.js';
 import { todayStr, mondayOf, addDays, dayIdx, findClashes } from './model.js';
@@ -20,6 +21,14 @@ const CONTAINER_IDS = ['grid', 'dayview'];
 const containers = () =>
   CONTAINER_IDS.map(id => document.getElementById(id)).filter(Boolean);
 
+const DOT_CHAR = s => (s === 'done' ? '✓' : s === 'partial' ? '◐' : '✗');
+function dotNode(status) {
+  const d = document.createElement('span');
+  d.className = `ov-dot ov-${status}`;
+  d.textContent = DOT_CHAR(status);
+  return d;
+}
+
 let observer = null;
 // Reentrancy guard. With a real browser's ASYNCHRONOUS record delivery this is
 // unreachable (measured: 0 hits) — the callback can never run while we are
@@ -28,6 +37,71 @@ let observer = null;
 // delivers records synchronously, where it IS the thing that stops recursion.
 let applying = false;
 let pending = false;    // microtask coalescing: one re-apply per burst
+
+// ── One-off (dated) blocks ───────────────────────────────────
+// An override with action:'add' is a single dated block — a makeup lesson, or
+// the "Arya art 3pm" the family typed at the Telegram bot. It is NOT part of
+// the recurring template, so it must never be a real `.evt`: it renders as a
+// read-only ghost (dashed, category-neutral, pointer-events:none) in the column
+// for its date, on the week grid AND in the Day view. The app's drag/edit only
+// ever moves the template; a one-off is managed from Today or from the bot.
+export function oneOffsInWeek(mon, sun) {
+  const out = [];
+  for (const o of plan.data.overrides || []) {
+    if (!o || o.action !== 'add' || o.date < mon || o.date > sun) continue;
+    // Unpositionable rows are skipped rather than guessed at — an override with
+    // no times is a Today-list item only, and sanitizePlan keeps it either way.
+    if (typeof o.start !== 'number' || typeof o.end !== 'number') continue;
+    if (o.end <= o.start || o.end <= S || o.start >= E) continue;   // outside 9–17
+    const act = (plan.data.activities || []).find(a => a.id === o.activityId);
+    out.push({
+      id: o.id || null,
+      date: o.date,
+      day: dayIdx(o.date),
+      // Drawn clamped to the visible band so an 8am/9pm one-off cannot paint
+      // over the page chrome; the label still states its real times.
+      top: Math.max(S, o.start),
+      bottom: Math.min(E, o.end),
+      start: o.start,
+      end: o.end,
+      // The bot's own label wins; otherwise the activity it makes up for.
+      name: o.name || act?.name || 'Extra',
+      // Same identity rule as Today: an override's `id` IS its eventId in the log.
+      status: o.id
+        ? (plan.data.log.find(e => e.eventId === o.id && e.date === o.date) || {}).status
+        : undefined,
+    });
+  }
+  return out;
+}
+
+function applyOneOffs(root, blocks) {
+  if (!blocks.length) return;
+  for (const ca of root.querySelectorAll('.ca')) {
+    const day = Number(ca.getAttribute('data-day'));
+    // Pixels-per-hour is read back off the column the renderer just drew
+    // (height = (E - S) * ph). That is what makes ONE code path fit all three
+    // metrics — #grid at 66px/hour, #dayview at 62, print at 72 — without this
+    // module importing anything from the frozen render layer.
+    const ph = parseFloat(ca.style && ca.style.height) / (E - S);
+    if (!Number.isFinite(day) || !Number.isFinite(ph) || ph <= 0) continue;
+    for (const b of blocks) {
+      if (b.day !== day) continue;
+      const el = document.createElement('div');
+      el.className = 'evt ov-oneoff';
+      // Deliberately NOT data-id: that attribute is the template's identity and
+      // the dot sweep below queries it. A ghost is never a template event.
+      if (b.id) el.setAttribute('data-oneoff', b.id);
+      el.style.top = `${(b.top - S) * ph + 1}px`;
+      el.style.height = `${(b.bottom - b.top) * ph - 2}px`;
+      el.innerHTML = `<div class="et">${esc(b.name)}</div>` +
+        `<div class="en">${fmt(b.start)}&ndash;${fmt(b.end)}</div>` +
+        `<span class="ov-tag">one-off</span>`;
+      if (b.status) el.appendChild(dotNode(b.status));   // after innerHTML, or it is wiped
+      ca.appendChild(el);
+    }
+  }
+}
 
 export function applyOverlay() {
   // Mid-drag renderGrid() rebuilds fire the observer; re-rendering the clash
@@ -40,9 +114,16 @@ export function applyOverlay() {
   if (!roots.length) return;
   applying = true;
   try {
-    for (const root of roots) root.querySelectorAll('.ov-dot').forEach(n => n.remove());
+    // Ghosts go first: their own dots leave the tree with them, so the dot
+    // sweep that follows only ever sees template decorations.
+    for (const root of roots) {
+      root.querySelectorAll('.ov-oneoff').forEach(n => n.remove());
+      root.querySelectorAll('.ov-dot').forEach(n => n.remove());
+    }
     const mon = mondayOf(todayStr());
     const sun = addDays(mon, 6);
+    const oneOffs = oneOffsInWeek(mon, sun);
+    for (const root of roots) applyOneOffs(root, oneOffs);
     for (const e of plan.data.log) {
       if (!e.eventId || e.date < mon || e.date > sun) continue;
       const ev = store.events.find(x => x.id === e.eventId);
@@ -57,12 +138,8 @@ export function applyOverlay() {
       // The Day view inherits the same guard: its column is the same claim.
       if (!ev || dayIdx(e.date) !== ev.day) continue;
       for (const root of roots) {
-        root.querySelectorAll(`.evt[data-id="${cssEsc(e.eventId)}"]`).forEach(el => {
-          const d = document.createElement('span');
-          d.className = `ov-dot ov-${e.status}`;
-          d.textContent = e.status === 'done' ? '✓' : e.status === 'partial' ? '◐' : '✗';
-          el.appendChild(d);
-        });
+        root.querySelectorAll(`.evt[data-id="${cssEsc(e.eventId)}"]`)
+          .forEach(el => el.appendChild(dotNode(e.status)));
       }
     }
     renderClashBanner();

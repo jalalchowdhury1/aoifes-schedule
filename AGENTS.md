@@ -17,7 +17,8 @@ Static vanilla app, no build step, no dependencies, no framework:
 - css/app.css — layout/components incl. mobile day view + bottom sheet
 - css/print.css — letter-landscape print, always the week grid
 - js/model.js — PURE (no DOM); constants, fmt/snap/clamps, defaults, serialize, sanitizeEvents
-- js/state.js — store + persistence + all mutations; sanitizes events on both load paths
+- js/state.js — store + persistence + all mutations; sanitizes events on both load
+  paths; `syncSchedule()` live re-sync + the `holdSync()` guard registry
 - js/grid.js — week grid render, drag/resize/select (fine pointers only)
 - js/dayview.js — mobile tabs + day column + Day/Week toggle
 - js/editor.js — edit panel (desktop) / bottom sheet (mobile), add form, legend
@@ -27,14 +28,17 @@ Static vanilla app, no build step, no dependencies, no framework:
 - aoife_schedule_3.html — v1-era standalone snapshot (localStorage-only, no lock,
   no /api). Kept for history; it drifts from the live app by design. DO NOT TOUCH.
 - js/plan/model.js — PURE planner model: dates/weeks/cycle math, session sequences, capacities, projections, stats, clash, sanitize
-- js/plan/state.js — planner store, localStorage aoife_plan_v1, /api/plan-* I/O, mutations
+- js/plan/state.js — planner store, localStorage aoife_plan_v1, /api/plan-* I/O,
+  mutations, `syncPlan()` live re-sync + `syncInfo` (the Today freshness caption)
 - js/plan/seed.js — PURE: the initial aoife_plan blob (honest as of 2026-08-16)
-- js/plan/tabs.js — tab navigation + boot; lazy view mounting
+- js/plan/tabs.js — tab navigation + boot; lazy view mounting; the live-sync
+  scheduler (`initLiveSync`: visibilitychange/focus/120s poll, both blobs)
 - js/plan/today.js — Today view
 - js/plan/year.js — Year view
 - js/plan/subjects.js — Subjects view
-- js/plan/overlay.js — read-only status dots on BOTH #grid and #dayview + clash
-  banner; a MutationObserver re-applies them after any re-render (see below)
+- js/plan/overlay.js — read-only status dots AND dated one-off ghost blocks on
+  BOTH #grid and #dayview + clash banner; a MutationObserver re-applies them
+  after any re-render (see below)
 - api/plan-get.js — GET aoife_plan (or ?prev=1 for undo copy)
 - api/plan-save.js — copy current -> aoife_plan_prev, then SET new
 - css/plan.css — all planner styles (tokens.css vars reused)
@@ -101,6 +105,70 @@ via MutationObserver.
   "Aoife Planner Backups", then POST it back via /api/plan-save.
 - Rollback tags: v2-pre-planner (before any planner code), planner-v1 (first planner
   release, week-marking model) and planner-v2 (day-precise time-away redesign).
+
+## Live re-sync (planner-v2.5, 2026-08-18)
+Both blobs are written from OUTSIDE this browser (the Telegram bot writes
+`aoife_plan`; another phone writes `aoifes_schedule`), so an open tab that only
+fetched at boot silently shows a frozen snapshot — the family saw neither the
+bot's "Arya art" one-off nor a status it had logged.
+
+- **Triggers** (js/plan/tabs.js `initLiveSync`, one scheduler for both blobs):
+  `visibilitychange` → visible, `window.focus`, and a 120s poll that runs ONLY
+  while `document.visibilityState === 'visible'` (never in a background tab).
+  Deps are injectable so the visibility rules are unit-tested without a browser.
+- **`pendingSaves`, never `dirty`.** The old `dirty` flag latched true on the
+  first local save and blocked every remote application for the life of the tab.
+  It is gone from BOTH stores. Each store now counts POSTs in flight
+  (incremented before the POST, decremented in a `finally`, so an error can
+  never wedge it) and refuses to apply a fetched blob while one is out.
+- **Planner blob** (`syncPlan`): applies only when `pendingSaves === 0` AND
+  (no local save yet OR `remote.savedAt >= lastLocalSaveAt`, the ISO stamp we
+  wrote). A missing/garbled remote `savedAt` counts as OLDER once we have
+  written. `lastLocalSaveAt` is stamped at write time, so a save that never
+  lands leaves remote "older" and local wins until one does.
+- **Schedule blob has NO `savedAt` — deliberate.** VERIFIED that the read path
+  ignores unknown top-level keys (fetchRemote reads only events/altSun/
+  catLabels; `sanitizeEvents` only filters the events array), but `serialize()`
+  DROPS them, so stamping one would mean changing `serialize()` — a change to
+  the frozen v1 storage shape, not an additive read. The contract wins. Writes
+  are ordered structurally instead: every mutation saves immediately, so with no
+  POST in flight and none failed, KV holds exactly what the tab holds and any
+  DIFFERING fetched blob is by definition the newer one. Hence the extra
+  `saveFailed` flag (a POST that rejected or returned non-2xx keeps local
+  authoritative until one lands — the planner gets this free from `savedAt`).
+- **`holdSync(fn)`** (js/state.js): a view registers a predicate for an
+  interaction a fetched blob must not interrupt, so state.js never imports the
+  frozen view layer. Two are registered in tabs.js: `isDragging` (mid-drag the
+  store is ahead of KV with no save yet, and a re-render under the cursor
+  corrupts drop math — commit 49ba699) and an open editor (`!locked && (addMode
+  || selId)`, whose inputs are read on change/blur). Neither latches.
+- **Identical blobs are dropped before notify()** (`serializePlan` / `serialize`
+  compare), so a poll never re-renders under the family's scroll, tab or typing.
+- Fetch errors are silent and never clobber local state; offline is normal.
+- **Freshness caption**: `syncInfo.at` advances on every round that REACHED KV
+  (applied or not — the question it answers is "is this tab stale?"), and Today
+  renders `· synced 3:42pm` under the date. A no-change round patches that one
+  node (`paintSynced`) instead of re-rendering the view.
+
+## One-off blocks on the grid (planner-v2.5)
+A dated override (`action:'add'` with numeric `start`/`end`) for the CURRENT
+week renders as a read-only ghost in the column for its date — on the week grid
+AND in the Day view (standing directive), from the same overlay module, observer
+and drag guard as the status dots.
+- Class `evt ov-oneoff`: `.evt` supplies the absolute positioning, `.ov-oneoff`
+  the dashed, category-neutral treatment, the "one-off" tag and
+  `pointer-events: none` (the app's drag/edit only ever moves the recurring
+  template; a one-off is managed from Today or the bot). It is inset 10px from
+  the left so an overlapping template block still shows its coloured rail.
+- It carries `data-oneoff`, NEVER `data-id`: `data-id` is the template's
+  identity and the dot sweep queries it. Its status dot comes from its own
+  lookup (`eventId === o.id && date === o.date`, the bot's identity rule).
+- Pixels-per-hour is read back off the `.ca` column's inline height
+  (`(E-S) * ph`), so ONE code path fits #grid (66), #dayview (62) and print (72)
+  without importing anything from the frozen render layer.
+- Overrides with no times are skipped (Today-list only); one wholly outside
+  9–17 is dropped, one overhanging the edge is clamped while its label keeps
+  the real times. Print-hidden like every other overlay decoration.
 
 ## Planner open items (2026-08-17)
 - LoE Foundations D true span (121-140 vs 121-160) — check the physical book.

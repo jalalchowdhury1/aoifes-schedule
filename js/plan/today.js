@@ -8,7 +8,7 @@ import {
   currentCur, cycleStats, doneOn, actTotal, okCls, teachingWeekNumber, dailyStreak,
   weekCapacity,
 } from './model.js';
-import { plan, togglePaced, logTimed } from './state.js';
+import { plan, togglePaced, logTimed, syncInfo } from './state.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
 const AWAY_ICON = { travel: '✈', off: '⏸' };
@@ -27,6 +27,27 @@ export function fmtUntil(days) {
   if (days < 14) return `in ${days} day${days === 1 ? '' : 's'}`;
   const wks = Math.round(days / 7);
   return `in ${wks} wk${wks === 1 ? '' : 's'}`;
+}
+
+// ── Freshness caption ────────────────────────────────────────
+// "· synced 3:42pm" under the date. The bot writes this plan from outside the
+// browser, so a tab that has not re-read in an hour is showing yesterday's
+// truth — the caption makes that visible at a glance instead of silently wrong.
+// Empty until the first round lands (an offline tab claims nothing). Reuses the
+// app's own fmt() so the time reads like every other time on the page.
+export function syncedCaption(at) {
+  if (!at) return '';
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return '';
+  return `· synced ${fmt(d.getHours() + d.getMinutes() / 60)}`;
+}
+
+// A sync round that changes nothing still refreshes the caption — that IS the
+// news ("the tab is current"). Patching the one node avoids re-rendering the
+// whole view every 120s just to move a clock.
+export function paintSynced() {
+  const el = document.getElementById('psync');
+  if (el) el.textContent = syncedCaption(syncInfo.at);   // textContent: never HTML
 }
 
 // A daily (no-time-slot) activity shows on a normal day; on a travel-type
@@ -203,7 +224,7 @@ export function renderToday() {
   const d = new Date();
   const status = dayStatus(plan.data.periods, today);
 
-  let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}</div></div>`;
+  let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}<span id="psync" class="psync">${syncedCaption(syncInfo.at)}</span></div></div>`;
   // On an away day the banner IS the headline for the day, so the weekly
   // summary falls in behind it; on a normal day it sits right under the date.
   const week = thisWeekHtml(today);
