@@ -275,9 +275,14 @@ docs/superpowers/specs/2026-08-19-subjects-chapter-timeline-design.md.
   overwrites the reference plan) inside Manage. `disarm()` restores the armed
   button's OWN captured label (`armedRest`) — do not hardcode reset text.
 - **View rows:** complete → `✓ <actual date|nothing>`; else
-  `plan <baseline|—> · now <live|—>` + chip (≈ on plan ≤7d / N wks early / late).
-  Current row = first incomplete row with sessions>0. `.tl-dt` wraps internally
-  (planner-v2.7 fix) — 320px phones must never scroll sideways.
+  `plan <baseline|—>` + `now <live|—>` segments + chip (≈ on plan ≤7d / N wks
+  early / late). Current row = first incomplete row with sessions>0. Layout is
+  a DELIBERATE two-line stack (name, then dates line; `.tl-seg` no-wrap pairs;
+  hairline separators) — never a side-by-side flex that depends on width; a
+  320px phone must never scroll sideways (stamp 2026-08-19-2 redesign after a
+  phone screenshot showed both a stale-CSS render AND a too-cramped layout —
+  note: staleness happened even though THAT release had bumped the stamp; the
+  remedy is bumping the generation again).
 - Initial baselines set 2026-08-19 on live (singapore ×15 rows, loe ×4 unfinished
   bands) = the trip-aware honest schedule (SM → May 16 '27, LoE → Feb 28 '27).
 
