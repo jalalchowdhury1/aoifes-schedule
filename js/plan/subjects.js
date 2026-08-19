@@ -8,8 +8,9 @@ import { catLabel } from '../state.js';
 import {
   todayStr, actTotal, actDone, currentCur, nextSession,
   projectFinish, requiredPerCycle, targetStats, okCls,
+  chainTimeline, actualFinishes, daysBetween,
 } from './model.js';
-import { plan, setActivityStatus, setTravelMode } from './state.js';
+import { plan, setActivityStatus, setTravelMode, setBaseline, getActivity } from './state.js';
 
 const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
 
@@ -48,6 +49,42 @@ function paceLine(a) {
   return out;
 }
 
+// 📅 Timeline: per-chapter plan-vs-now. Active paced subjects with counts only —
+// a parked/planned subject's projection would be fiction (the walk assumes she
+// starts today). Complete rows show the log-attested date when one exists.
+// The "current" highlight skips 0-session placeholder rows (counts pending):
+// they are not workable, so they are never what she is "on".
+function timelineHtml(a) {
+  if (a.type !== 'paced' || a.status !== 'active' || actTotal(a) === 0) return '';
+  const p = plan.data;
+  const rows = chainTimeline(a, todayStr(), p);
+  if (!rows.length) return '';
+  const actual = actualFinishes(a, p.log);
+  const base = a.baseline?.rows;
+  let curSeen = false;
+  const items = rows.map(r => {
+    let cls = 'tl-row', right;
+    if (r.complete) {
+      const ad = actual[r.key];
+      right = `<span class="tl-ok">✓${ad ? ' ' + fmtDate(ad) : ''}</span>`;
+    } else {
+      if (!curSeen && r.sessions > 0) { curSeen = true; cls += ' cur'; }
+      const b = base ? base[r.key] : null;
+      let chip = '';
+      if (b && r.finish) {
+        const dd = daysBetween(r.finish, b);            // + = ahead of plan
+        const dw = Math.round(Math.abs(dd) / 7);
+        if (Math.abs(dd) <= 7) chip = `<span class="pchip">≈ on plan</span>`;
+        else if (dd > 0) chip = `<span class="pchip ok">${dw} wk${dw > 1 ? 's' : ''} early</span>`;
+        else chip = `<span class="pchip warn">${dw} wk${dw > 1 ? 's' : ''} late</span>`;
+      }
+      right = `plan ${b ? fmtDate(b) : '—'} · now ${r.finish ? fmtDate(r.finish) : '—'}${chip ? ' ' + chip : ''}`;
+    }
+    return `<div class="${cls}"><span class="tl-nm">${esc(r.label)}</span><span class="tl-dt">${right}</span></div>`;
+  }).join('');
+  return `<details class="sdet"><summary>📅 Timeline</summary><div class="tl">${items}</div></details>`;
+}
+
 function card(a) {
   const name = a.name || catLabel(a.cat);
   const total = actTotal(a), done = actDone(a);
@@ -61,6 +98,7 @@ function card(a) {
     h += `<div class="sline">${done}/${total}${ns ? ` · next: ${esc(ns.label)}` : ''}</div>
           <div class="sbar"><i style="width:${pct}%"></i></div>`;
   if (a.note) h += `<div class="sline">${esc(a.note)}</div>`;
+  h += timelineHtml(a);
   h += `<details class="sdet"><summary>Manage</summary><div class="sctl">`;
   if (a.status === 'planned') h += `<button data-do="activate">Activate</button>`;
   if (a.status === 'active') h += `<button data-do="park">Park</button>`;
@@ -72,6 +110,8 @@ function card(a) {
       ${['pause', 'reduced', 'continue'].map(m =>
         `<option value="${m}"${(a.travel?.mode || 'pause') === m ? ' selected' : ''}>${m}</option>`).join('')}
       </select></label>`;
+  if (a.type === 'paced' && a.status === 'active' && actTotal(a) > 0)
+    h += `<button data-do="baseline">${a.baseline ? 'Re-baseline' : 'Set baseline'}</button>`;
   h += `</div></details></div>`;
   return h;
 }
@@ -89,7 +129,7 @@ export function renderSubjects() {
   if (!elWired) {
     elWired = true;
     el.addEventListener('click', e => {
-      if (!e.target.closest('[data-do="cancel"]')) disarm();
+      if (!e.target.closest('[data-do="cancel"],[data-do="baseline"]')) disarm();
     });
   }
   el.querySelectorAll('[data-do]').forEach(b => {
@@ -97,6 +137,17 @@ export function renderSubjects() {
     if (b.dataset.do === 'travel')
       b.addEventListener('change', () => { disarm(); setTravelMode(id, b.value); });
     else b.addEventListener('click', () => {
+      if (b.dataset.do === 'baseline') {
+        if (getActivity(id)?.baseline && armedBtn !== b) {
+          disarm();
+          armedBtn = b;
+          b.textContent = 'Tap again to re-baseline';
+          return;
+        }
+        disarm();
+        setBaseline(id);
+        return;
+      }
       const map = { activate: 'active', park: 'parked', cancel: 'cancelled' };
       if (b.dataset.do === 'cancel' && armedBtn !== b) {
         disarm();                             // re-arm from some other card's button

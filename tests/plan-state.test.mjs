@@ -240,5 +240,7 @@ test('setBaseline freezes unfinished row dates; complete rows excluded; overwrit
   assert.equal(act.baseline.rows.c2, expected);
   S.setBaseline('sm', '2026-09-08');                          // re-baseline overwrites
   assert.equal(act.baseline.setOn, '2026-09-08');
+  const before = plan.data.savedAt;
   assert.equal(S.setBaseline('nope'), undefined);             // unknown id: no throw
+  assert.equal(plan.data.savedAt, before);                    // and no commit/save
 });
