@@ -33,7 +33,11 @@ globalThis.document = {
 };
 
 const { store } = await import('../js/state.js');
-const { plan, syncInfo } = await import('../js/plan/state.js');
+const { plan } = await import('../js/plan/state.js');
+const { markSynced, syncInfo } = await import('../js/sync.js');
+// The caption reports the OLDER of the two blobs' rounds, so a test that wants
+// a specific clock time marks BOTH stores at it.
+const bothSyncedAt = at => { syncInfo.plan = at; syncInfo.schedule = at; };
 const { renderToday, fmtUntil, dailyVisible, thisWeekHtml, yesterdayHtml,
         syncedCaption, paintSynced } = await import('../js/plan/today.js');
 
@@ -414,12 +418,18 @@ test('syncedCaption: renders the local wall-clock time, and nothing at all befor
 test('renderToday: the caption rides in the date header and reflects the last sync', () => {
   store.events = [];
   loadPlan([]);
-  syncInfo.at = null;
+  syncInfo.plan = null; syncInfo.schedule = null;
   renderToday();
   assert.match(viewToday.innerHTML, /<span id="psync" class="psync"><\/span>/,
     'an unsynced tab claims nothing');
 
-  syncInfo.at = new Date(2026, 7, 18, 14, 7).toISOString();
+  // Only ONE blob heard from is still not a synced page: the caption stays mute.
+  markSynced('plan', new Date(2026, 7, 18, 14, 7).toISOString());
+  renderToday();
+  assert.match(viewToday.innerHTML, /<span id="psync" class="psync"><\/span>/,
+    'half a sync is not a sync');
+
+  bothSyncedAt(new Date(2026, 7, 18, 14, 7).toISOString());
   renderToday();
   const html = viewToday.innerHTML;
   assert.match(html, /<span id="psync" class="psync">· synced 2:07pm<\/span>/);
@@ -430,11 +440,11 @@ test('renderToday: the caption rides in the date header and reflects the last sy
 test('paintSynced: updates the caption in place, with no re-render of the view', () => {
   store.events = [];
   loadPlan([]);
-  syncInfo.at = new Date(2026, 7, 18, 14, 7).toISOString();
+  bothSyncedAt(new Date(2026, 7, 18, 14, 7).toISOString());
   renderToday();
   const before = viewToday.innerHTML;
 
-  syncInfo.at = new Date(2026, 7, 18, 16, 30).toISOString();
+  bothSyncedAt(new Date(2026, 7, 18, 16, 30).toISOString());
   paintSynced();
 
   assert.equal(psync.textContent, '· synced 4:30pm');

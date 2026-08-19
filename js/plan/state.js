@@ -3,6 +3,7 @@
 import { sanitizePlan, serializePlan, currentCur, todayStr, sortPeriods,
          PERIOD_TYPES, ISO } from './model.js';
 import { seedPlan } from './seed.js';
+import { onHold, markSynced } from '../sync.js';
 
 const PK = 'aoife_plan_v1';
 
@@ -15,10 +16,8 @@ export const plan = { data: null };
 // in-flight counter plus the timestamp of our own last write.
 let pendingSaves = 0;         // POSTs in flight (decremented in a finally)
 let lastLocalSaveAt = null;   // the `savedAt` we stamped on our most recent save
-// When this tab last heard back from KV — the Today caption's "· synced HH:MM".
-// It answers "is what I'm looking at stale?", so it advances on every round that
-// REACHED the server, whether or not the blob turned out to be new.
-export const syncInfo = { at: null };
+let saveFailed = false;       // that write never landed: retry before reading
+let lastAttempt = null;       // {str, base} of the last POST, replayed on retry
 
 const listeners = new Set();
 export const onPlanChange = fn => listeners.add(fn);
@@ -44,27 +43,34 @@ export function initPlan() {
 //   * no local save yet, OR remote.savedAt >= the savedAt we stamped on our last
 //     save — anything older is our own write echoing back late (or a failed
 //     save's pre-image) and must never overwrite what we hold.
-// A missing/garbled remote savedAt counts as OLDER once we have written: the
-// only writers that strip it are not the app, and losing a tap is worse than
-// waiting for the next round. Identical blobs are dropped before planNotify(),
-// so a poll never re-renders under the family's scroll or open sheet.
+// A missing/unparseable remote savedAt counts as OLDER once we have written:
+// the only writers that strip it are not the app, and losing a tap is worse
+// than waiting for the next round. Identical blobs are dropped before
+// planNotify(), so a poll never re-renders under the family's scroll or sheet.
 export async function syncPlan() {
+  if (pendingSaves || onHold()) return false;           // our write / their edit
+  if (saveFailed && lastAttempt) {
+    // The tap that failed offline is not discarded: replay it, then let the
+    // NEXT round read. Same self-healing retry as the template store.
+    await postPlan(lastAttempt.str, lastAttempt.base);
+    if (!saveFailed) markSynced('plan');
+    return false;
+  }
   let data;
   try {
     const res = await fetch('/api/plan-get');
     data = await res.json();
   } catch (e) { return false; }         // offline is normal: never clobber
-  syncInfo.at = new Date().toISOString();
+  markSynced('plan');
   if (data && data.error === 'empty') {
     // First run only: publish the seed. Never after a local save — a wiped KV
     // must not be re-seeded over whatever this tab has since written.
-    if (!pendingSaves && !lastLocalSaveAt) savePlan();
+    if (!lastLocalSaveAt) savePlan();
     return false;
   }
   if (!data || data.error) return false;
-  if (pendingSaves) return false;                       // our own write is in flight
-  if (lastLocalSaveAt &&
-      !(typeof data.savedAt === 'string' && data.savedAt >= lastLocalSaveAt)) return false;
+  if (pendingSaves || onHold()) return false;           // started during the fetch
+  if (lastLocalSaveAt && !isAtLeast(data.savedAt, lastLocalSaveAt)) return false;
   const next = sanitizePlan(data);
   if (plan.data && serializePlan(next) === serializePlan(plan.data)) return false;
   plan.data = next;
@@ -72,20 +78,40 @@ export async function syncPlan() {
   return true;
 }
 
+// Timestamps are compared as EPOCHS, never as strings: this browser stamps
+// milliseconds ('…12.345Z') while the Telegram bot's Python writes microseconds
+// ('…12.345678Z'), and lexically '…12.345678Z' > '…12.345Z' even when it is the
+// older write by half a second. Date.parse handles both and truncates to ms.
+export function isAtLeast(remote, mine) {
+  const r = Date.parse(remote), m = Date.parse(mine);
+  return Number.isFinite(r) && Number.isFinite(m) && r >= m;
+}
+
+function postPlan(str, base) {
+  pendingSaves++;
+  return fetch('/api/plan-save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // `base` is the savedAt of the blob this snapshot was edited on top of.
+    // api/plan-save merges when KV has moved on since (see AGENTS.md).
+    body: JSON.stringify({ data: str, ...(base ? { base } : {}) }),
+  }).then(res => { saveFailed = !!res && res.ok === false; },
+          () => { saveFailed = true; })
+    .finally(() => { pendingSaves--; });                   // never latches
+}
+
 export function savePlan() {
+  const base = plan.data.savedAt || null;   // what we were editing on top of
   const at = new Date().toISOString();
   plan.data.savedAt = at;
   lastLocalSaveAt = at;               // stamped at write time, not at completion:
                                       // a save that never lands leaves remote
-                                      // older than us, which blocks application.
+                                      // older than us, so local wins on screen
+                                      // until syncPlan's retry pushes it through.
   const str = serializePlan(plan.data);
   try { localStorage.setItem(PK, str); } catch (e) {}
-  pendingSaves++;
-  fetch('/api/plan-save', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data: str }),
-  }).catch(() => {}).finally(() => { pendingSaves--; });   // never latches
+  lastAttempt = { str, base };
+  postPlan(str, base);
   try { document.dispatchEvent(new CustomEvent('aoife:saved')); } catch (e) {}
 }
 

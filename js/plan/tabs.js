@@ -3,7 +3,8 @@
 // by plan.css's own @media print block (hide planner UI, force .grid-outer
 // visible), not by .no-print alone — so printing from any tab yields the week grid.
 import { initPlan, syncPlan, onPlanChange } from './state.js';
-import { onChange, store, syncSchedule, holdSync } from '../state.js';
+import { onChange, store, syncSchedule } from '../state.js';
+import { holdSync } from '../sync.js';
 import { isDragging } from '../grid.js';
 import { renderToday, paintSynced } from './today.js';
 import { renderYear } from './year.js';
@@ -53,20 +54,46 @@ function renderViews() {
 // Nothing polls in a background tab — a phone left on the fridge would otherwise
 // burn battery all day for a page nobody is looking at.
 export const SYNC_MS = 120000;
+// One wake = one round. A phone coming back from the lock screen fires
+// visibilitychange AND focus milliseconds apart, and so does a desktop tab
+// switch: without this, every wake doubled both GETs at exactly the moment the
+// tab is busiest re-rendering.
+export const WAKE_MS = 1000;
 
 export const runSync = () =>
   Promise.all([syncPlan(), syncSchedule()]).then(paintSynced, () => {});
 
+// An <input>/<select>/<textarea> with focus is an edit in progress — the Year
+// sheet's date fields, the editor's note box. Neither store may re-render
+// underneath it, so this hold covers BOTH blobs (js/sync.js is shared).
+export const inputFocused = (doc = document) => {
+  const a = doc && doc.activeElement;
+  return !!a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName || '');
+};
+
+let wired = false;
+
 // Deps are injectable so the visibility rules are testable without a browser.
 export function initLiveSync(run = runSync,
-  { doc = document, win = window, every = setInterval } = {}) {
+  { doc = document, win = window, every = setInterval, now = Date.now } = {}) {
+  if (wired) return false;          // idempotent: never a second interval
+  wired = true;
   const visible = () => doc.visibilityState === 'visible';
+  let last = -Infinity, inflight = false;
+  const fire = () => {
+    const t = now();
+    if (inflight || t - last < WAKE_MS) return;
+    last = t;
+    inflight = true;
+    Promise.resolve(run()).catch(() => {}).then(() => { inflight = false; last = now(); });
+  };
   // A phone returning from the lock screen or the app switcher fires
   // visibilitychange; a desktop tab regaining focus fires window.focus. Both
-  // are the moment a stale tab is about to be read, so both re-sync at once.
-  doc.addEventListener('visibilitychange', () => { if (visible()) run(); });
-  win.addEventListener('focus', () => run());
-  every(() => { if (visible()) run(); }, SYNC_MS);
+  // are the moment a stale tab is about to be read — deduped into one round.
+  doc.addEventListener('visibilitychange', () => { if (visible()) fire(); });
+  win.addEventListener('focus', fire);
+  every(() => { if (visible()) fire(); }, SYNC_MS);
+  return true;
 }
 
 export function initPlanner() {
@@ -83,13 +110,13 @@ export function initPlanner() {
   // Watch #grid/#dayview so the dots survive re-renders that bypass these two
   // hooks entirely (main.js's 60s timer, day-tab taps in js/dayview.js).
   initOverlay();
-  // Two uncommitted-edit states on the template that a fetched blob must not
-  // walk over: a drag/resize in progress (the store is ahead of KV with no save
-  // yet, and re-rendering mid-drag corrupts drop math), and an open editor
-  // (its <input>s are read on change/blur, so a rebuild would drop what is
-  // being typed). Both clear themselves; neither latches.
-  holdSync(isDragging);
-  holdSync(() => !store.locked && (store.addMode || !!store.selId));
+  // Uncommitted-edit states that a fetched blob must not walk over. All three
+  // clear themselves; none latches. A merely SELECTED block is deliberately not
+  // one of them — leaving a block selected would otherwise freeze the tab for
+  // the rest of the day, which is the staleness bug this release exists to fix.
+  holdSync(isDragging);                                     // mid drag/resize
+  holdSync(() => !store.locked && store.addMode);           // half-filled add form
+  holdSync(() => inputFocused());                           // a field has focus
   setTab(t);
   syncPlan().then(paintSynced, () => {});   // boot load; main.js boots the template
   initLiveSync();

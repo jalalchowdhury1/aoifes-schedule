@@ -22,7 +22,13 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 
 const SCHED = await import('../js/state.js');
 const P = await import('../js/plan/state.js');
-const { initLiveSync, runSync, SYNC_MS } = await import('../js/plan/tabs.js');
+const SYNC = await import('../js/sync.js');
+const { initLiveSync, runSync, inputFocused, SYNC_MS, WAKE_MS } = await import('../js/plan/tabs.js');
+// initLiveSync wires exactly once per module instance (one interval per page),
+// so each scheduler test imports its own copy of tabs.js. Its imports — the two
+// stores — resolve to the SAME instances, which is the point.
+const freshTabs = () => import(`../js/plan/tabs.js?n=${Math.random()}`);
+const clearMarks = () => { SYNC.syncInfo.plan = null; SYNC.syncInfo.schedule = null; };
 
 const OLD = '2000-01-01T00:00:00.000Z';
 const NEW = '2099-01-01T00:00:00.000Z';
@@ -80,13 +86,27 @@ test('syncPlan: a save in flight blocks application, and the counter never latch
   assert.deepEqual(P.plan.data.overrides, [ONEOFF]);
 });
 
-test('syncPlan: a POST that REJECTS still releases the counter (finally, not then)', async () => {
+test('syncPlan: a POST that REJECTS still releases the counter, and the tap is REPLAYED not dropped', async () => {
   P.initPlan();
+  P.plan.data.log.push({ date: '2026-09-01', activityId: 'loe', status: 'done' });
   fetchImpl = () => Promise.reject(new Error('offline'));
-  P.savePlan();
+  P.savePlan();                                         // never reaches KV
   await tick();
-  fetchImpl = () => Promise.resolve(res(planBlob({ savedAt: NEW, overrides: [ONEOFF] })));
-  assert.equal(await P.syncPlan(), true);               // not wedged by the failed save
+
+  // Next round: the failed write is re-published FIRST, and nothing is applied
+  // over it. This is the self-heal — an offline tap used to be discarded.
+  const posted = [];
+  fetchImpl = (url, opt) => {
+    if (String(url).includes('plan-save')) { posted.push(JSON.parse(opt.body)); return Promise.resolve(res({ ok: true })); }
+    return Promise.resolve(res(planBlob({ savedAt: NEW, overrides: [ONEOFF] })));
+  };
+  assert.equal(await P.syncPlan(), false, 'the retry round reads nothing');
+  assert.equal(posted.length, 1, 'it re-published the local blob');
+  assert.match(posted[0].data, /"activityId":"loe"/, 'the same bytes, tap included');
+
+  // and the round after that syncs normally again
+  assert.equal(await P.syncPlan(), true);
+  assert.deepEqual(P.plan.data.overrides, [ONEOFF]);
 });
 
 test('syncPlan: a remote blob OLDER than our own last save is ignored', async () => {
@@ -100,6 +120,41 @@ test('syncPlan: a remote blob OLDER than our own last save is ignored', async ()
   assert.equal(r, false);
   assert.equal(rendered, 0);
   assert.equal(serializePlan(P.plan.data), before, 'our own write survives the stale read');
+});
+
+test('isAtLeast: timestamps compare as EPOCHS, not strings (bot microseconds vs browser milliseconds)', () => {
+  // The bot's Python stamps 6 fractional digits, this browser stamps 3. Within
+  // the same millisecond '…12.345678Z' sorts BELOW '…12.345Z' as a string
+  // ('6' < 'Z'), so a string compare rejects a bot write that is in fact the
+  // newer one — the family's tap on Telegram would never reach the open tab.
+  const mine = '2026-08-18T10:00:12.345Z';
+  const bot  = '2026-08-18T10:00:12.345678Z';
+  assert.ok(bot < mine, 'string compare gets this exactly backwards');
+  assert.equal(P.isAtLeast(bot, mine), true, 'same millisecond: not older');
+  assert.equal(P.isAtLeast('2026-08-18T10:00:11.999999Z', mine), false, 'genuinely older');
+  assert.equal(P.isAtLeast('2026-08-18T10:00:13.000001Z', mine), true);
+  assert.equal(P.isAtLeast(mine, mine), true);                      // equal counts
+  assert.equal(P.isAtLeast(undefined, mine), false);
+  assert.equal(P.isAtLeast('not a date', mine), false);
+  assert.equal(P.isAtLeast(mine, 'not a date'), false);
+  // Offset form vs Z form: same instant, still >=.
+  assert.equal(P.isAtLeast('2026-08-18T06:00:12.345-04:00', mine), true);
+});
+
+test('syncPlan: a microsecond-stamped bot write in our own millisecond is APPLIED, not rejected', async () => {
+  P.initPlan();
+  let stamped = null;
+  fetchImpl = (url, opt) => {
+    if (String(url).includes('plan-save')) { stamped = JSON.parse(JSON.parse(opt.body).data).savedAt; return Promise.resolve(res({ ok: true })); }
+    return Promise.resolve(res({ error: 'empty' }));
+  };
+  P.savePlan();
+  await tick();
+  const botStamp = stamped.replace(/Z$/, '678Z');      // same ms, µs precision
+  assert.ok(botStamp < stamped, 'the string trap this guards');
+  fetchImpl = () => Promise.resolve(res(planBlob({ savedAt: botStamp, overrides: [ONEOFF] })));
+  assert.equal(await P.syncPlan(), true);
+  assert.deepEqual(P.plan.data.overrides, [ONEOFF]);
 });
 
 test('syncPlan: after a local save, a remote blob with no savedAt is treated as older', async () => {
@@ -125,33 +180,33 @@ test('syncPlan: with no local save yet, a blob with no savedAt IS applied (fresh
 test('syncPlan: a fetch error leaves the plan untouched and reports no sync', async () => {
   P.initPlan();
   const before = serializePlan(P.plan.data);
-  const at = P.syncInfo.at;
+  clearMarks();
   fetchImpl = () => Promise.reject(new Error('offline'));
   const { r, rendered } = await applied(P.syncPlan);
   assert.equal(r, false);
   assert.equal(rendered, 0);
   assert.equal(serializePlan(P.plan.data), before);
-  assert.equal(P.syncInfo.at, at, 'an offline round must not claim freshness');
+  assert.equal(SYNC.syncInfo.plan, null, 'an offline round must not claim freshness');
 });
 
 test('syncPlan: an error payload is ignored, but the round still counts as reached', async () => {
   P.initPlan();
   const before = serializePlan(P.plan.data);
-  P.syncInfo.at = null;
+  clearMarks();
   fetchImpl = () => Promise.resolve(res({ error: 'no-kv' }));
   assert.equal(await P.syncPlan(), false);
   assert.equal(serializePlan(P.plan.data), before);
-  assert.ok(P.syncInfo.at, 'the server answered: the caption may say so');
+  assert.ok(SYNC.syncInfo.plan, 'the server answered: the caption may say so');
 });
 
-test('syncPlan: syncInfo.at advances on a round that applies nothing (the caption is freshness, not change)', async () => {
+test('the freshness mark advances on a round that applies nothing (the caption is freshness, not change)', async () => {
   P.initPlan();
   const blob = planBlob({ savedAt: NEW });
   fetchImpl = () => Promise.resolve(res(blob));
   await P.syncPlan();
-  P.syncInfo.at = null;
+  clearMarks();
   assert.equal(await P.syncPlan(), false);              // identical: nothing applied
-  assert.ok(P.syncInfo.at, 'still heard from KV');
+  assert.ok(SYNC.syncInfo.plan, 'still heard from KV');
 });
 
 test('syncPlan: an empty KV is seeded once, never after a local save', async () => {
@@ -186,7 +241,8 @@ async function settled() {
 }
 
 let dragging = false;
-SCHED.holdSync(() => dragging);
+SYNC.holdSync(() => dragging);
+SYNC.holdSync(() => inputFocused());        // exactly what js/plan/tabs.js registers
 
 test('syncSchedule: a differing remote blob is applied, re-renders once, and re-seeds the id counter', async () => {
   SCHED.store.events = [...EV];
@@ -298,8 +354,97 @@ test('syncSchedule: a blob missing keys keeps the current values for them', asyn
   assert.deepEqual(SCHED.store.catLabels, { art: 'Art with Ayra' });
 });
 
+test('syncSchedule: a failed save is RE-PUBLISHED on the next round, then normal sync resumes', async () => {
+  SCHED.store.events = [...EV];
+  await settled();
+  SCHED.store.events = [...EV, { id: 'e9', cat: 'art', day: 5, start: 9, end: 10, note: '', name: 'New' }];
+  fetchImpl = () => Promise.reject(new Error('offline'));
+  SCHED.save();                                         // the family's edit, lost in the wire
+  await tick();
+
+  const posted = [];
+  fetchImpl = (url, opt) => {
+    if (String(url).includes('/api/save')) { posted.push(JSON.parse(opt.body).data); return Promise.resolve(res({ ok: true })); }
+    return Promise.resolve(res({ events: EV }));        // KV still has the OLD blob
+  };
+  const out = await rendered(SCHED.syncSchedule);
+  assert.equal(out.r, false, 'the retry round applies nothing');
+  assert.equal(out.rendered, 0);
+  assert.equal(posted.length, 1, 're-published instead of going stale forever');
+  assert.match(posted[0], /"id":"e9"/, 'the edit that failed is the one that went up');
+  assert.equal(SCHED.store.events.length, 2, 'and it was never overwritten by the old blob');
+
+  // KV is now in sync again, so the NEXT round reads normally.
+  fetchImpl = () => Promise.resolve(res({ events: EV2 }));
+  assert.equal(await SCHED.syncSchedule(), true);
+  assert.deepEqual(SCHED.store.events, EV2);
+});
+
+test('syncSchedule: a retry that fails again keeps retrying and never applies', async () => {
+  SCHED.store.events = [...EV];
+  await settled();
+  fetchImpl = () => Promise.reject(new Error('offline'));
+  SCHED.save();
+  await tick();
+  let posts = 0;
+  fetchImpl = url => {
+    if (String(url).includes('/api/save')) { posts++; return Promise.reject(new Error('still offline')); }
+    return Promise.resolve(res({ events: EV2 }));
+  };
+  assert.equal(await SCHED.syncSchedule(), false);
+  assert.equal(await SCHED.syncSchedule(), false);
+  assert.equal(posts, 2, 'every round is another attempt');
+  assert.deepEqual(SCHED.store.events, EV, 'never clobbered while local is ahead');
+  await settled();
+});
+
+// ── the focused-input hold covers BOTH stores ───────────────
+test('inputFocused: true only for a focused field', () => {
+  const doc = tag => ({ activeElement: tag ? { tagName: tag } : null });
+  assert.equal(inputFocused(doc('INPUT')), true);
+  assert.equal(inputFocused(doc('SELECT')), true);
+  assert.equal(inputFocused(doc('TEXTAREA')), true);
+  assert.equal(inputFocused(doc('BUTTON')), false);
+  assert.equal(inputFocused(doc('DIV')), false);
+  assert.equal(inputFocused(doc(null)), false);
+  assert.equal(inputFocused({}), false);
+  assert.equal(inputFocused(undefined), false);
+});
+
+test('a focused field holds BOTH stores (the Year sheet types into the planner blob)', async () => {
+  SCHED.store.events = [...EV];
+  await settled();
+  P.initPlan();
+  globalThis.document.activeElement = { tagName: 'INPUT' };     // mid-edit
+  fetchImpl = () => Promise.resolve(res(planBlob({ savedAt: NEW, overrides: [ONEOFF] })));
+  assert.equal(await P.syncPlan(), false, 'planner sync waits');
+  fetchImpl = () => Promise.resolve(res({ events: EV2 }));
+  assert.equal(await SCHED.syncSchedule(), false, 'template sync waits');
+  assert.deepEqual(P.plan.data.overrides, []);
+  assert.deepEqual(SCHED.store.events, EV);
+
+  globalThis.document.activeElement = null;                     // blur: no latch
+  fetchImpl = () => Promise.resolve(res(planBlob({ savedAt: NEW, overrides: [ONEOFF] })));
+  assert.equal(await P.syncPlan(), true);
+  fetchImpl = () => Promise.resolve(res({ events: EV2 }));
+  assert.equal(await SCHED.syncSchedule(), true);
+});
+
+// ── caption honesty: the older of the two rounds ────────────
+test('syncedAt: null until BOTH blobs have been heard from, then the OLDER one', () => {
+  clearMarks();
+  assert.equal(SYNC.syncedAt(), null);
+  SYNC.markSynced('plan', '2026-08-18T14:00:00.000Z');
+  assert.equal(SYNC.syncedAt(), null, 'a fresh planner over an unknown template proves nothing');
+  SYNC.markSynced('schedule', '2026-08-18T13:00:00.000Z');
+  assert.equal(SYNC.syncedAt(), '2026-08-18T13:00:00.000Z', 'the page is only as fresh as its stalest half');
+  SYNC.markSynced('schedule', '2026-08-18T15:00:00.000Z');
+  assert.equal(SYNC.syncedAt(), '2026-08-18T14:00:00.000Z');
+  clearMarks();
+});
+
 // ── the scheduler: js/plan/tabs.js ──────────────────────────
-function fakeEnv(visibility = 'visible') {
+function fakeEnv(visibility = 'visible', now = () => Date.now()) {
   const handlers = { doc: {}, win: {} };
   let intervalMs = null, intervalFn = null;
   const env = {
@@ -307,23 +452,35 @@ function fakeEnv(visibility = 'visible') {
            addEventListener: (k, fn) => { handlers.doc[k] = fn; } },
     win: { addEventListener: (k, fn) => { handlers.win[k] = fn; } },
     every: (fn, ms) => { intervalFn = fn; intervalMs = ms; },
+    now,
   };
   return { env, handlers, poll: () => intervalFn(), ms: () => intervalMs };
 }
 
-test('initLiveSync: wires visibilitychange + focus + a 120s poll', () => {
+test('initLiveSync: wires visibilitychange + focus + a 120s poll', async () => {
   const { env, handlers, ms } = fakeEnv();
-  initLiveSync(() => {}, env);
+  const T = await freshTabs();
+  assert.equal(T.initLiveSync(() => {}, env), true);
   assert.ok(handlers.doc.visibilitychange);
   assert.ok(handlers.win.focus);
   assert.equal(ms(), SYNC_MS);
   assert.equal(SYNC_MS, 120000);
 });
 
-test('initLiveSync: a hidden tab never polls and never syncs on visibilitychange', () => {
+test('initLiveSync: a second call never wires a second interval', async () => {
+  const T = await freshTabs();
+  const one = fakeEnv(), two = fakeEnv();
+  assert.equal(T.initLiveSync(() => {}, one.env), true);
+  assert.equal(T.initLiveSync(() => {}, two.env), false, 'idempotent');
+  assert.equal(two.ms(), null, 'no timer from the second call');
+  assert.equal(two.handlers.win.focus, undefined);
+});
+
+test('initLiveSync: a hidden tab never polls and never syncs on visibilitychange', async () => {
   const { env, handlers, poll } = fakeEnv('hidden');
   let runs = 0;
-  initLiveSync(() => { runs++; }, env);
+  const T = await freshTabs();
+  T.initLiveSync(() => { runs++; }, env);
   poll();
   handlers.doc.visibilitychange();
   assert.equal(runs, 0, 'a phone on the fridge must not poll KV all day');
@@ -331,14 +488,57 @@ test('initLiveSync: a hidden tab never polls and never syncs on visibilitychange
   assert.equal(runs, 1, 'focus is the one trigger that always means "someone is here"');
 });
 
-test('initLiveSync: a visible tab syncs on poll, on becoming visible, and on focus', () => {
-  const { env, handlers, poll } = fakeEnv('visible');
+test('initLiveSync: a visible tab syncs on poll, on becoming visible, and on focus', async () => {
+  const clock = { t: 0 };
+  const { env, handlers, poll } = fakeEnv('visible', () => clock.t);
   let runs = 0;
-  initLiveSync(() => { runs++; }, env);
-  poll();
-  handlers.doc.visibilitychange();
-  handlers.win.focus();
+  const T = await freshTabs();
+  T.initLiveSync(() => { runs++; }, env);
+  // Each round has to SETTLE before the next trigger counts (a round already in
+  // flight swallows one) — three separate wakes, not one burst.
+  poll();                       await tick();
+  clock.t += WAKE_MS;
+  handlers.doc.visibilitychange(); await tick();
+  clock.t += WAKE_MS;
+  handlers.win.focus();         await tick();
   assert.equal(runs, 3);
+});
+
+test('initLiveSync: one wake = one round (visibilitychange + focus fire together)', async () => {
+  const clock = { t: 5000 };
+  const { env, handlers } = fakeEnv('visible', () => clock.t);
+  let runs = 0;
+  const T = await freshTabs();
+  T.initLiveSync(() => { runs++; }, env);
+
+  handlers.doc.visibilitychange();          // a phone unlocking fires BOTH,
+  await tick();                             // milliseconds apart
+  clock.t += 3;
+  handlers.win.focus();
+  await tick();
+  assert.equal(runs, 1, 'the second is swallowed by the wake window');
+
+  clock.t += WAKE_MS;                       // a genuinely later wake still runs
+  handlers.win.focus();
+  await tick();
+  assert.equal(runs, 2);
+});
+
+test('initLiveSync: a round still running swallows the next trigger', async () => {
+  const clock = { t: 0 };
+  const { env, handlers } = fakeEnv('visible', () => clock.t);
+  let runs = 0, release;
+  const T = await freshTabs();
+  T.initLiveSync(() => { runs++; return new Promise(r => { release = r; }); }, env);
+  handlers.win.focus();
+  clock.t += 10 * WAKE_MS;                  // long past the debounce window
+  handlers.win.focus();
+  assert.equal(runs, 1, 'no overlapping rounds');
+  release();
+  await tick();
+  clock.t += WAKE_MS;
+  handlers.win.focus();
+  assert.equal(runs, 2, 'and it runs again once the first has settled');
 });
 
 test('runSync: one round drives BOTH blobs and resolves even when everything is offline', async () => {

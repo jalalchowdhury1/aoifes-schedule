@@ -8,7 +8,8 @@ import {
   currentCur, cycleStats, doneOn, actTotal, okCls, teachingWeekNumber, dailyStreak,
   weekCapacity,
 } from './model.js';
-import { plan, togglePaced, logTimed, syncInfo } from './state.js';
+import { plan, togglePaced, logTimed } from './state.js';
+import { syncedAt } from '../sync.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
 const AWAY_ICON = { travel: '✈', off: '⏸' };
@@ -33,8 +34,11 @@ export function fmtUntil(days) {
 // "· synced 3:42pm" under the date. The bot writes this plan from outside the
 // browser, so a tab that has not re-read in an hour is showing yesterday's
 // truth — the caption makes that visible at a glance instead of silently wrong.
-// Empty until the first round lands (an offline tab claims nothing). Reuses the
-// app's own fmt() so the time reads like every other time on the page.
+// It reports the OLDER of the two blobs' last rounds (syncedAt), because this
+// page renders both: a fresh planner half over an hour-old template is still an
+// hour-old page. Empty until BOTH have been heard from — an offline tab, or one
+// whose template sync is held by an open form, claims nothing at all. Reuses
+// the app's own fmt() so the time reads like every other time on the page.
 export function syncedCaption(at) {
   if (!at) return '';
   const d = at instanceof Date ? at : new Date(at);
@@ -47,7 +51,7 @@ export function syncedCaption(at) {
 // whole view every 120s just to move a clock.
 export function paintSynced() {
   const el = document.getElementById('psync');
-  if (el) el.textContent = syncedCaption(syncInfo.at);   // textContent: never HTML
+  if (el) el.textContent = syncedCaption(syncedAt());    // textContent: never HTML
 }
 
 // A daily (no-time-slot) activity shows on a normal day; on a travel-type
@@ -224,7 +228,7 @@ export function renderToday() {
   const d = new Date();
   const status = dayStatus(plan.data.periods, today);
 
-  let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}<span id="psync" class="psync">${syncedCaption(syncInfo.at)}</span></div></div>`;
+  let h = `<div class="pcard"><div class="phead">${DAYS[dayIdx(today)]}, ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</div><div class="pmeta">${chips(today)}<span id="psync" class="psync">${syncedCaption(syncedAt())}</span></div></div>`;
   // On an away day the banner IS the headline for the day, so the weekly
   // summary falls in behind it; on a normal day it sits right under the date.
   const week = thisWeekHtml(today);

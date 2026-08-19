@@ -1,6 +1,7 @@
 // App state + persistence. Storage contract is v1's: localStorage key
 // 'aoife_v3' and KV via /api/get + /api/save. DO NOT change keys or shape.
 import { CATS, defEvents, maxIdNum, serialize, applyAltSun, sanitizeEvents } from './model.js';
+import { onHold, markSynced } from './sync.js';
 
 const SK = 'aoife_v3';
 
@@ -23,17 +24,6 @@ export const uid = () => `e${++_n}`;
 // the hold registry below — none of which latch.
 let pendingSaves = 0;      // POSTs in flight; a blob fetched now may predate them
 let saveFailed = false;    // the last POST did not land: local is ahead of KV
-
-// A view can own an interaction that a fetched blob must not interrupt (the
-// grid's drag/resize, an open editor). It registers a predicate here rather
-// than state.js importing the frozen view layer, which would invert the module
-// layering (model -> state -> views). Wired in js/plan/tabs.js.
-const holds = new Set();
-export const holdSync = fn => holds.add(fn);
-const onHold = () => {
-  for (const fn of holds) { try { if (fn()) return true; } catch (e) {} }
-  return false;
-};
 
 export const catLabel = k => store.catLabels[k] || CATS[k]?.label || 'Event';
 export const evLabel = ev => ev.name || catLabel(ev.cat);
@@ -66,21 +56,31 @@ export function initState() {
 //     that DIFFERS therefore came from somewhere else and is the newer one.
 //   * pendingSaves > 0 -> our write is in flight and a read may legitimately
 //     still return the pre-write blob. Never apply.
-//   * saveFailed -> our write never landed (offline): local is ahead of KV
-//     until a save succeeds. Never apply. (The planner gets this for free — a
-//     failed save leaves remote.savedAt < lastLocalSaveAt.)
-//   * onHold() -> a drag/resize or an open editor is an uncommitted local edit;
-//     re-rendering under the cursor also corrupts drop math (commit 49ba699).
+//   * saveFailed -> our write never landed (offline): local is ahead of KV, so
+//     rather than going stale forever we RE-PUBLISH it and skip this round.
+//     Every trigger is therefore a retry, which turns a dropped edit into a
+//     120s self-heal instead of a silent loss.
+//   * onHold() -> a drag/resize, an open add form or a focused input is an
+//     uncommitted local edit; re-rendering under the cursor also corrupts drop
+//     math (commit 49ba699).
 // Identical blobs are dropped before notify(), so a poll never fights the
 // family's scroll, selection or open panel. Errors are silent (offline is
 // normal) and never clobber local state.
 export async function syncSchedule() {
-  if (pendingSaves || saveFailed || onHold()) return false;
+  if (pendingSaves || onHold()) return false;
+  if (saveFailed) {
+    // Retry first, apply later: KV must hold our edit before anything is
+    // allowed to overwrite it on screen. The next round does the reading.
+    await saveRemote(serialize(store));
+    if (!saveFailed) markSynced('schedule');       // KV now matches this tab
+    return false;
+  }
   let data;
   try {
     const res = await fetch('/api/get');
     data = await res.json();
   } catch (e) { return false; }
+  markSynced('schedule');                          // the server answered
   if (!data || data.error || data === 'empty') return false;
   // Re-check after the await: a save or a drag can begin while a fetch is out.
   if (pendingSaves || saveFailed || onHold()) return false;
