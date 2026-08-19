@@ -248,6 +248,16 @@ export function sanitizePlan(raw) {
           ? a.chain.filter(c => c && c.pattern && c.id).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
           : [] };
       if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
+      // Baseline (Subjects 📅 Timeline): rebuild to exactly {setOn, rows} or
+      // drop it — a corrupt baseline must degrade to "no plan yet", never
+      // corrupt the activity or crash a date compare.
+      if ('baseline' in o) {
+        const b = o.baseline, rows = b && typeof b === 'object' ? b.rows : null;
+        const ok = b && isISO(b.setOn) && rows && typeof rows === 'object' &&
+          !Array.isArray(rows) && Object.values(rows).every(isISO);
+        if (ok) o.baseline = { setOn: b.setOn, rows: { ...rows } };
+        else delete o.baseline;
+      }
       return o;
     });
   out.log = (Array.isArray(r.log) ? r.log : [])

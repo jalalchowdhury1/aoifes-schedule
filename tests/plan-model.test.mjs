@@ -764,3 +764,26 @@ test('actualFinishes: band boundaries inside one chain; date sort not array orde
   assert.equal(out['lc:81-90'], '2026-09-10');
   assert.equal(out['lc:91-100'], undefined);
 });
+
+test('sanitizePlan: well-formed baseline round-trips, rebuilt to exactly {setOn, rows}', () => {
+  const p = sanitizePlan({ activities: [{ id: 'a', type: 'paced', status: 'active',
+    baseline: { setOn: '2026-08-19', rows: { 'c1': '2026-09-13' }, junk: 1 } }] });
+  assert.deepEqual(p.activities[0].baseline,
+    { setOn: '2026-08-19', rows: { 'c1': '2026-09-13' } });
+});
+
+test('sanitizePlan: malformed baseline is dropped without dropping the activity', () => {
+  const bad = [
+    'a-string',
+    { rows: { c1: '2026-09-13' } },
+    { setOn: 'yesterday', rows: { c1: '2026-09-13' } },
+    { setOn: '2026-08-19', rows: ['2026-09-13'] },
+    { setOn: '2026-08-19', rows: { c1: 'soon' } },
+    { setOn: '2026-08-19' },
+  ];
+  for (const baseline of bad) {
+    const p = sanitizePlan({ activities: [{ id: 'a', type: 'paced', status: 'active', baseline }] });
+    assert.equal(p.activities.length, 1, JSON.stringify(baseline));
+    assert.equal('baseline' in p.activities[0], false, JSON.stringify(baseline));
+  }
+});
