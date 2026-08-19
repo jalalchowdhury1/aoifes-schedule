@@ -123,22 +123,27 @@ export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 export const BAND_SIZE = 10;
 export function timelineRows(act) {
   const rows = [];
+  // WALK_CAP is declared later in this file; fine at call time (module-scope
+  // const, this function only runs post-evaluation). Same belt-and-braces
+  // reasoning as WALK_CAP's own comment: a fat-fingered lastUnit (or a huge
+  // hand-built chain) must never build 500k row objects and hang a tab.
   for (const c of act?.chain || []) {
+    if (rows.length >= WALK_CAP) break;
     const total = sessionsCount(c);
-    const done = Math.min(c.done || 0, total);
+    const done = Math.min(Math.max(0, c.done || 0), total);
     if (c.pattern === 'tb-wb') {
       rows.push({ key: c.id, chainId: c.id, label: c.name || c.id, sessions: total, done });
     } else {
       if (c.firstUnit == null || c.lastUnit == null) continue;
       const word = c.unitWord || 'Lesson';
       let left = done;
-      for (let a = c.firstUnit; a <= c.lastUnit; a += BAND_SIZE) {
+      for (let a = c.firstUnit; a <= c.lastUnit && rows.length < WALK_CAP; a += BAND_SIZE) {
         const b = Math.min(a + BAND_SIZE - 1, c.lastUnit);
         const n = b - a + 1;
         const d = Math.min(left, n);
         left -= d;
         rows.push({ key: `${c.id}:${a}-${b}`, chainId: c.id,
-          label: `${word}s ${a}–${b}`, sessions: n, done: d });
+          label: a === b ? `${word} ${a}` : `${word}s ${a}–${b}`, sessions: n, done: d });
       }
     }
   }
@@ -159,8 +164,13 @@ export function chainTimeline(act, fromDate, plan, horizon = 300) {
   let acc = 0, w = mondayOf(fromDate), i = 0;
   for (let wk = 0; wk < horizon && i < rows.length; wk++) {
     acc += weekCapacity(act, w, plan.periods, plan.parentCycle);
-    while (i < rows.length && (rows[i].complete || acc >= targets[i])) {
-      if (!rows[i].complete) rows[i].finish = addDays(w, 6);
+    // A zero-session row (a chapter waiting for its counts, a first-class
+    // state in this app) contributes nothing to `targets`, so it shares its
+    // target with whichever row precedes it and would otherwise be popped
+    // and stamped with THAT row's date. Pass it through untouched instead —
+    // finish stays null, the UI shows "—".
+    while (i < rows.length && (rows[i].complete || rows[i].sessions === 0 || acc >= targets[i])) {
+      if (!rows[i].complete && rows[i].sessions > 0) rows[i].finish = addDays(w, 6);
       i++;
     }
     w = addDays(w, 7);

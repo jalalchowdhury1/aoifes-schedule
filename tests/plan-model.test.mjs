@@ -648,7 +648,7 @@ test('weekAttendance: a dated one-off logs against its own id and never inflates
 });
 
 // ── Chapter timeline (Subjects 📅 Timeline) ─────────────────
-import { timelineRows, BAND_SIZE, chainTimeline, actualFinishes } from '../js/plan/model.js';
+import { timelineRows, BAND_SIZE, chainTimeline, actualFinishes, WALK_CAP } from '../js/plan/model.js';
 
 const TL_CYC = { anchorMonday: '2026-08-24', dutyStart: '2026-08-11' };
 const TL_SM = { id: 'sm', type: 'paced', status: 'active',
@@ -786,4 +786,63 @@ test('sanitizePlan: malformed baseline is dropped without dropping the activity'
     assert.equal(p.activities.length, 1, JSON.stringify(baseline));
     assert.equal('baseline' in p.activities[0], false, JSON.stringify(baseline));
   }
+});
+
+// ── Timeline row hardening (code review fixes) ───────────────
+test('timelineRows: WALK_CAP bounds a chain with a huge unit span, and returns quickly', () => {
+  const huge = { id: 'g', pattern: 'simple', firstUnit: 1, lastUnit: 5000000, done: 0 };
+  const start = Date.now();
+  const rows = timelineRows({ chain: [huge] });
+  assert.equal(rows.length, WALK_CAP);
+  assert.ok(Date.now() - start < 1000, 'timelineRows must not build 500k row objects');
+});
+
+test('chainTimeline: a zero-session (waiting-for-counts) row passes through with finish null', () => {
+  const act = { id: 'wait', rhythm: { kind: 'daily' }, travel: { mode: 'pause' },
+    chain: [
+      { id: 'ch1', name: 'Ch 1', pattern: 'tb-wb', lessons: 3, tests: 0, done: 0 },   // 6 sessions, in progress
+      { id: 'ch2', name: 'Ch 2', pattern: 'tb-wb', lessons: 0, tests: 0, done: 0 },   // 0 sessions: waiting for counts
+    ] };
+  const plan = { periods: [], parentCycle: TL_CYC };
+  const rows = chainTimeline(act, '2026-08-19', plan);
+  const ch2 = rows.find(r => r.key === 'ch2');
+  assert.equal(ch2.finish, null);
+  assert.equal(ch2.complete, false);
+  const ch1 = rows.find(r => r.key === 'ch1');
+  assert.equal(ch1.finish, projectFinish(act, '2026-08-19', plan).date);
+});
+
+test('timelineRows: negative done clamps to 0', () => {
+  const act = { chain: [{ id: 'g', pattern: 'simple', firstUnit: 1, lastUnit: 15, done: -3 }] };
+  const rows = timelineRows(act);
+  assert.deepEqual(rows.map(r => r.done), [0, 0]);
+});
+
+test('timelineRows: a single-unit tail band gets a singular label, no dash', () => {
+  const act = { chain: [{ id: 'w', pattern: 'simple', firstUnit: 1, lastUnit: 11, unitWord: 'Week' }] };
+  const rows = timelineRows(act);
+  assert.deepEqual(rows.map(r => r.label), ['Weeks 1–10', 'Week 11']);
+});
+
+test('timelineRows/chainTimeline: a chain mixing tb-wb and simple items keeps teaching order and the projectFinish invariant', () => {
+  const act = { id: 'mix', rhythm: { kind: 'daily' }, travel: { mode: 'reduced', factor: 0.5 },
+    chain: [
+      { id: 'm1', name: 'Ch 1', pattern: 'tb-wb', lessons: 2, tests: 0, done: 0 },         // 4 sessions
+      { id: 'm2', name: 'Unit', pattern: 'simple', firstUnit: 1, lastUnit: 15, done: 0 },  // 2 bands
+    ] };
+  const rows = timelineRows(act);
+  assert.deepEqual(rows.map(r => r.key), ['m1', 'm2:1-10', 'm2:11-15']);
+  const plan = { periods: [], parentCycle: TL_CYC };
+  const ct = chainTimeline(act, '2026-08-19', plan);
+  const last = [...ct].reverse().find(r => !r.complete);
+  assert.equal(last.finish, projectFinish(act, '2026-08-19', plan).date);
+});
+
+test('chainTimeline: an activity with no rhythm (zero capacity forever) leaves unfinished rows at finish null, no hang', () => {
+  const act = { id: 'norhythm', chain: [{ id: 'x', pattern: 'tb-wb', lessons: 5, tests: 0, done: 0 }] };
+  const plan = { periods: [], parentCycle: TL_CYC };
+  const start = Date.now();
+  const rows = chainTimeline(act, '2026-08-19', plan);
+  assert.ok(Date.now() - start < 1000, 'chainTimeline must not hang on zero capacity');
+  assert.ok(rows.every(r => r.finish === null));
 });
