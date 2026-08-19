@@ -648,7 +648,7 @@ test('weekAttendance: a dated one-off logs against its own id and never inflates
 });
 
 // ── Chapter timeline (Subjects 📅 Timeline) ─────────────────
-import { timelineRows, BAND_SIZE } from '../js/plan/model.js';
+import { timelineRows, BAND_SIZE, chainTimeline } from '../js/plan/model.js';
 
 const TL_CYC = { anchorMonday: '2026-08-24', dutyStart: '2026-08-11' };
 const TL_SM = { id: 'sm', type: 'paced', status: 'active',
@@ -695,4 +695,43 @@ test('timelineRows: short tail band, unitWord, done clamp, junk chain skipped', 
   assert.deepEqual(rows.map(r => r.sessions), [10, 5]);
   assert.deepEqual(rows.map(r => r.done), [10, 5]);                // 99 clamped to 15
   assert.deepEqual(timelineRows({}), []);                          // no chain at all
+});
+
+test('chainTimeline: last unfinished row lands EXACTLY on projectFinish (the invariant)', () => {
+  for (const periods of [[], [{ id: 'p1', start: '2027-01-04', end: '2027-02-07', type: 'travel' }]]) {
+    const p = { periods, parentCycle: TL_CYC };
+    for (const act of [TL_SM, TL_LOE]) {
+      const rows = chainTimeline(act, '2026-08-19', p);
+      const last = [...rows].reverse().find(r => !r.complete);
+      assert.equal(last.finish, projectFinish(act, '2026-08-19', p).date,
+        `${act.id} with ${periods.length} periods`);
+    }
+  }
+});
+
+test('chainTimeline: rows finish in order, complete rows have finish null', () => {
+  const done1 = { ...TL_SM, chain: [
+    { ...TL_SM.chain[0], done: 6 },            // Ch 1 fully done
+    { ...TL_SM.chain[1], done: 0 },
+  ] };
+  const rows = chainTimeline(done1, '2026-08-19', { periods: [], parentCycle: TL_CYC });
+  assert.equal(rows[0].complete, true);
+  assert.equal(rows[0].finish, null);
+  assert.equal(rows[1].complete, false);
+  assert.match(rows[1].finish, /^\d{4}-\d{2}-\d{2}$/);
+  const lrows = chainTimeline(TL_LOE, '2026-08-19', { periods: [], parentCycle: TL_CYC })
+    .filter(r => !r.complete);
+  for (let i = 1; i < lrows.length; i++)
+    assert.ok(lrows[i].finish >= lrows[i - 1].finish, `row ${i} goes backwards`);
+});
+
+test('chainTimeline: horizon exhaustion leaves finish null (UI shows —)', () => {
+  const rows = chainTimeline(TL_LOE, '2026-08-19', { periods: [], parentCycle: TL_CYC }, 1);
+  assert.ok(rows.some(r => !r.complete && r.finish === null));
+});
+
+test('chainTimeline: everything done → all rows complete, no dates', () => {
+  const allDone = { ...TL_SM, chain: TL_SM.chain.map(c => ({ ...c, done: 99 })) };
+  const rows = chainTimeline(allDone, '2026-08-19', { periods: [], parentCycle: TL_CYC });
+  assert.ok(rows.every(r => r.complete && r.finish === null));
 });

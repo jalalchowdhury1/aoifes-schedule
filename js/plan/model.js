@@ -145,6 +145,29 @@ export function timelineRows(act) {
   return rows;
 }
 
+// Per-row projected finish dates from the SAME week-walk as projectFinish, so
+// the last unfinished row lands on exactly projectFinish's date (unit-pinned):
+// the breakdown can never contradict the card's headline. A row's finish is
+// the Sunday of the week its cumulative remaining sessions are covered.
+export function chainTimeline(act, fromDate, plan, horizon = 300) {
+  const rows = timelineRows(act).map(r =>
+    ({ ...r, complete: r.sessions > 0 && r.done >= r.sessions, finish: null }));
+  const targets = [];                 // cumulative remaining sessions per row
+  let cum = 0;
+  for (const r of rows) { cum += Math.max(0, r.sessions - r.done); targets.push(cum); }
+  if (!cum) return rows;              // nothing left anywhere
+  let acc = 0, w = mondayOf(fromDate), i = 0;
+  for (let wk = 0; wk < horizon && i < rows.length; wk++) {
+    acc += weekCapacity(act, w, plan.periods, plan.parentCycle);
+    while (i < rows.length && (rows[i].complete || acc >= targets[i])) {
+      if (!rows[i].complete) rows[i].finish = addDays(w, 6);
+      i++;
+    }
+    w = addDays(w, 7);
+  }
+  return rows;
+}
+
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
 // Every date that a week-walk loop compares against MUST be a real ISO date,
 // or `while (w <= badDate)` never terminates. Guard them all here.
