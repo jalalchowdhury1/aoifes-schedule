@@ -32,7 +32,8 @@ Static vanilla app, no build step, no dependencies, no framework:
   no /api). Kept for history; it drifts from the live app by design. DO NOT TOUCH.
 - js/plan/model.js — PURE planner model: dates/weeks/cycle math, session sequences, capacities, projections, stats, clash, sanitize, `mergePlanWrites` (the endpoint's concurrent-write union)
 - js/plan/state.js — planner store, localStorage aoife_plan_v1, /api/plan-* I/O,
-  mutations, `syncPlan()` live re-sync + `syncInfo` (the Today freshness caption)
+  mutations, `syncPlan()` live re-sync with failed-save replay (freshness stamps
+  live in js/sync.js)
 - js/plan/seed.js — PURE: the initial aoife_plan blob (honest as of 2026-08-16)
 - js/plan/tabs.js — tab navigation + boot; lazy view mounting; the live-sync
   scheduler (`initLiveSync`: visibilitychange/focus/120s poll, both blobs)
