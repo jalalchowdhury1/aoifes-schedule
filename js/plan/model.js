@@ -168,6 +168,31 @@ export function chainTimeline(act, fromDate, plan, horizon = 300) {
   return rows;
 }
 
+// Actual finish dates recovered from the log: dated 'done' entries per chain,
+// replayed in date order — the entry that crosses a row's cumulative session
+// boundary dates that row. Rows advanced without log rows (bulk `done` bumps
+// from a Claude session) have no entry here; the view shows a bare ✓.
+export function actualFinishes(act, log) {
+  const out = {};
+  const byChain = new Map();
+  for (const r of timelineRows(act)) {
+    if (!byChain.has(r.chainId)) byChain.set(r.chainId, []);
+    byChain.get(r.chainId).push(r);
+  }
+  for (const [chainId, rows] of byChain) {
+    const dates = (Array.isArray(log) ? log : [])
+      .filter(e => e && e.status === 'done' && e.curriculum === chainId &&
+        typeof e.date === 'string' && ISO.test(e.date))
+      .map(e => e.date).sort();
+    let upto = 0;
+    for (const r of rows) {
+      upto += r.sessions;
+      if (dates.length >= upto) out[r.key] = dates[upto - 1];
+    }
+  }
+  return out;
+}
+
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
 // Every date that a week-walk loop compares against MUST be a real ISO date,
 // or `while (w <= badDate)` never terminates. Guard them all here.

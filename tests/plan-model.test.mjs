@@ -648,7 +648,7 @@ test('weekAttendance: a dated one-off logs against its own id and never inflates
 });
 
 // ── Chapter timeline (Subjects 📅 Timeline) ─────────────────
-import { timelineRows, BAND_SIZE, chainTimeline } from '../js/plan/model.js';
+import { timelineRows, BAND_SIZE, chainTimeline, actualFinishes } from '../js/plan/model.js';
 
 const TL_CYC = { anchorMonday: '2026-08-24', dutyStart: '2026-08-11' };
 const TL_SM = { id: 'sm', type: 'paced', status: 'active',
@@ -734,4 +734,33 @@ test('chainTimeline: everything done → all rows complete, no dates', () => {
   const allDone = { ...TL_SM, chain: TL_SM.chain.map(c => ({ ...c, done: 99 })) };
   const rows = chainTimeline(allDone, '2026-08-19', { periods: [], parentCycle: TL_CYC });
   assert.ok(rows.every(r => r.complete && r.finish === null));
+});
+
+test('actualFinishes: the log entry crossing a row boundary dates that row', () => {
+  const log = [];
+  for (let i = 1; i <= 11; i++)
+    log.push({ date: `2026-09-${String(i).padStart(2, '0')}`, activityId: 'sm',
+      status: 'done', curriculum: i <= 6 ? 'c1' : 'c2' });
+  const out = actualFinishes(TL_SM, log);
+  assert.equal(out['c1'], '2026-09-06');
+  assert.equal(out['c2'], '2026-09-11');
+});
+
+test('actualFinishes: partial chapters and bulk done-bumps have no date', () => {
+  const log = [
+    { date: '2026-09-01', status: 'done', curriculum: 'c1' },
+    { date: '2026-09-02', status: 'done', curriculum: 'c1' },
+  ];
+  const out = actualFinishes(TL_SM, log);
+  assert.deepEqual(out, {});
+  assert.deepEqual(actualFinishes(TL_SM, undefined), {});
+});
+
+test('actualFinishes: band boundaries inside one chain; date sort not array order', () => {
+  const log = [];
+  for (let i = 10; i >= 1; i--)
+    log.push({ date: `2026-09-${String(i).padStart(2, '0')}`, status: 'done', curriculum: 'lc' });
+  const out = actualFinishes(TL_LOE, log);
+  assert.equal(out['lc:81-90'], '2026-09-10');
+  assert.equal(out['lc:91-100'], undefined);
 });
