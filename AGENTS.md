@@ -287,22 +287,36 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   weekday change (Mon → Thu) re-anchors, to this week.
 - **Markers** (greppable in `~/Library/Logs/aoife-gcal-sync.log`):
   `GCAL-SYNC OK <date> <n_events>` · `GCAL-SYNC FAIL <date> <reason>` (exit 1,
-  one line, never a traceback wall) · `GCAL-SYNC WAITING calendar-not-shared-yet`
-  and `GCAL-SYNC WAITING calendar-api-not-enabled` (exit 0). **WAITING is exit 0
-  on purpose**: both are setup steps only the Google account owner can perform,
-  and paging at 5 AM for one is noise. It is not a way to hide forever — the
-  fleet probe greps `GCAL-SYNC OK {date}`, so once its `live_since` grace date
-  passes, a calendar still stuck in WAITING is reported.
-- **Owner setup (three steps, all outside this repo).** 1) Create a calendar
-  named exactly `Aoife's School`. 2) Share it with
-  `claude-sheets@hoa-tracker-494016.iam.gserviceaccount.com` with **"Make changes
+  one line, never a traceback wall) · and THREE exit-0 `WAITING` states, one per
+  owner setup step, in the order they clear: `calendar-api-disabled` →
+  `calendar-not-shared-yet` → `write-permission`. **WAITING is exit 0 on
+  purpose**: these are steps only the Google account owner can perform, paging at
+  5 AM for one is noise, and every one of them heals on the next nightly run with
+  nothing to re-trigger by hand. It is not a way to hide forever — the fleet
+  probe greps `GCAL-SYNC OK {date}`, so once its `live_since` grace date passes,
+  a calendar still stuck in any WAITING state is reported.
+- **Owner setup (three steps, all outside this repo).** 1) Enable **Google
+  Calendar API** in cloud project `hoa-tracker-494016`; that project was only
+  ever used for Sheets. VERIFIED 2026-08-18 that the service account CANNOT
+  enable it itself (`serviceusage.services.enable` → 403 "Permission denied to
+  enable service"), and Google's own error text warns the switch takes a few
+  minutes to propagate — one 403 right after the click is expected, not a
+  failure. 2) Create a calendar named exactly `Aoife's School`. 3) Share it with
+  `claude-sheets@hoa-tracker-494016.iam.gserviceaccount.com` as **"Make changes
   to events"** — it then appears in the service account's calendarList, which is
-  how the sync finds it (no id is hardcoded). 3) Enable **Google Calendar API**
-  in cloud project `hoa-tracker-494016`; that project was only ever used for
-  Sheets. VERIFIED 2026-08-18 that the service account CANNOT enable it itself
-  (`serviceusage.services.enable` → 403 "Permission denied to enable service").
+  how the sync finds it (no calendar id is hardcoded).
   The key itself lives at `~/.config/mcp-google-sheets/service-account.json` and
   is only ever read by path — never copied into this repo (which is public).
+- **Read-only shares are gated BEFORE any write.** "See all event details"
+  (`accessRole: reader`) lists perfectly well and then 403s every single write,
+  one at a time — a log wall of identical permission errors that names no cause.
+  So the sync checks `accessRole` on the calendarList entry and stops at
+  `GCAL-SYNC WAITING write-permission` unless it is `writer`/`owner`, before
+  reading or writing anything. A 403 during the writes themselves (the share was
+  downgraded after the list call — `accessRole` is a cached field) lands on the
+  same marker. **Throttle and quota 403s are deliberately NOT caught**:
+  `rateLimitExceeded`/`quotaExceeded` stay FAIL, because a sync that quietly
+  stopped publishing must page someone.
 - **launchd**: `com.jalal.aoife-gcal-sync` at 04:10 daily (overnight window per
   the house rule; after the 03:40 backup, before the 05:00 fleet check).
   `com.jalal.aoife-gcal-sync.plist` is committed at the repo root and installed
@@ -322,7 +336,7 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   - Periods are NOT windowed (the list is short and curated); overrides are.
   - Overrides with no times are Today-list items and have no calendar shape.
   - No reverse sync and no reminders/attendees/colors are set.
-- **Tests**: `cd scripts/gcal-sync && uv run pytest` (53, all offline — Google is
+- **Tests**: `cd scripts/gcal-sync && uv run pytest` (64, all offline — Google is
   a fake discovery client, the two blobs are patched). These are NOT part of the
   repo's `node --test` suite; run both before shipping a change here.
   `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before

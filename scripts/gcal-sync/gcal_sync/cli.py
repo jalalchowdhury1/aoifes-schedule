@@ -2,14 +2,19 @@
 
 Markers (the fleet probe greps these out of ~/Library/Logs/aoife-gcal-sync.log):
   GCAL-SYNC OK <date> <n_events>              — synced, n = events now desired
+  GCAL-SYNC WAITING calendar-api-disabled     — exit 0, an owner step is pending
   GCAL-SYNC WAITING calendar-not-shared-yet   — exit 0, an owner step is pending
-  GCAL-SYNC WAITING calendar-api-not-enabled  — exit 0, an owner step is pending
+  GCAL-SYNC WAITING write-permission          — exit 0, an owner step is pending
   GCAL-SYNC FAIL <date> <reason>              — exit 1
 
-WAITING is exit 0 on purpose: a setup step only the account owner can perform is
-not a broken job, and paging at 5 AM for it would be noise. It is not a way to
-hide forever either — the fleet probe greps `GCAL-SYNC OK {date}`, so once its
-`live_since` grace date passes, a calendar still stuck in WAITING is reported.
+The three WAITING states are the three setup steps, in the order they clear:
+enable the API → share the calendar → grant "Make changes to events". Each is
+exit 0 on purpose: a step only the Google account owner can perform is not a
+broken job, and paging at 5 AM for it would be noise. Every one of them heals by
+itself on the next nightly run, so there is nothing to re-trigger by hand. It is
+not a way to hide forever either — the fleet probe greps `GCAL-SYNC OK {date}`,
+so once its `live_since` grace date passes, a calendar still stuck in any
+WAITING state is reported.
 """
 
 from __future__ import annotations
@@ -48,26 +53,56 @@ def build_service(sa_path: str):
     return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
+WRITE_ROLES = ("owner", "writer")
+
+
+def _status(exc):
+    return getattr(getattr(exc, "resp", None), "status", None)
+
+
 def api_disabled(exc) -> bool:
     """True when Google says the Calendar API is off for this cloud project.
 
     The service account cannot switch it on itself (verified 2026-08-18:
     serviceusage enable -> 403 'Permission denied to enable service'), so this
     is an owner step exactly like sharing the calendar — and gets the same
-    exit-0 WAITING treatment rather than a nightly FAIL.
+    exit-0 WAITING treatment rather than a nightly FAIL. Google's own error text
+    warns that enabling takes a few minutes to propagate, so a 403 right after
+    the owner clicks the button is expected, not terminal: the next nightly run
+    (or the next poll) clears it with no intervention.
     """
     text = str(exc)
-    return "SERVICE_DISABLED" in text or "has not been used in project" in text
+    return ("accessNotConfigured" in text or "SERVICE_DISABLED" in text
+            or "has not been used in project" in text)
+
+
+def write_denied(exc) -> bool:
+    """A 403 that means 'this calendar is shared read-only', not 'slow down'.
+
+    Rate-limit and quota 403s are REAL failures — they must stay FAIL so the
+    fleet sees them; only a permission 403 is an owner setup step.
+    """
+    text = str(exc)
+    if _status(exc) != 403:
+        return False
+    if "rateLimit" in text or "quotaExceeded" in text or "userRateLimit" in text:
+        return False
+    return True
 
 
 def find_calendar(service, name: str):
-    """The shared calendar's id, or None while the user has not shared it yet."""
+    """The shared calendar's calendarList entry, or None if it is not there yet.
+
+    Returns the whole entry, not just the id: `accessRole` is what tells us
+    whether the owner shared it as "See all event details" (reader — we must not
+    attempt writes) or "Make changes to events" (writer).
+    """
     token = None
     while True:
         page = service.calendarList().list(pageToken=token, maxResults=250).execute()
         for cal in page.get("items", []):
             if (cal.get("summary") or "").strip() == name:
-                return cal["id"]
+                return cal
         token = page.get("nextPageToken")
         if not token:
             return None
@@ -136,18 +171,28 @@ def main(argv=None) -> int:
 
         service = build_service(sa_path)
         try:
-            cal_id = find_calendar(service, args.calendar)
+            cal = find_calendar(service, args.calendar)
         except Exception as e:
             if not api_disabled(e):
                 raise
-            print("GCAL-SYNC WAITING calendar-api-not-enabled "
-                  "(enable 'Google Calendar API' in cloud project hoa-tracker-494016)")
+            print("GCAL-SYNC WAITING calendar-api-disabled "
+                  "(enable 'Google Calendar API' in cloud project hoa-tracker-494016; "
+                  "Google needs a few minutes to propagate after the click)")
             return 0
-        if cal_id is None:
+        if cal is None:
             print(f"GCAL-SYNC WAITING calendar-not-shared-yet "
                   f"(share '{args.calendar}' with the service account)")
             return 0
 
+        # Read-only share: reading and diffing would succeed and every write
+        # would 403 one at a time. Stop before touching anything.
+        role = cal.get("accessRole")
+        if role not in WRITE_ROLES:
+            print(f"GCAL-SYNC WAITING write-permission "
+                  f"(calendar shared as '{role}'; needs 'Make changes to events')")
+            return 0
+
+        cal_id = cal["id"]
         existing = list_synced(service, cal_id)
         sync_plan = model.reconcile(desired, existing)
         print(f"[{stamp}] desired={len(desired)} existing={len(existing)} "
@@ -163,7 +208,17 @@ def main(argv=None) -> int:
             print(f"GCAL-SYNC DRY-RUN {stamp} {len(desired)}")
             return 0
 
-        apply_plan(service, cal_id, sync_plan)
+        try:
+            apply_plan(service, cal_id, sync_plan)
+        except Exception as e:
+            # Belt and braces behind the accessRole gate: the share can be
+            # downgraded between the list call and the writes, and accessRole
+            # is a cached calendarList field.
+            if not write_denied(e):
+                raise
+            print("GCAL-SYNC WAITING write-permission "
+                  "(write rejected 403; calendar needs 'Make changes to events')")
+            return 0
         print(f"GCAL-SYNC OK {stamp} {len(desired)}")
         return 0
     except Exception as e:                                # one line, never a traceback wall
