@@ -134,6 +134,24 @@ def _timed(date: dt.date, start: float, end: float) -> tuple[dict, dict]:
     )
 
 
+def _sig_part(part: dict, recurring: bool):
+    """Normalise one end of an event for hashing.
+
+    For a RECURRING series the absolute DTSTART date is an ANCHOR, not content:
+    the builder always proposes this week's instance, so hashing the date would
+    make every series look "changed" every Monday and re-patch all of them —
+    dragging each series' start forward a week, every week, and taking the
+    family's past instances with it. What actually identifies a weekly slot is
+    its weekday + time of day, so that is what the hash sees. A one-off keeps
+    its real date: moving a makeup lesson to another day IS a change.
+    """
+    if recurring and "dateTime" in part:
+        date = dt.date.fromisoformat(part["dateTime"][:10])
+        return {"byday": BYDAY[date.weekday()], "time": part["dateTime"][11:],
+                "timeZone": part.get("timeZone")}
+    return part
+
+
 def signature(body: dict) -> str:
     """Content hash of everything this sync owns on an event.
 
@@ -141,18 +159,46 @@ def signature(body: dict) -> str:
     back (offsets, expanded RRULEs, dropped empty keys) — a patch fires when WE
     changed something, never because the API echoed a value differently.
     """
+    recurring = bool(body.get("recurrence"))
     payload = json.dumps(
         {
             "summary": body.get("summary"),
             "description": body.get("description"),
-            "start": body.get("start"),
-            "end": body.get("end"),
+            "start": _sig_part(body.get("start") or {}, recurring),
+            "end": _sig_part(body.get("end") or {}, recurring),
             "recurrence": body.get("recurrence"),
         },
         sort_keys=True,
         ensure_ascii=False,
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def keep_anchor(body: dict, existing: dict) -> dict:
+    """Re-point a patch at the series' EXISTING DTSTART date where valid.
+
+    A weekly series that only changed title or time keeps the start date it was
+    created with — patching DTSTART forward would silently drop every instance
+    before the new anchor. If the WEEKDAY genuinely changed the anchor is stale,
+    so the freshly built one (this week) is used instead. Not applicable to
+    one-offs and all-day periods, whose date is the content.
+    """
+    if not body.get("recurrence"):
+        return body
+    current = ((existing or {}).get("start") or {}).get("dateTime")
+    if not current:
+        return body
+    try:
+        anchor = dt.date.fromisoformat(current[:10])
+        wanted = dt.date.fromisoformat(body["start"]["dateTime"][:10])
+    except (KeyError, TypeError, ValueError):
+        return body
+    if anchor.weekday() != wanted.weekday():
+        return body                                    # the day of week moved: re-anchor
+    out = dict(body)
+    for side in ("start", "end"):
+        out[side] = dict(body[side], dateTime=f"{anchor.isoformat()}T{body[side]['dateTime'][11:]}")
+    return out
 
 
 def _event(key: str, summary: str, start: dict, end: dict, recurrence=None) -> dict:
@@ -325,7 +371,7 @@ def reconcile(desired: dict, existing: list) -> SyncPlan:
         if sig_of(keep) == sig_of(body):
             plan.unchanged += 1
         else:
-            plan.patches.append((keep["id"], body))
+            plan.patches.append((keep["id"], keep_anchor(body, keep)))
 
     for rows in by_key.values():          # keys we no longer want at all
         plan.deletes.extend(r["id"] for r in rows)

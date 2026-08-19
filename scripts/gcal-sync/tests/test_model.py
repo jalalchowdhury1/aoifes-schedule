@@ -245,6 +245,61 @@ def test_signature_changes_with_content_and_is_stable_otherwise():
     assert model.sig_of(a) == model.sig_of(b) != model.sig_of(c)
 
 
+# ── the DTSTART anchor (a weekly series must not drift) ─────────────────────
+def test_a_recurring_signature_ignores_which_week_it_was_built_in():
+    """Otherwise every Monday looks like a change and re-patches the world."""
+    this_week = model.template_events(schedule([ev()]), TODAY)["tpl:e1"]
+    next_week = model.template_events(schedule([ev()]), TODAY + dt.timedelta(days=7))["tpl:e1"]
+    later = model.template_events(schedule([ev()]), TODAY + dt.timedelta(days=200))["tpl:e1"]
+    assert model.sig_of(this_week) == model.sig_of(next_week) == model.sig_of(later)
+    assert this_week["start"]["dateTime"] != next_week["start"]["dateTime"]   # dates DO differ
+
+
+def test_a_one_off_signature_does_depend_on_its_date():
+    mon = model.override_events({"overrides": [override(date="2026-08-19")]}, TODAY)["ov:x1"]
+    tue = model.override_events({"overrides": [override(date="2026-08-20")]}, TODAY)["ov:x1"]
+    assert model.sig_of(mon) != model.sig_of(tue)
+
+
+def test_a_week_passing_produces_no_patches_at_all():
+    s = schedule([ev(id="e1"), ev(id="e2", day=4, cat="hala")])
+    existing = [gcal_row(f"g{i}", b) for i, b in enumerate(model.desired_state(s, {}, TODAY).values())]
+    later = model.desired_state(s, {}, TODAY + dt.timedelta(days=21))
+    plan = model.reconcile(later, existing)
+    assert plan.touched == 0 and plan.unchanged == 2
+
+
+def test_patching_a_time_change_keeps_the_original_start_date():
+    before = model.template_events(schedule([ev(start=10, end=11)]), TODAY)["tpl:e1"]
+    row = gcal_row("g1", before)
+    row["start"] = {"dateTime": "2026-06-01T10:00:00", "timeZone": model.TZ}   # anchored in June
+    after = model.template_events(schedule([ev(start=10.5, end=11)]), TODAY)
+    (_, body), = model.reconcile(after, [row]).patches
+    assert body["start"]["dateTime"] == "2026-06-01T10:30:00"                  # anchor kept
+    assert body["end"]["dateTime"] == "2026-06-01T11:00:00"
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+    assert model.sig_of(body) == model.sig_of(after["tpl:e1"])                 # anchor is not content
+
+
+def test_patching_a_weekday_change_re_anchors_to_this_week():
+    before = model.template_events(schedule([ev(day=0)]), TODAY)["tpl:e1"]
+    row = gcal_row("g1", before)
+    row["start"] = {"dateTime": "2026-06-01T10:00:00", "timeZone": model.TZ}   # a Monday
+    after = model.template_events(schedule([ev(day=3)]), TODAY)                # moved to Thursday
+    (_, body), = model.reconcile(after, [row]).patches
+    assert body["start"]["dateTime"].startswith("2026-08-20")                  # this week's Thu
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=TH"]
+
+
+def test_keep_anchor_leaves_one_offs_and_all_day_periods_alone():
+    one_off = model.override_events({"overrides": [override()]}, TODAY)["ov:x1"]
+    period = model.period_events(
+        {"periods": [{"id": "p1", "start": "2026-09-01", "end": "2026-09-02", "type": "off"}]})["pd:p1"]
+    stale = {"start": {"dateTime": "2020-01-01T09:00:00"}}
+    assert model.keep_anchor(one_off, stale) == one_off
+    assert model.keep_anchor(period, stale) == period
+
+
 # ── reconcile ───────────────────────────────────────────────────────────────
 def gcal_row(event_id, body=None, key=None):
     """A fake Google event resource, as events.list would return it."""

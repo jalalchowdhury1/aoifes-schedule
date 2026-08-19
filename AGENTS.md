@@ -276,6 +276,15 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   Google echoes back (it normalises offsets and expands RRULEs), so a patch fires
   only when we actually changed something — a no-change night writes nothing.
   Duplicates of one syncKey collapse to the lowest event id.
+- **A weekly series' DTSTART is an ANCHOR, not content — do not re-derive it.**
+  The builder always proposes *this week's* instance, so if the hash included
+  that date, every Monday would look like a change and re-patch all 11 series,
+  dragging each one's start forward a week forever and taking the family's past
+  instances (and any per-instance edits) with it. So: `signature()` hashes a
+  recurring event's **weekday + time of day**, never its date (a one-off keeps
+  its real date — moving a makeup lesson IS a change), and `keep_anchor()`
+  re-points a patch at the DTSTART the series already has. Only a genuine
+  weekday change (Mon → Thu) re-anchors, to this week.
 - **Markers** (greppable in `~/Library/Logs/aoife-gcal-sync.log`):
   `GCAL-SYNC OK <date> <n_events>` · `GCAL-SYNC FAIL <date> <reason>` (exit 1,
   one line, never a traceback wall) · `GCAL-SYNC WAITING calendar-not-shared-yet`
@@ -313,7 +322,7 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   - Periods are NOT windowed (the list is short and curated); overrides are.
   - Overrides with no times are Today-list items and have no calendar shape.
   - No reverse sync and no reminders/attendees/colors are set.
-- **Tests**: `cd scripts/gcal-sync && uv run pytest` (47, all offline — Google is
+- **Tests**: `cd scripts/gcal-sync && uv run pytest` (53, all offline — Google is
   a fake discovery client, the two blobs are patched). These are NOT part of the
   repo's `node --test` suite; run both before shipping a change here.
   `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before
