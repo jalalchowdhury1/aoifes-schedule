@@ -646,3 +646,53 @@ test('weekAttendance: a dated one-off logs against its own id and never inflates
   assert.deepEqual(att(p, 'ruhamah'), { expected: 5, done: 0 });
   assert.deepEqual(att(p, 'art'), { expected: 0, done: 0 });
 });
+
+// ── Chapter timeline (Subjects 📅 Timeline) ─────────────────
+import { timelineRows, BAND_SIZE } from '../js/plan/model.js';
+
+const TL_CYC = { anchorMonday: '2026-08-24', dutyStart: '2026-08-11' };
+const TL_SM = { id: 'sm', type: 'paced', status: 'active',
+  rhythm: { kind: 'daily' }, travel: { mode: 'reduced', factor: 0.5 },
+  chain: [
+    { id: 'c1', name: 'Ch 1 · Numbers', pattern: 'tb-wb', lessons: 3, tests: 0, done: 0 },  // 6 sessions
+    { id: 'c2', name: 'Ch 2 · Add/Sub', pattern: 'tb-wb', lessons: 2, tests: 1, done: 0 },  // 5 sessions
+  ] };
+const TL_LOE = { id: 'tloe', type: 'paced', status: 'active',
+  rhythm: { kind: 'cycle', perOnWeek: 1, perOffWeek: 2.5 }, travel: { mode: 'pause' },
+  chain: [
+    { id: 'lc', name: 'C', pattern: 'simple', firstUnit: 81, lastUnit: 120, done: 21 },
+    { id: 'ld', name: 'D', pattern: 'simple', firstUnit: 121, lastUnit: 140, done: 0 },
+  ] };
+
+test('timelineRows: tb-wb chains are one row per chapter, in order', () => {
+  const rows = timelineRows(TL_SM);
+  assert.deepEqual(rows.map(r => r.key), ['c1', 'c2']);
+  assert.deepEqual(rows.map(r => r.chainId), ['c1', 'c2']);
+  assert.deepEqual(rows.map(r => r.sessions), [6, 5]);
+  assert.deepEqual(rows.map(r => r.done), [0, 0]);
+  assert.equal(rows[0].label, 'Ch 1 · Numbers');
+});
+
+test('timelineRows: simple chains split into 10-unit bands, done flows through in order', () => {
+  assert.equal(BAND_SIZE, 10);
+  const rows = timelineRows(TL_LOE);
+  assert.deepEqual(rows.map(r => r.key),
+    ['lc:81-90', 'lc:91-100', 'lc:101-110', 'lc:111-120', 'ld:121-130', 'ld:131-140']);
+  assert.equal(rows[0].label, 'Lessons 81–90');
+  assert.deepEqual(rows.map(r => r.sessions), [10, 10, 10, 10, 10, 10]);
+  assert.deepEqual(rows.map(r => r.done), [10, 10, 1, 0, 0, 0]);   // 21 done in C
+  assert.deepEqual(rows.map(r => r.chainId), ['lc', 'lc', 'lc', 'lc', 'ld', 'ld']);
+});
+
+test('timelineRows: short tail band, unitWord, done clamp, junk chain skipped', () => {
+  const act = { chain: [
+    { id: 'g', pattern: 'simple', firstUnit: 1, lastUnit: 15, done: 99, unitWord: 'Week' },
+    { id: 'bad', pattern: 'simple', done: 3 },                     // no units: skipped
+  ] };
+  const rows = timelineRows(act);
+  assert.deepEqual(rows.map(r => r.key), ['g:1-10', 'g:11-15']);
+  assert.equal(rows[1].label, 'Weeks 11–15');
+  assert.deepEqual(rows.map(r => r.sessions), [10, 5]);
+  assert.deepEqual(rows.map(r => r.done), [10, 5]);                // 99 clamped to 15
+  assert.deepEqual(timelineRows({}), []);                          // no chain at all
+});

@@ -114,6 +114,37 @@ export const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCo
 export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);
 export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 
+// ── Chapter timeline (Subjects 📅 Timeline) ─────────────────
+// Row descriptors for a paced activity's chain, in teaching order.
+// tb-wb chains (Singapore chapters) are one row each; simple chains (LoE books)
+// split into BAND_SIZE-unit display bands so a 40-lesson book reads as
+// milestones. Bands are DISPLAY ONLY — nothing stored changes shape, so band
+// size can change later without any data migration.
+export const BAND_SIZE = 10;
+export function timelineRows(act) {
+  const rows = [];
+  for (const c of act?.chain || []) {
+    const total = sessionsCount(c);
+    const done = Math.min(c.done || 0, total);
+    if (c.pattern === 'tb-wb') {
+      rows.push({ key: c.id, chainId: c.id, label: c.name || c.id, sessions: total, done });
+    } else {
+      if (c.firstUnit == null || c.lastUnit == null) continue;
+      const word = c.unitWord || 'Lesson';
+      let left = done;
+      for (let a = c.firstUnit; a <= c.lastUnit; a += BAND_SIZE) {
+        const b = Math.min(a + BAND_SIZE - 1, c.lastUnit);
+        const n = b - a + 1;
+        const d = Math.min(left, n);
+        left -= d;
+        rows.push({ key: `${c.id}:${a}-${b}`, chainId: c.id,
+          label: `${word}s ${a}–${b}`, sessions: n, done: d });
+      }
+    }
+  }
+  return rows;
+}
+
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
 // Every date that a week-walk loop compares against MUST be a real ISO date,
 // or `while (w <= badDate)` never terminates. Guard them all here.
