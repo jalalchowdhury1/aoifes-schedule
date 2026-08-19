@@ -19,9 +19,10 @@ const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month:
 // shut mid-decision. `armedBtn` therefore holds a DOM node and must be dropped
 // on every render (the node it points at is about to be replaced).
 let armedBtn = null;
+let armedRest = '';                           // the label to restore on disarm
 let elWired = false;                          // #view-subjects survives re-renders
 const disarm = () => {
-  if (armedBtn) { armedBtn.textContent = 'Cancel'; armedBtn = null; }
+  if (armedBtn) { armedBtn.textContent = armedRest; armedBtn = null; }
 };
 
 function paceLine(a) {
@@ -140,6 +141,7 @@ export function renderSubjects() {
       if (b.dataset.do === 'baseline') {
         if (getActivity(id)?.baseline && armedBtn !== b) {
           disarm();
+          armedRest = b.textContent;
           armedBtn = b;
           b.textContent = 'Tap again to re-baseline';
           return;
@@ -151,6 +153,7 @@ export function renderSubjects() {
       const map = { activate: 'active', park: 'parked', cancel: 'cancelled' };
       if (b.dataset.do === 'cancel' && armedBtn !== b) {
         disarm();                             // re-arm from some other card's button
+        armedRest = b.textContent;
         armedBtn = b;
         b.textContent = 'Tap again to cancel';
         return;
