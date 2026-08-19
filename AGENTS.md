@@ -255,6 +255,32 @@ and drag guard as the status dots.
   9–17 is dropped, one overhanging the edge is clamped while its label keeps
   the real times. Print-hidden like every other overlay decoration.
 
+## Subjects 📅 Timeline (planner-v2.7, 2026-08-19)
+Per-chapter "plan vs now" breakdown on every ACTIVE paced subject card, as a
+second `<details>` under the progress bar. Spec:
+docs/superpowers/specs/2026-08-19-subjects-chapter-timeline-design.md.
+- **Model (js/plan/model.js, all additive):** `timelineRows(act)` — one row per
+  tb-wb chain (Singapore chapter); `simple` chains split into `BAND_SIZE`(10)-unit
+  DISPLAY bands (`loe-c:81-90` keys, band size can change with no migration);
+  total rows capped at WALK_CAP. `chainTimeline(act, from, plan)` — same
+  week-walk as projectFinish; **invariant: the last unfinished row WITH
+  sessions>0 lands exactly on projectFinish's date** (0-session placeholder
+  rows pass through `finish:null` — never scan with bare `!r.complete`).
+  `actualFinishes(act, log)` — real dates replayed from the log; bulk `done`
+  bumps without log rows show a bare ✓.
+- **Baseline:** `activity.baseline = {setOn, rows:{rowKey:date}}`, guarded by
+  sanitizePlan (malformed → dropped, activity kept). `setBaseline(actId, date?)`
+  in state.js freezes only unfinished+dated rows (history lives in the log).
+  UI: "Set baseline" (first set = one tap) / "Re-baseline" (two-tap — it
+  overwrites the reference plan) inside Manage. `disarm()` restores the armed
+  button's OWN captured label (`armedRest`) — do not hardcode reset text.
+- **View rows:** complete → `✓ <actual date|nothing>`; else
+  `plan <baseline|—> · now <live|—>` + chip (≈ on plan ≤7d / N wks early / late).
+  Current row = first incomplete row with sessions>0. `.tl-dt` wraps internally
+  (planner-v2.7 fix) — 320px phones must never scroll sideways.
+- Initial baselines set 2026-08-19 on live (singapore ×15 rows, loe ×4 unfinished
+  bands) = the trip-aware honest schedule (SM → May 16 '27, LoE → Feb 28 '27).
+
 ## Planner open items (2026-08-17)
 - LoE Foundations D true span (121-140 vs 121-160) — check the physical book.
 - Geography curriculum name + 36 unit titles — Claude bulk-loads once provided.
