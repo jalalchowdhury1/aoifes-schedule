@@ -232,6 +232,93 @@ and drag guard as the status dots.
   the cycle and the next work week. Nothing left to decide here.
 - Family sign-off of the spec (built overnight on explicit authorization).
 
+## Google Calendar sync (2026-08-18)
+Nightly ONE-WAY publish of Aoife's schedule into a Google Calendar the family
+already sees on their phones. Code: `scripts/gcal-sync/` (uv-managed Python —
+the Google client is not stdlib, so it gets its own pyproject + lock rather than
+polluting system python; `scripts/planner-backup.sh` stays the shell example).
+`gcal_sync/model.py` is PURE (no network, no clock — every entry point takes the
+date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prints.
+
+- **Direction is one-way, forever.** The planner is the source of truth; the
+  calendar is a rendering of it. **Do not edit these events in Google Calendar —
+  the next 4:10 AM run overwrites them.** Every synced event says so in its
+  description: *"Synced from aoifes-schedule.vercel.app — do not edit here;
+  edits will be overwritten nightly."*
+- **Sources**: `GET /api/get` (template) and `GET /api/plan-get` (overrides,
+  periods, activities). Both go through the same while-typeof-string unwrap as
+  api/get.js, and template events through a port of `isValidEvent` — the live
+  blob still carries the corrupt `{"id":"e999"}` record and it must not become a
+  calendar entry.
+- **Mapping**
+  | planner | calendar |
+  |---|---|
+  | template event | weekly recurring event, `RRULE:FREQ=WEEKLY;BYDAY=<MO..SU>`, DTSTART on this week's instance of that weekday, no UNTIL/COUNT |
+  | override `action:'add'` with numeric start/end | one timed event, window today−7 … today+365 |
+  | period `travel` / `off` | all-day event `start … end+1` (GCal's `end.date` is EXCLUSIVE), titled `✈️ <label>` / `⏸ <label>` |
+  Times are `America/New_York` (`dateTime` + `timeZone`, no hardcoded offset, so
+  DST is Google's problem). Titles use the SAME rule as the app:
+  `name || catLabels[cat] || CATS[cat].label` — a legend rename in the app reaches
+  the calendar on the next run. An override with no name falls back to its
+  activity's name, then `Extra`; a period with no label falls back to
+  `Travel`/`Time off`.
+- **Reconciliation, and why the family's own events are safe.** Every event the
+  sync creates carries `extendedProperties.private` = `{aoifeSync:"v1",
+  syncKey:"<tpl|ov|pd>:<source id>", sig:"<content hash>"}`. Each run lists ONLY
+  events matching `privateExtendedProperty=aoifeSync=v1` (with
+  `singleEvents=false`, so a weekly series is one master row, which is the row we
+  patch), diffs by syncKey, then inserts / patches / deletes. **An event without
+  that property is never read, patched or deleted** — the family can add
+  birthdays and doctor visits to the same calendar safely. The three key prefixes
+  keep the id namespaces apart (a period `p1` and an override `p1` are different
+  events); an id-less override keys off the same `date|start|end|name` fingerprint
+  api/plan-save.js merges on. Change detection compares OUR `sig`, not the fields
+  Google echoes back (it normalises offsets and expands RRULEs), so a patch fires
+  only when we actually changed something — a no-change night writes nothing.
+  Duplicates of one syncKey collapse to the lowest event id.
+- **Markers** (greppable in `~/Library/Logs/aoife-gcal-sync.log`):
+  `GCAL-SYNC OK <date> <n_events>` · `GCAL-SYNC FAIL <date> <reason>` (exit 1,
+  one line, never a traceback wall) · `GCAL-SYNC WAITING calendar-not-shared-yet`
+  and `GCAL-SYNC WAITING calendar-api-not-enabled` (exit 0). **WAITING is exit 0
+  on purpose**: both are setup steps only the Google account owner can perform,
+  and paging at 5 AM for one is noise. It is not a way to hide forever — the
+  fleet probe greps `GCAL-SYNC OK {date}`, so once its `live_since` grace date
+  passes, a calendar still stuck in WAITING is reported.
+- **Owner setup (three steps, all outside this repo).** 1) Create a calendar
+  named exactly `Aoife's School`. 2) Share it with
+  `claude-sheets@hoa-tracker-494016.iam.gserviceaccount.com` with **"Make changes
+  to events"** — it then appears in the service account's calendarList, which is
+  how the sync finds it (no id is hardcoded). 3) Enable **Google Calendar API**
+  in cloud project `hoa-tracker-494016`; that project was only ever used for
+  Sheets. VERIFIED 2026-08-18 that the service account CANNOT enable it itself
+  (`serviceusage.services.enable` → 403 "Permission denied to enable service").
+  The key itself lives at `~/.config/mcp-google-sheets/service-account.json` and
+  is only ever read by path — never copied into this repo (which is public).
+- **launchd**: `com.jalal.aoife-gcal-sync` at 04:10 daily (overnight window per
+  the house rule; after the 03:40 backup, before the 05:00 fleet check).
+  `com.jalal.aoife-gcal-sync.plist` is committed at the repo root and installed
+  to `~/Library/LaunchAgents`. Wrapper `scripts/gcal-sync/run.sh` runs
+  `uv run --frozen` so 4 AM never re-resolves dependencies. Registered in the
+  fleet (`github-notion-sync`: `log_marker` probe + `schedule_snapshot.py`
+  CATALOG entry).
+- **Known limitations (v1, deliberate)**
+  - **`action:'skip'` overrides are NOT reflected.** A cancelled session still
+    shows on the calendar as its recurring instance. Doing it right means EXDATE
+    on the master (or a cancelled-instance write on that occurrence), which is
+    fiddly enough to be its own change; the planner's Today view remains the
+    authority on what actually happened. **Do not "fix" this by deleting the
+    master series** — that would drop every future occurrence too.
+  - **`altSun` is ignored** — the regular-week shape is synced. (Same reason the
+    print sheet always shows the week grid.)
+  - Periods are NOT windowed (the list is short and curated); overrides are.
+  - Overrides with no times are Today-list items and have no calendar shape.
+  - No reverse sync and no reminders/attendees/colors are set.
+- **Tests**: `cd scripts/gcal-sync && uv run pytest` (47, all offline — Google is
+  a fake discovery client, the two blobs are patched). These are NOT part of the
+  repo's `node --test` suite; run both before shipping a change here.
+  `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before
+  any behavior change reaches the family's phones.
+
 ## Env vars (Vercel project settings — names only, never values; repo is public)
 api/*.js read `KV_REST_API_URL`/`KV_REST_API_TOKEN` with fallback to
 `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`. Secrets live only in Vercel.

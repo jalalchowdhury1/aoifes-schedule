@@ -9,3 +9,8 @@
 /t_A4_1.1.pdf
 /t_Letter_1.0.pdf
 /t_Letter_1.1.pdf
+
+# uv-managed venv + caches for scripts/gcal-sync (uv.lock IS committed)
+scripts/gcal-sync/.venv/
+__pycache__/
+.pytest_cache/

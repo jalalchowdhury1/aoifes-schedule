@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jalal.aoife-gcal-sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/jalalchowdhury/PycharmProjects/Aoife's Schedule/scripts/gcal-sync/run.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jalalchowdhury/PycharmProjects/Aoife's Schedule/scripts/gcal-sync</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>10</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/jalalchowdhury/Library/Logs/aoife-gcal-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jalalchowdhury/Library/Logs/aoife-gcal-sync.log</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/jalalchowdhury</string>
+        <key>USER</key>
+        <string>jalalchowdhury</string>
+        <key>PATH</key>
+        <string>/Users/jalalchowdhury/.local/bin:/usr/local/bin:/opt/homebrew/bin:/Library/Developer/CommandLineTools/usr/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
