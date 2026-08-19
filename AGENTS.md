@@ -248,6 +248,15 @@ Push to main -> Vercel auto-deploys (no build command). Local preview:
 `python3 -m http.server 8080` (the /api fetch fails locally by design; app runs on
 localStorage/defaults). Rollback: `git revert` the offending commits and push —
 KV data is unaffected either way.
+- **Bump the `?v=` stamp on the five asset URLs in index.html with every
+  release** (css/tokens.css, css/app.css, css/plan.css, css/print.css,
+  js/main.js). iOS Safari caches CSS and the JS entry point independently, so a
+  release that changes both can land with fresh JS reading a stale cached
+  stylesheet (planner-v2.5.1 incident: a phone rendered v2.5's one-off ghost
+  markup styled by pre-v2.5 CSS — unstyled background/border, oversized tag —
+  while every other browser and a hard-refresh showed it correctly). Same
+  literal string on all five so they always travel together as one cache
+  generation; no build step, so this is a manual step of the ship checklist.
 
 ## Print (most-loved feature — re-verify after any grid/sizing change)
 Two row-height modes: SPH=66 screen, PPH=78 print, swapped on beforeprint/afterprint
