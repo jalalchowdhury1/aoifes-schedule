@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { seedPlan } from '../js/plan/seed.js';
 import {
   sanitizePlan, serializePlan, actDone, nextSession, currentCur,
-  requiredPerCycle, targetStats,
+  requiredPerCycle, targetStats, chainTimeline,
 } from '../js/plan/model.js';
 
 // state.js touches localStorage / fetch / document at module scope and on every
@@ -220,4 +220,25 @@ test('sanitizePlan drops a chain entry lacking id (togglePaced needs it)', () =>
     { pattern: 'simple', firstUnit: 6, lastUnit: 9, done: 0 },   // no id -> dropped
   ] }] });
   assert.deepEqual(p.activities[0].chain.map(c => c.id), ['good']);
+});
+
+test('setBaseline freezes unfinished row dates; complete rows excluded; overwrite works', () => {
+  plan.data = sanitizePlan({
+    parentCycle: { anchorMonday: '2026-08-24', dutyStart: '2026-08-11' },
+    activities: [{ id: 'sm', type: 'paced', status: 'active',
+      rhythm: { kind: 'daily' }, travel: { mode: 'reduced', factor: 0.5 },
+      chain: [
+        { id: 'c1', pattern: 'tb-wb', lessons: 3, tests: 0, done: 6 },   // complete
+        { id: 'c2', pattern: 'tb-wb', lessons: 2, tests: 1, done: 0 },
+      ] }],
+  });
+  S.setBaseline('sm', '2026-09-01');
+  const act = plan.data.activities[0];
+  assert.equal(act.baseline.setOn, '2026-09-01');
+  assert.equal('c1' in act.baseline.rows, false);            // complete: history, not plan
+  const expected = chainTimeline(act, '2026-09-01', plan.data).find(r => r.key === 'c2').finish;
+  assert.equal(act.baseline.rows.c2, expected);
+  S.setBaseline('sm', '2026-09-08');                          // re-baseline overwrites
+  assert.equal(act.baseline.setOn, '2026-09-08');
+  assert.equal(S.setBaseline('nope'), undefined);             // unknown id: no throw
 });

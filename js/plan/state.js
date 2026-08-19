@@ -1,7 +1,7 @@
 // Planner store + persistence. Mirrors ../state.js philosophy.
 // localStorage 'aoife_plan_v1'; KV via /api/plan-get + /api/plan-save.
 import { sanitizePlan, serializePlan, currentCur, todayStr, sortPeriods,
-         PERIOD_TYPES, ISO } from './model.js';
+         PERIOD_TYPES, ISO, chainTimeline } from './model.js';
 import { seedPlan } from './seed.js';
 import { onHold, markSynced } from '../sync.js';
 
@@ -226,6 +226,20 @@ export function setActivityStatus(id, status) {
 export function setTravelMode(id, mode) {
   const act = getActivity(id);
   if (act) { act.travel = mode === 'reduced' ? { mode, factor: 0.5 } : { mode }; commit(); }
+}
+
+// Freeze today's projected per-row finish dates as "the plan" (Subjects 📅
+// Timeline). Overwrites any previous baseline — the UI arms two-tap when one
+// exists. Complete rows and horizon-exhausted rows store nothing: history
+// lives in the log, and a dash is honest for the unprojectable.
+export function setBaseline(actId, date = todayStr()) {
+  const act = getActivity(actId);
+  if (!act) return;
+  const rows = {};
+  for (const r of chainTimeline(act, date, plan.data))
+    if (!r.complete && r.finish) rows[r.key] = r.finish;
+  act.baseline = { setOn: date, rows };
+  commit();
 }
 
 export function addOverride(o) { plan.data.overrides.push(o); commit(); }
