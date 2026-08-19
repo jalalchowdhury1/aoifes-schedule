@@ -258,7 +258,15 @@ and drag guard as the status dots.
 ## Planner open items (2026-08-17)
 - LoE Foundations D true span (121-140 vs 121-160) — check the physical book.
 - Geography curriculum name + 36 unit titles — Claude bulk-loads once provided.
-- Dimensions G3 lesson/test counts when the books arrive.
+- Dimensions G3 lesson/test counts — **DONE 2026-08-19** (loaded straight into
+  the KV blob from the 3A/3B contents-page photos; seed.js deliberately keeps
+  its dated 2026-08-16 snapshot). Structure: 15 `tb-wb` chains, one per
+  textbook chapter (`dm3-c1`…`dm3-c15`, named `3A Ch 1 · Numbers to 10,000`
+  style so next-session labels match the book's per-chapter lesson numbers);
+  each textbook Review rides as its chapter's `tests` count (Ch 4→R1, Ch 7→R2,
+  Ch 11→R3, Ch 15→R4+R5). 123 lessons ×2 + 5 reviews = 251 sessions,
+  projecting ~Apr 2027 at daily pace. `done` starts at 0 — nudge it if she's
+  already mid-book.
 - Science enrollment decision + Hala Tuesday overlap resolution.
 - Jiu Jitsu enrollment + real target (20/yr is a placeholder).
 - 7-on/7-off anchor parity — **CONFIRMED** from the family calendar (2026-08-17):
