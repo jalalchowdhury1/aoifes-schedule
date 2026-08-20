@@ -24,7 +24,10 @@ const SAVE_URL = `${SITE}/api/plan-save`;
 // produces the identical, idempotent result rather than drifting.
 const MIGRATION_DATE = '2026-08-19';
 
-const GEO_TITLES_PATH = '/private/tmp/claude-501/-Users-jalalchowdhury/d162264c-538b-499e-a540-927ddba563ba/scratchpad/geography_titles.json';
+// Titles are committed beside this script (extracted 2026-08-19 from the BYL
+// 'Around the World' PDF, 30-week program) so the migration is runnable from
+// any session, not just the one that extracted them.
+const GEO_TITLES_PATH = new URL('./geography-titles.json', import.meta.url).pathname;
 // The book states "This is a 30-week program" (TOC confirmed: Wk1 intro,
 // 2-5 N.America, 6-9 S.America, 10-14 Europe, 15-19 Asia, 20-24 Africa,
 // 25-27 Oceania, 28-30 Antarctica/review) — NOT 36 as first assumed in
