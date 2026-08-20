@@ -4,12 +4,12 @@
 // NO browser dialogs anywhere (prompt/alert/confirm): this runs on the family's
 // phones, where a native dialog is easy to mis-tap and impossible to style.
 // Deleting is a two-tap button; validation errors render inline as .form-err.
-import { esc } from '../model.js';
+import { esc, DAYS, fmt } from '../model.js';
 import { store, catLabel } from '../state.js';
 import {
   todayStr, addDays, mondayOf, weeksBetween, daysBetween, dayStatus,
   weekCapacity, actTotal, actDone, projectFinish, tripImpact, isWorkDay,
-  weekAttendance, okCls, WALK_CAP,
+  weekAttendance, okCls, WALK_CAP, ISO, sessionLabel,
 } from './model.js';
 import { plan, addPeriod, updatePeriod, deletePeriod } from './state.js';
 
@@ -221,6 +221,96 @@ export function weekAttHtml(weekStart, today) {
   return parts.length ? `<div class="pmeta">${parts.join(' · ')}</div>` : '';
 }
 
+// ── Per-subject history drill-down (planner-v2.8) ────────────
+// "Tue Aug 19" — the day-of-week + month + date the family recognizes,
+// built the same locale-free way as fmtDay/fmtRange above (never
+// toLocaleDateString: CLDR 42+ renders "Sept", which breaks a fixed width).
+const dayLabelFor = s => { const d = D(s); return `${DAYS[(d.getDay() + 6) % 7]} ${fmtDay(s)}`; };
+
+// Full month names for a group header ("June 2026") — MON above is the
+// crowded 3-letter week axis; a group header has room to spell it out.
+const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+const ym = s => { const [y, m] = s.split('-').map(Number); return y * 12 + (m - 1); };
+const monthLabelFor = (dateStr, todayYm) => {
+  const diff = todayYm - ym(dateStr);
+  if (diff === 0) return 'This month';
+  if (diff === 1) return 'Last month';
+  const d = D(dateStr);
+  return `${MONTH_FULL[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const isISO = s => typeof s === 'string' && ISO.test(s);
+
+// Template event ids for one category — the same "cat must not be null"
+// guard weekAttendance uses: a null/undefined cat must never match the
+// corrupt {id:'e999'} record the live blob still carries (its own cat is
+// undefined too).
+function catEventIds(events, cat) {
+  const ids = new Set();
+  if (cat == null) return ids;
+  for (const e of Array.isArray(events) ? events : [])
+    if (e && e.cat === cat && e.id != null) ids.add(e.id);
+  return ids;
+}
+
+// A log row belongs to `act` when: its own activityId matches (paced/daily
+// checks, and timed onGrid activity slots), OR its eventId is one of the
+// activity's category's template events (core attendance rows — the same
+// eventId-set idea weekAttendance uses for `expected`/`done`), OR its
+// eventId is a Telegram-written one-off override's OWN id and that override
+// carries this activity's id (a bot-scheduled makeup session).
+const ownsRow = (e, act, tplIds, ovIds) =>
+  !!e && (e.activityId === act.id ||
+    (e.eventId != null && (tplIds.has(e.eventId) || ovIds.has(e.eventId))));
+
+// Log rows for one subject, newest first, grouped by month ("This month" /
+// "Last month" / "June 2026" relative to todayStr()). Each row carries
+// EITHER `timeLabel` (a timed row: the template event's or one-off
+// override's start/end) OR `sessionLabel` (a paced row: the log row's own
+// `label` when present, else sessionLabel() replayed against its chain +
+// session index) — never both. Pure and side-effect-free: `plan` is read
+// only, never mutated.
+export function historyRows(act, events, plan) {
+  if (!act || !plan) return [];
+  const log = Array.isArray(plan.log) ? plan.log : [];
+  const overrides = Array.isArray(plan.overrides) ? plan.overrides : [];
+  const tplIds = catEventIds(events, act.cat);
+  const ovIds = new Set(overrides
+    .filter(o => o && o.action === 'add' && o.activityId === act.id && o.id != null)
+    .map(o => o.id));
+  const evById = new Map((Array.isArray(events) ? events : [])
+    .filter(e => e && e.id != null).map(e => [e.id, e]));
+  const ovById = new Map(overrides.filter(o => o && o.id != null).map(o => [o.id, o]));
+  const chain = Array.isArray(act.chain) ? act.chain : [];
+
+  const rows = log
+    .filter(e => isISO(e?.date) && ownsRow(e, act, tplIds, ovIds))
+    .map(e => {
+      const tplEv = e.eventId != null ? evById.get(e.eventId) : null;
+      const ov = e.eventId != null ? ovById.get(e.eventId) : null;
+      const timed = tplEv || (ov && Number.isFinite(ov.start) && Number.isFinite(ov.end) ? ov : null);
+      const row = { date: e.date, dayLabel: dayLabelFor(e.date), status: e.status };
+      if (timed) row.timeLabel = `${fmt(timed.start)}–${fmt(timed.end)}`;
+      else if (e.curriculum || e.label) {
+        const cur = e.curriculum ? chain.find(c => c && c.id === e.curriculum) : null;
+        row.sessionLabel = e.label || (cur ? sessionLabel(cur, e.session || 0) : '');
+      }
+      return row;
+    })
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));   // newest first, stable
+
+  const todayYm = ym(todayStr());
+  const groups = [];
+  for (const r of rows) {
+    const label = monthLabelFor(r.date, todayYm);
+    const last = groups[groups.length - 1];
+    if (last && last.monthLabel === label) last.rows.push(r);
+    else groups.push({ monthLabel: label, rows: [r] });
+  }
+  return groups;
+}
+
 // ── Week info card (read-only; the only way it changes data is by
 //    opening the sheet, which the family still has to confirm with Save) ──
 function cardHtml(wks, away) {
@@ -259,6 +349,30 @@ function listHtml() {
       <span class="yrow-d">${esc(fmtRange(p.start, p.end))} · ${plural(days, 'day')}</span></div>`;
   }
   return `${h}<button type="button" id="yadd" class="ybtn-add">+ Add time away</button></div>`;
+}
+
+// ── History: one <details> "row" per subject — tapping expands its logged
+// sessions (historyRows), newest first, grouped by month. Subjects with
+// nothing logged yet drop off the list entirely, same "nothing to say ->
+// nothing renders" rule as thisWeekHtml/yesterdayHtml on Today. Reuses the
+// Subjects 📅 Timeline's own `.tl`/`.tl-row` row look (a name-left,
+// status-right hairline-separated list) rather than inventing a new one.
+function historyHtml(subjectRows, coreList) {
+  const p = plan.data;
+  const items = [...subjectRows.map(a => [a, a.name || a.id]), ...coreList.map(a => [a, coreName(a)])]
+    .map(([a, name]) => ({ name, groups: historyRows(a, store.events, p) }))
+    .filter(x => x.groups.length);
+  if (!items.length) return '';
+  const rowsHtml = groups => groups.map(g =>
+    `<div class="yh-mo">${esc(g.monthLabel)}</div>${g.rows.map(r => {
+      const icon = r.status === 'done' ? '✓' : r.status === 'partial' ? '◐' : '✗';
+      const label = r.timeLabel || r.sessionLabel || '';
+      return `<div class="yh-row"><span>${esc(r.dayLabel)}${
+        label ? ` · ${esc(label)}` : ''}</span><span>${icon}</span></div>`;
+    }).join('')}`).join('');
+  const details = items.map(({ name, groups }) =>
+    `<details class="sdet"><summary>${esc(name)}</summary>${rowsHtml(groups)}</details>`).join('');
+  return `<div class="psec">History</div><div class="pcard yhist">${details}</div>`;
 }
 
 // ── Sheet: live impact preview ──────────────────────────────
@@ -462,6 +576,7 @@ export function renderYear() {
 
   h += cardHtml(wks, away);
   h += listHtml();
+  h += historyHtml(rows, coreRows(p.activities, store.events));
 
   const nw = nextWorkStart(p.parentCycle, today);
   h += `<div class="pcard pmeta yfoot">Mama works Tue–Mon, every other week${

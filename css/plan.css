@@ -272,6 +272,20 @@ html[data-theme='dark'] {
 .ybtn-add { width: 100%; margin-top: 9px; padding: 9px; font-size: 12.5px; }
 .yfoot { line-height: 1.5; }
 
+/* History (planner-v2.8): one <details> "row" per subject — tapping expands
+   its logged sessions (js/plan/year.js historyRows), newest first, grouped
+   under a small uppercase month header. Reuses the .sdet details/summary
+   look Subjects' own 📅 Timeline uses; the padding below just widens the
+   tap target for a family finger, scoped to this list only. */
+.yhist .sdet + .sdet { border-top: 1px solid var(--line); }
+.yhist .sdet summary { padding: 9px 2px; }
+.yh-mo { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+         color: var(--text-muted); font-weight: 700; margin: 10px 2px 4px; }
+.yh-mo:first-child { margin-top: 2px; }
+.yh-row { display: flex; justify-content: space-between; align-items: baseline;
+          gap: 8px; padding: 6px 2px; font-size: 11.5px; color: var(--text-sub); }
+.yh-row + .yh-row { border-top: 1px solid var(--line); }
+
 /* Add/edit sheet — a card on desktop, a bottom sheet on phones */
 .ysh-bd { position: fixed; inset: 0; background: var(--backdrop); z-index: 80; }
 .ysh { position: relative; z-index: 90; background: var(--bg-panel);

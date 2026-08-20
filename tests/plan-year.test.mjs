@@ -14,9 +14,10 @@ for (const k of ['alert', 'confirm', 'prompt'])
   globalThis[k] = () => { throw new Error(`${k}() must never be called by the planner`); };
 
 const { fmtRange, perName, awayCls, weekAway, nextWorkStart, monthGroups, axisHtml,
-        MIN_LABEL_SPAN, coreRows, shortName, weekAttHtml } = await import('../js/plan/year.js');
+        MIN_LABEL_SPAN, coreRows, shortName, weekAttHtml, historyRows } = await import('../js/plan/year.js');
 const { store } = await import('../js/state.js');
 const { plan } = await import('../js/plan/state.js');
+const { todayStr, addDays } = await import('../js/plan/model.js');
 
 // ── fmtRange ────────────────────────────────────────────────
 test('fmtRange: collapses the month only when both ends share month AND year', () => {
@@ -224,4 +225,113 @@ test('weekAttHtml: away days shrink the denominators, a full week away drops the
   assert.equal(weekAttHtml(WK, '2026-08-21'), '');
   plan.data = null;
   assert.equal(weekAttHtml(WK, '2026-08-21'), '');
+});
+
+// ── historyRows (Year per-subject drill-down, planner-v2.8) ──
+const TODAY = todayStr();
+const MONTH_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+// The first of the month N months before today — day-of-month fixed at 1 so
+// the arithmetic never has to worry about a target month being shorter than
+// today's day-of-month (no Feb 30).
+function monthsAgo(n) {
+  const [y, m] = TODAY.split('-').map(Number);
+  const total = y * 12 + (m - 1) - n;
+  const yy = Math.floor(total / 12), mm = ((total % 12) + 12) % 12;
+  return `${yy}-${String(mm + 1).padStart(2, '0')}-01`;
+}
+
+test('historyRows: newest-first, grouped by month with This month / Last month / full "Month YYYY" headers', () => {
+  const act = { id: 'loe', chain: [{ id: 'loe-c', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 5 }] };
+  const lastMonthDate = monthsAgo(1);
+  const olderDate = monthsAgo(3);
+  const p = { overrides: [], log: [
+    { date: TODAY, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 4 },
+    { date: lastMonthDate, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 3 },
+    { date: olderDate, activityId: 'loe', status: 'partial', curriculum: 'loe-c', session: 2 },
+  ] };
+  const groups = historyRows(act, [], p);
+  assert.equal(groups.length, 3);
+  assert.equal(groups[0].monthLabel, 'This month');
+  assert.equal(groups[0].rows[0].date, TODAY);
+  assert.equal(groups[1].monthLabel, 'Last month');
+  assert.equal(groups[1].rows[0].date, lastMonthDate);
+  const [y, m] = olderDate.split('-').map(Number);
+  assert.equal(groups[2].monthLabel, `${MONTH_FULL[m - 1]} ${y}`);
+  assert.equal(groups[2].rows[0].status, 'partial');
+});
+
+test('historyRows: rows sort newest-first, including multiple rows within the same month group', () => {
+  const act = { id: 'loe', chain: [{ id: 'loe-c', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 5 }] };
+  const d1 = monthsAgo(2), d2 = addDays(d1, 5), d3 = addDays(d1, 10);   // all inside the same month
+  const p = { overrides: [], log: [
+    { date: d1, activityId: 'loe', status: 'done' },
+    { date: d3, activityId: 'loe', status: 'done' },
+    { date: d2, activityId: 'loe', status: 'done' },
+  ] };
+  const groups = historyRows(act, [], p);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].rows.map(r => r.date), [d3, d2, d1]);
+});
+
+test('historyRows: a timed row (template event) carries a time range; a paced row carries the session label', () => {
+  const events = [{ id: 'q1', cat: 'quran', day: 0, start: 15.5, end: 16.5 }];
+  const coreAct = { id: 'core-quran', cat: 'quran', chain: [] };
+  const timedGroups = historyRows(coreAct, events,
+    { overrides: [], log: [{ date: TODAY, eventId: 'q1', status: 'done', timed: true }] });
+  assert.equal(timedGroups[0].rows[0].timeLabel, '3:30pm–4:30pm');
+  assert.match(timedGroups[0].rows[0].dayLabel, /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \w{3} \d{1,2}$/);
+  assert.equal('sessionLabel' in timedGroups[0].rows[0], false);
+
+  const pacedAct = { id: 'loe', chain: [{ id: 'loe-c', name: 'Foundations C', pattern: 'simple',
+    firstUnit: 101, lastUnit: 120, done: 5 }] };
+  const pacedGroups = historyRows(pacedAct, [],
+    { overrides: [], log: [{ date: TODAY, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 1 }] });
+  assert.equal(pacedGroups[0].rows[0].sessionLabel, 'Lesson 102');
+  assert.equal('timeLabel' in pacedGroups[0].rows[0], false);
+});
+
+test('historyRows: an explicit row.label wins over sessionLabel(chain, session)', () => {
+  const act = { id: 'loe', chain: [{ id: 'loe-c', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 5 }] };
+  const p = { overrides: [], log: [{ date: TODAY, activityId: 'loe', status: 'done',
+    curriculum: 'loe-c', session: 1, label: 'Lesson 99 (pre-tracking)' }] };
+  assert.equal(historyRows(act, [], p)[0].rows[0].sessionLabel, 'Lesson 99 (pre-tracking)');
+});
+
+test('historyRows: rows are owned by activityId, a template eventId for the category, or a bot one-off mapped to the activity — never an unrelated row', () => {
+  const events = [
+    { id: 'e999' },                                      // the corrupt live record — never owned
+    { id: 'r1', cat: 'ruhamah', day: 0, start: 11, end: 12 },
+  ];
+  const act = { id: 'core-ruhamah', cat: 'ruhamah', chain: [] };
+  const p = {
+    overrides: [
+      { date: TODAY, action: 'add', id: 'x1', activityId: 'core-ruhamah', name: 'Makeup Ruhama', start: 15, end: 16 },
+      { date: TODAY, action: 'add', id: 'x2', activityId: 'loe', name: 'Unrelated makeup', start: 9, end: 10 },
+    ],
+    log: [
+      { date: TODAY, eventId: 'r1', status: 'done', timed: true },     // template event -> owned
+      { date: TODAY, eventId: 'x1', status: 'done', timed: true },     // bot one-off mapped here -> owned
+      { date: TODAY, eventId: 'x2', status: 'done', timed: true },     // mapped to a DIFFERENT activity -> not owned
+      { date: TODAY, activityId: 'loe', status: 'done' },              // a different activity entirely -> not owned
+      { date: TODAY, eventId: 'e999', status: 'done', timed: true },   // corrupt record -> never owned
+    ],
+  };
+  const groups = historyRows(act, events, p);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].rows.length, 2);
+  assert.deepEqual(groups[0].rows.map(r => r.timeLabel).sort(), ['11am–12pm', '3pm–4pm']);
+});
+
+test('historyRows: a null/undefined activity cat never matches the corrupt {id:"e999"} template record', () => {
+  const events = [{ id: 'e999' }];
+  const act = { id: 'weird', cat: undefined, chain: [] };
+  const p = { overrides: [], log: [{ date: TODAY, eventId: 'e999', status: 'done', timed: true }] };
+  assert.deepEqual(historyRows(act, events, p), []);
+});
+
+test('historyRows: malformed/missing inputs never throw', () => {
+  assert.deepEqual(historyRows(null, [], {}), []);
+  assert.deepEqual(historyRows({ id: 'a' }, null, null), []);
+  assert.deepEqual(historyRows({ id: 'a' }, [], { log: 'garbage', overrides: 'garbage' }), []);
 });
