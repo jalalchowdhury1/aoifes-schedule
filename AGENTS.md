@@ -112,7 +112,10 @@ via MutationObserver.
   planner-v2.1 (year tap targets/This-Week card), planner-v2.2 (week dots +
   Yesterday receipt), planner-v2.3 (Day-view dots + observer), planner-v2.4
   (bot interop), planner-v2.5 (live re-sync + one-off ghosts + write merge),
-  planner-v2.6 (per-subject attendance rows on the Year view).
+  planner-v2.6 (per-subject attendance rows on the Year view), planner-v2.7
+  (Subjects 📅 Timeline chapter breakdown + baseline), planner-v2.8 (Subjects
+  order/dot grid/pace note, Today completed-label fix, Year history
+  drill-down — tag cut by the coordinator at deploy).
 
 ## Year view: per-subject attendance rows (planner-v2.6, 2026-08-18)
 The Year page used to end in one synthetic row, "Core — ELA·Math·Arabic·Quran",
