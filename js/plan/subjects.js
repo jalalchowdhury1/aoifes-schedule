@@ -126,15 +126,19 @@ function dotCluster(c, idx) {
   return `<div class="dgc" style="--dgc:var(--dg${idx % 15})" title="${esc(c.name || c.id)}">${dots}${revs}</div>`;
 }
 
-// One mini-bar per display band for a simple chain (LoE): the SAME band
-// split timelineRows uses (bandSize-aware, via that pure helper), so a bar
-// here always lines up with a row in the 📅 Timeline breakdown below it.
+// A dot per lesson for a simple chain (LoE), visually grouped by the SAME
+// band split timelineRows uses (bandSize-aware) — "●●●●● ●●●●●" — so a group
+// here always lines up with a row in the 📅 Timeline breakdown below it, and
+// the family can count by fives at a glance (user request 2026-08-20; this
+// replaced the v2.8 one-bar-per-band form). Simple lessons are one session
+// each: dots are full or empty, never half.
 function barCluster(c, idx, rows) {
-  const bars = rows.filter(r => r.chainId === c.id).map(r => {
-    const pct = r.sessions ? Math.round((r.done / r.sessions) * 100) : 0;
-    return `<span class="dg-bar" title="${esc(r.label)}"><i style="width:${pct}%"></i></span>`;
+  const groups = rows.filter(r => r.chainId === c.id).map(r => {
+    const dots = Array.from({ length: r.sessions }, (_, i) =>
+      `<i class="dg-dot${i < r.done ? ' full' : ''}"></i>`).join('');
+    return `<span class="dg-grp" title="${esc(r.label)}">${dots}</span>`;
   }).join('');
-  return bars ? `<div class="dgc dgc-bars" style="--dgc:var(--dg${idx % 15})">${bars}</div>` : '';
+  return groups ? `<div class="dgc" style="--dgc:var(--dg${idx % 15})">${groups}</div>` : '';
 }
 
 function dotGridHtml(a) {

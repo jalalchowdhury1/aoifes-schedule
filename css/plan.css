@@ -134,10 +134,11 @@
                background: linear-gradient(90deg, var(--dgc) 50%, var(--bg-input) 50%); }
 .dg-rev { font-size: 7px; line-height: 1; color: var(--border); margin-left: 1px; }
 .dg-rev.full { color: var(--dgc); }
-.dgc-bars { gap: 4px; }
-.dg-bar { width: 18px; height: 8px; border-radius: 3px; flex: 0 0 auto; position: relative;
-          overflow: hidden; background-color: var(--bg-input); border: 1px solid var(--border); }
-.dg-bar i { position: absolute; inset: 0 auto 0 0; background-color: var(--dgc); border-radius: 2px; }
+/* Simple-chain lessons render one dot each, grouped by timeline band
+   ("●●●●●  ●●●●●", user request 2026-08-20) — the wider inter-group gap is
+   the visual "|" so fives can be counted at a glance. Groups wrap as units. */
+.dg-grp { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+.dgc .dg-grp + .dg-grp { margin-left: 7px; }
 
 /* 15-color rotating palette (chapter/book index mod 15), distinct hues 24°
    apart around the wheel. Darker/more-saturated for the light theme (reads
