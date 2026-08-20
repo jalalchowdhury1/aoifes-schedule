@@ -263,6 +263,21 @@ export function actualFinishes(act, log) {
   return out;
 }
 
+// A plan-vs-now date delta, ± days between a live projected finish and a
+// frozen baseline date: within a week either way reads as "on plan" (dates
+// wobble by a session or two without meaning anything), otherwise ▲/▼ by the
+// week. Shared by the Subjects 📅 Timeline row chip AND the computed pace
+// note (planner-v2.8) so a whole-book "ahead/behind" line can never disagree
+// with its own per-chapter breakdown — one rule, two renderings. null when
+// either date is missing (no baseline set yet, or an unprojectable row).
+export function planDeltaChip(finishDate, baselineDate) {
+  if (!finishDate || !baselineDate) return null;
+  const dd = daysBetween(finishDate, baselineDate);        // + = ahead of plan
+  const weeks = Math.round(Math.abs(dd) / 7);
+  if (Math.abs(dd) <= 7) return { state: 'on', weeks: 0 };
+  return { state: dd > 0 ? 'ahead' : 'behind', weeks };
+}
+
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
 // Every date that a week-walk loop compares against MUST be a real ISO date,
 // or `while (w <= badDate)` never terminates. Guard them all here.

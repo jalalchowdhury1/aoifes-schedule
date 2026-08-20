@@ -8,8 +8,8 @@ import { catLabel } from '../state.js';
 import {
   todayStr, actTotal, currentCur, nextSession,
   projectFinish, requiredPerCycle, targetStats, okCls,
-  chainTimeline, actualFinishes, daysBetween, compareSubjects,
-  lessonTotals, timelineRows,
+  chainTimeline, actualFinishes, compareSubjects,
+  lessonTotals, timelineRows, planDeltaChip, mondayOf, addDays, dailyStreak,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode, setBaseline, getActivity } from './state.js';
 
@@ -73,12 +73,11 @@ function timelineHtml(a) {
       if (!curSeen && r.sessions > 0) { curSeen = true; cls += ' cur'; }
       const b = base ? base[r.key] : null;
       let chip = '';
-      if (b && r.finish) {
-        const dd = daysBetween(r.finish, b);            // + = ahead of plan
-        const dw = Math.round(Math.abs(dd) / 7);
-        if (Math.abs(dd) <= 7) chip = `<span class="pchip">≈ on plan</span>`;
-        else if (dd > 0) chip = `<span class="pchip ok">${dw} wk${dw > 1 ? 's' : ''} early</span>`;
-        else chip = `<span class="pchip warn">${dw} wk${dw > 1 ? 's' : ''} late</span>`;
+      const delta = planDeltaChip(r.finish, b);
+      if (delta) {
+        chip = delta.state === 'on' ? `<span class="pchip">≈ on plan</span>`
+          : delta.state === 'ahead' ? `<span class="pchip ok">${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} early</span>`
+          : `<span class="pchip warn">${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} late</span>`;
       }
       // Each plan/now pair is one no-wrap segment so a narrow phone wraps
       // between segments, never inside a date.
@@ -148,6 +147,37 @@ function dotGridHtml(a) {
   return html ? `<div class="dgwrap">${html}</div>` : '';
 }
 
+// ── Computed pace note (replaces the static a.note for active paced-with-
+//    chain cards): "▲ 2 wks ahead of plan · 4 sessions this week ·
+//    5-day streak". Static a.note keeps rendering for every OTHER card.
+function pacedNoteLine(a) {
+  const p = plan.data, today = todayStr();
+  const parts = [];
+  // (a) whole-book delta: the SAME idiom AGENTS.md documents for
+  // chainTimeline's invariant — the LAST unfinished row with sessions>0,
+  // whose `finish` is exactly projectFinish's date — so this line can never
+  // disagree with the "→ <date>" chip at the top of the card. Same chip math
+  // as the 📅 Timeline row (planDeltaChip), just worded as a sentence.
+  const rows = chainTimeline(a, today, p);
+  const cur = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
+  const base = a.baseline?.rows;
+  const delta = cur ? planDeltaChip(cur.finish, base ? base[cur.key] : null) : null;
+  if (delta) {
+    parts.push(delta.state === 'on' ? 'on plan'
+      : delta.state === 'ahead' ? `▲ ${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} ahead of plan`
+      : `▼ ${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} behind`);
+  }
+  // (b) sessions logged this week, Mon..Sun.
+  const weekStart = mondayOf(today), weekEnd = addDays(weekStart, 6);
+  const sessions = (Array.isArray(p.log) ? p.log : []).filter(e =>
+    e && e.activityId === a.id && e.status === 'done' && e.date >= weekStart && e.date <= weekEnd).length;
+  parts.push(`${sessions} session${sessions === 1 ? '' : 's'} this week`);
+  // (c) streak — omit "0-day"/"1-day": below 2 it isn't a streak worth naming.
+  const streak = dailyStreak(p.log, a.id, p.periods, today);
+  if (streak >= 2) parts.push(`${streak}-day streak`);
+  return `<div class="sline">${esc(parts.join(' · '))}</div>`;
+}
+
 function card(a) {
   const name = a.name || catLabel(a.cat);
   const total = actTotal(a);
@@ -158,7 +188,9 @@ function card(a) {
       <span class="smeta">${stChip ? `<span class="pchip">${stChip}</span>` : paceLine(a)}</span></div>`;
   if (a.type === 'paced' && total > 0)
     h += headerLine(a, cur) + dotGridHtml(a);
-  if (a.note) h += `<div class="sline">${esc(a.note)}</div>`;
+  if (a.type === 'paced' && a.status === 'active' && (a.chain || []).length)
+    h += pacedNoteLine(a);
+  else if (a.note) h += `<div class="sline">${esc(a.note)}</div>`;
   h += timelineHtml(a);
   h += `<details class="sdet"><summary>Manage</summary><div class="sctl">`;
   if (a.status === 'planned') h += `<button data-do="activate">Activate</button>`;

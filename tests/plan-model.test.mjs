@@ -5,6 +5,7 @@ import {
   sessionsCount, nextSession, actTotal, actDone, actRemaining,
   dayAway, dayStatus, awayDaysInWeek, effectiveDaysInWeek,
   sanitizePlan, serializePlan, lessonTotals, compareSubjects, SUBJECT_ORDER,
+  planDeltaChip,
 } from '../js/plan/model.js';
 
 test('date helpers: Mon-first indexing and week math', () => {
@@ -923,6 +924,22 @@ test('sanitizePlan: an invalid bandSize (non-int, zero, negative) is dropped fro
       chain: [{ id: 'c', pattern: 'simple', firstUnit: 1, lastUnit: 20, done: 0, bandSize: bad }] }] });
     assert.equal('bandSize' in p.activities[0].chain[0], false, JSON.stringify(bad));
   }
+});
+
+// ── planDeltaChip (planner-v2.8: shared Timeline-chip / pace-note math) ──
+test('planDeltaChip: within 7 days either way is "on", beyond it is ahead/behind by the week', () => {
+  assert.deepEqual(planDeltaChip('2026-09-06', '2026-09-01'), { state: 'on', weeks: 0 });    // +5d
+  assert.deepEqual(planDeltaChip('2026-08-27', '2026-09-01'), { state: 'on', weeks: 0 });    // -5d
+  assert.deepEqual(planDeltaChip('2026-09-01', '2026-09-01'), { state: 'on', weeks: 0 });    // 0d
+  assert.deepEqual(planDeltaChip('2026-08-15', '2026-09-01'), { state: 'ahead', weeks: 2 }); // -17d, finish EARLIER than baseline = ahead
+  assert.deepEqual(planDeltaChip('2026-09-25', '2026-09-01'), { state: 'behind', weeks: 3 }); // +24d, finish LATER = behind
+});
+
+test('planDeltaChip: null when either date is missing', () => {
+  assert.equal(planDeltaChip(null, '2026-09-01'), null);
+  assert.equal(planDeltaChip('2026-09-01', null), null);
+  assert.equal(planDeltaChip(null, null), null);
+  assert.equal(planDeltaChip(undefined, undefined), null);
 });
 
 // ── compareSubjects (planner-v2.8: fixed Subjects tab order) ─
