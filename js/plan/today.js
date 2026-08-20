@@ -231,9 +231,30 @@ export function thisWeekHtml(dateStr) {
 // against the chain + session index the row recorded. A row missing both
 // falls back to the ordinary next-session label — same as no row at all.
 // Un-ticking removes the row, so the next render naturally reverts.
+//
+// A CATCH-UP day (the bot logging several sessions in one go) can write
+// MULTIPLE done rows for the same activity/date — sessions 0, 1, 2 appended
+// in whatever order the taps landed, which is not a promise about which is
+// "current". Picking the first array match (the old bug here) could show a
+// stale mid-catch-up label. The row with the HIGHEST numeric `session` is
+// the one actually completed last today; a row with no session at all
+// always loses to one that has one (nothing to compare), and a tie (incl.
+// "neither has a session") keeps the LAST one in array order, so a same-day
+// re-tick still wins by recency.
+function latestTodayRow(rows) {
+  let row = null;
+  for (const e of rows) {
+    const es = typeof e.session === 'number' ? e.session : -Infinity;
+    const rs = row && typeof row.session === 'number' ? row.session : -Infinity;
+    if (!row || es >= rs) row = e;
+  }
+  return row;
+}
+
 export function pacedRowLabel(a, log, today) {
-  const row = (Array.isArray(log) ? log : []).find(e =>
+  const rows = (Array.isArray(log) ? log : []).filter(e =>
     e && e.activityId === a.id && e.date === today && e.status === 'done' && !e.eventId);
+  const row = latestTodayRow(rows);
   if (row) {
     if (row.label) return { label: row.label, cur: null };
     if (row.curriculum != null && row.session != null) {

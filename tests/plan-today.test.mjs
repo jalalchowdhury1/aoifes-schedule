@@ -461,6 +461,29 @@ test('pacedRowLabel: un-ticking (row removed) reverts to the next label, same id
   assert.equal(unticked.label, 'Lesson 103');
 });
 
+// ── Catch-up day: multiple done rows for one activity/date (review fix) ──
+// A bot catch-up writes several sessions in one go; array order is an
+// accident of write timing, not a promise about which is "current" — the
+// label must reflect the HIGHEST session actually completed today.
+const rowFor = session => ({ date: TODAY, activityId: 'loe', status: 'done', curriculum: 'loe-c', session });
+
+test('pacedRowLabel: a 3-row catch-up day shows the label of the HIGHEST session, not the first written', () => {
+  const a = { id: 'loe', chain: [LOE_C_101()] };
+  const log = [rowFor(0), rowFor(1), rowFor(2)];             // written in order, highest last
+  assert.equal(pacedRowLabel(a, log, TODAY).label, 'Lesson 103');   // 101 + 2
+});
+
+test('pacedRowLabel: out-of-order writes (0, 2, 1) still resolve to the highest session (2 -> Lesson 103)', () => {
+  const a = { id: 'loe', chain: [LOE_C_101()] };
+  const log = [rowFor(0), rowFor(2), rowFor(1)];             // highest written in the MIDDLE
+  assert.equal(pacedRowLabel(a, log, TODAY).label, 'Lesson 103');
+});
+
+test('pacedRowLabel: a single-row day is unchanged by the highest-session pick', () => {
+  const a = { id: 'loe', chain: [LOE_C_101()] };
+  assert.equal(pacedRowLabel(a, [rowFor(1)], TODAY).label, 'Lesson 102');
+});
+
 // ── Freshness caption ("· synced HH:MM") ────────────────────
 // The bot writes this plan from outside the browser, so a tab that has not
 // re-read in an hour is showing yesterday's truth. The caption is how that
