@@ -255,6 +255,74 @@ and drag guard as the status dots.
   9–17 is dropped, one overhanging the edge is clamped while its label keeps
   the real times. Print-hidden like every other overlay decoration.
 
+## Subjects/Today/Year: v2.8 family feedback batch (2026-08-19 night)
+Spec: docs/superpowers/specs/2026-08-19-v2.8-family-feedback-batch.md — every
+item was explicitly confirmed that evening. All additive on top of v2.7.
+- **Subjects order.** `compareSubjects(a, b)` (js/plan/model.js) sorts by a
+  fixed `SUBJECT_ORDER` array (singapore, loe, geography, then the core
+  categories, then science/jj/history/core-mama); an id not in the list sorts
+  after every known one, stable among themselves by the OLD status order
+  (active/planned/parked/done/cancelled). Replaces the pure status sort.
+- **lessonTotals(act)** → `{done, total}` in LESSON units, not session units:
+  a tb-wb lesson is its 2 sessions together (half-done = .5), chapter Reviews
+  (`tests`) are EXCLUDED entirely, a simple chain is 1:1. Feeds the Subjects
+  header ("2/60 lessons · 3% · next: …"); `actTotal`/`actDone` (session units)
+  are unchanged and still used everywhere else (projectFinish, tracks, etc).
+- **Per-chain `bandSize`.** `timelineRows` reads `c.bandSize` (validated
+  positive int, `sanitizePlan` drops an invalid one) instead of the fixed
+  `BAND_SIZE`, so LoE ships 5-lesson bands (`loe-c:101-105`…) while other
+  simple chains keep the 10-unit default. **Changing a chain's bandSize
+  changes its row KEYS, which orphans any existing baseline** (the v2.8
+  migration re-freezes LoE's baseline for exactly this reason — see below).
+- **Dot grid / mini-bars** (subjects.js, replaces the single `.sbar` for
+  paced-with-chain cards): one dot cluster per tb-wb chapter (a dot per
+  lesson, half-fill via CSS gradient, a ◆ per chapter Review at the cluster's
+  end), one mini-bar per display band for a simple chain (reuses
+  `timelineRows`' own band split, so a bar always matches a 📅 Timeline row).
+  Chain-colored via `--dgc` (set per cluster, inherited by children) from a
+  rotating 15-color palette, `--dg0`…`--dg14` in css/plan.css with
+  `html[data-theme='dark']` overrides. Untested at the unit level (subjects.js
+  has no test rig); the pure math feeding it (lessonTotals, timelineRows) is
+  covered in tests/plan-model.test.mjs.
+- **Computed pace note.** For an ACTIVE paced-with-chain card, `a.note` is
+  replaced by a computed line ("▲ 2 wks ahead of plan · 4 sessions this week
+  · 5-day streak"): whole-book delta via the new pure `planDeltaChip
+  (finishDate, baselineDate)` (model.js) against the LAST unfinished
+  `chainTimeline` row with sessions>0 (the same row AGENTS.md's own
+  chainTimeline invariant already pins to projectFinish's date) — `timelineHtml`'s
+  own per-row chip now calls the SAME function, so the whole-book line and its
+  own chapter breakdown can never disagree. Sessions-this-week and
+  `dailyStreak` (streak omitted below 2 days) round it out. Static `a.note`
+  keeps rendering for every other card (non-paced, not active, chain-less).
+- **Today: a ticked lesson keeps its own name.** `pacedRowLabel` (today.js):
+  when a `done` log row exists for TODAY, the paced daily row shows the label
+  of the session that WAS completed (row's own `label` when present, else
+  `sessionLabel(chain, row.session)`) instead of flipping to the next one the
+  instant it's checked. Un-ticking (the row is spliced) naturally reverts.
+- **Year history drill-down.** `historyRows(act, events, plan)` (year.js,
+  pure) — log rows for one subject, newest first, grouped by month ("This
+  month"/"Last month"/"June 2026"). A row is owned by activityId, by an
+  eventId in the subject's category's template events, or by a Telegram
+  one-off override's own id when that override carries the subject's
+  activityId. UI is a NEW "History" section below Time away — one
+  `<details>` per subject — deliberately NOT nested inside the tracks/`.yhit`
+  tap-layer widget (that absolutely-positioned overlay owns the whole `.ytw`
+  box for the week-picker gesture; interleaving new interactive content
+  there would risk it). A subject with nothing logged drops off the list.
+- **Migration** (scripts/migrate-v28.mjs, committed but not yet run against
+  live data): loe-c/loe-d chain shape + bandSize, remaps loe-c's pre-v2.8 log
+  rows (old numbering counted from 81, new from 101 — a row with old
+  session<20 keeps its `curriculum` and gets an explicit `label` instead of
+  being remapped out of range), appends the 2026-08-19 lesson-102 row,
+  renames core-mama to "Miscellaneous", clears the singapore/loe notes,
+  re-freezes ONLY loe's baseline, and (if the family's geography titles JSON
+  was dropped in place) loads 30 unit titles and sets `geo-1.lastUnit = 30`
+  — the book is a 30-week program, not the 36 first assumed below. Each
+  edit re-derives itself from current fetched state (idempotent); the log
+  remap additionally stamps a `v28Remap` marker per row plus a migration-date
+  guard, since a remapped row's new session is otherwise indistinguishable
+  from an original pre-tracking row's on a second run.
+
 ## Subjects 📅 Timeline (planner-v2.7, 2026-08-19)
 Per-chapter "plan vs now" breakdown on every ACTIVE paced subject card, as a
 second `<details>` under the progress bar. Spec:
@@ -287,8 +355,12 @@ docs/superpowers/specs/2026-08-19-subjects-chapter-timeline-design.md.
   bands) = the trip-aware honest schedule (SM → May 16 '27, LoE → Feb 28 '27).
 
 ## Planner open items (2026-08-17)
-- LoE Foundations D true span (121-140 vs 121-160) — check the physical book.
-- Geography curriculum name + 36 unit titles — Claude bulk-loads once provided.
+- LoE Foundations D true span — **DONE 2026-08-19** (family-verified: 121-160,
+  40 lessons; applied via the v2.8 chain edit + migration, see above).
+- Geography curriculum name + unit titles — **DONE 2026-08-19** (extracted from
+  the family's own PDF: a 30-week program, NOT 36 as first guessed here —
+  titles + `geo-1.lastUnit = 30` land via scripts/migrate-v28.mjs, not yet
+  run against live data).
 - Dimensions G3 lesson/test counts — **DONE 2026-08-19** (loaded straight into
   the KV blob from the 3A/3B contents-page photos; seed.js deliberately keeps
   its dated 2026-08-16 snapshot). Structure: 15 `tb-wb` chains, one per
