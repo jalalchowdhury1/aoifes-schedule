@@ -109,6 +109,24 @@ export const nextSession = cur => {
 const CLS = new Set(['q', 'r', 'h', 'b', 'a', 'ot', 'g', 's', 'j']);
 export const okCls = x => (CLS.has(x) ? x : 'ot');
 
+// ── Subjects tab order (planner-v2.8, family feedback 2026-08-19) ──
+// Fixed order: the top three (Singapore, LoE, Geography) are what Nabila
+// needs day to day, then the core categories, then the rest. An id not in
+// this list (a future activity) sorts after every known one, stable among
+// THEMSELVES by the OLD status order (active/planned/parked/done/cancelled)
+// — the rule this list replaces for everything it names.
+export const SUBJECT_ORDER = ['singapore', 'loe', 'geography', 'core-ruhamah',
+  'core-hala', 'core-quran', 'core-art', 'science', 'jj', 'history', 'core-mama'];
+const SUBJECT_STATUS_ORDER = { active: 0, planned: 1, parked: 2, done: 3, cancelled: 4 };
+export function compareSubjects(a, b) {
+  const ia = SUBJECT_ORDER.indexOf(a?.id), ib = SUBJECT_ORDER.indexOf(b?.id);
+  const ka = ia === -1 ? SUBJECT_ORDER.length : ia;
+  const kb = ib === -1 ? SUBJECT_ORDER.length : ib;
+  if (ka !== kb) return ka - kb;
+  if (ia !== -1) return 0;    // both known: ids are unique, nothing left to break the tie
+  return (SUBJECT_STATUS_ORDER[a?.status] ?? 9) - (SUBJECT_STATUS_ORDER[b?.status] ?? 9);
+}
+
 export const currentCur = act => (act.chain || []).find(c => (c.done || 0) < sessionsCount(c)) || null;
 export const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCount(c), 0);
 export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);

@@ -8,7 +8,7 @@ import { catLabel } from '../state.js';
 import {
   todayStr, actTotal, actDone, currentCur, nextSession,
   projectFinish, requiredPerCycle, targetStats, okCls,
-  chainTimeline, actualFinishes, daysBetween,
+  chainTimeline, actualFinishes, daysBetween, compareSubjects,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode, setBaseline, getActivity } from './state.js';
 
@@ -123,9 +123,7 @@ function card(a) {
 export function renderSubjects() {
   const el = document.getElementById('view-subjects');
   if (!el || !plan.data) return;
-  const order = { active: 0, planned: 1, parked: 2, done: 3, cancelled: 4 };
-  const acts = [...plan.data.activities].sort((x, y) =>
-    (order[x.status] ?? 9) - (order[y.status] ?? 9));
+  const acts = [...plan.data.activities].sort(compareSubjects);
   armedBtn = null;                            // the node it held is about to go
   el.innerHTML = acts.map(card).join('');
   // One delegated listener on the container, which OUTLIVES innerHTML, so it is

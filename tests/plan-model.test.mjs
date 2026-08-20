@@ -4,7 +4,7 @@ import {
   addDays, dayIdx, mondayOf, weeksBetween, daysBetween, isOnWeek, isWorkDay,
   sessionsCount, nextSession, actTotal, actDone, actRemaining,
   dayAway, dayStatus, awayDaysInWeek, effectiveDaysInWeek,
-  sanitizePlan, serializePlan, lessonTotals,
+  sanitizePlan, serializePlan, lessonTotals, compareSubjects, SUBJECT_ORDER,
 } from '../js/plan/model.js';
 
 test('date helpers: Mon-first indexing and week math', () => {
@@ -923,6 +923,36 @@ test('sanitizePlan: an invalid bandSize (non-int, zero, negative) is dropped fro
       chain: [{ id: 'c', pattern: 'simple', firstUnit: 1, lastUnit: 20, done: 0, bandSize: bad }] }] });
     assert.equal('bandSize' in p.activities[0].chain[0], false, JSON.stringify(bad));
   }
+});
+
+// ── compareSubjects (planner-v2.8: fixed Subjects tab order) ─
+test('compareSubjects: known ids follow the fixed order regardless of input order', () => {
+  assert.deepEqual(SUBJECT_ORDER, ['singapore', 'loe', 'geography', 'core-ruhamah',
+    'core-hala', 'core-quran', 'core-art', 'science', 'jj', 'history', 'core-mama']);
+  const acts = [
+    { id: 'core-mama', status: 'active' }, { id: 'history', status: 'active' },
+    { id: 'singapore', status: 'planned' }, { id: 'loe', status: 'active' },
+    { id: 'geography', status: 'planned' }, { id: 'core-ruhamah', status: 'active' },
+  ];
+  const sorted = [...acts].sort(compareSubjects).map(a => a.id);
+  assert.deepEqual(sorted, ['singapore', 'loe', 'geography', 'core-ruhamah', 'history', 'core-mama']);
+});
+
+test('compareSubjects: unknown ids sort after every known one, by the old status order among themselves', () => {
+  const acts = [
+    { id: 'new-parked', status: 'parked' },
+    { id: 'jj', status: 'active' },
+    { id: 'new-active', status: 'active' },
+    { id: 'new-done', status: 'done' },
+  ];
+  const sorted = [...acts].sort(compareSubjects).map(a => a.id);
+  assert.deepEqual(sorted, ['jj', 'new-active', 'new-parked', 'new-done']);
+});
+
+test('compareSubjects: stable — two unknown ids sharing a status keep their original relative order', () => {
+  const acts = [{ id: 'z1', status: 'active' }, { id: 'z2', status: 'active' }];
+  assert.deepEqual([...acts].sort(compareSubjects).map(a => a.id), ['z1', 'z2']);
+  assert.deepEqual([...acts].reverse().sort(compareSubjects).map(a => a.id), ['z2', 'z1']);
 });
 
 test('chainTimeline: an activity with no rhythm (zero capacity forever) leaves unfinished rows at finish null, no hang', () => {
