@@ -14,7 +14,7 @@ for (const k of ['alert', 'confirm', 'prompt'])
   globalThis[k] = () => { throw new Error(`${k}() must never be called by the planner`); };
 
 const { fmtRange, perName, awayCls, weekAway, nextWorkStart, monthGroups, axisHtml,
-        MIN_LABEL_SPAN, coreRows, shortName, weekAttHtml, historyRows } = await import('../js/plan/year.js');
+        MIN_LABEL_SPAN, coreRows, shortName, weekAttHtml, historyRows, HISTORY_CAP } = await import('../js/plan/year.js');
 const { store } = await import('../js/state.js');
 const { plan } = await import('../js/plan/state.js');
 const { todayStr, addDays } = await import('../js/plan/model.js');
@@ -334,4 +334,36 @@ test('historyRows: malformed/missing inputs never throw', () => {
   assert.deepEqual(historyRows(null, [], {}), []);
   assert.deepEqual(historyRows({ id: 'a' }, null, null), []);
   assert.deepEqual(historyRows({ id: 'a' }, [], { log: 'garbage', overrides: 'garbage' }), []);
+});
+
+// ── HISTORY_CAP: bound a multi-year log (review fix) ──────────
+test('historyRows: caps at the most recent HISTORY_CAP rows and appends a muted "…older sessions" notice', () => {
+  assert.equal(HISTORY_CAP, 200);
+  const act = { id: 'loe', chain: [{ id: 'loe-c', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 0 }] };
+  const base = addDays(TODAY, -400);          // far enough back that nothing collides with "This/Last month"
+  const log = Array.from({ length: 250 }, (_, i) => ({ date: addDays(base, i), activityId: 'loe', status: 'done' }));
+  const groups = historyRows(act, [], { overrides: [], log });
+
+  const realRows = groups.flatMap(g => g.rows).filter(r => !r.notice);
+  assert.equal(realRows.length, 200);
+  const notices = groups.flatMap(g => g.rows).filter(r => r.notice);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].label, '…older sessions not shown (50 more)');
+  // the notice sits at the very end of the very last (oldest) group
+  const lastGroup = groups[groups.length - 1];
+  assert.equal(lastGroup.rows[lastGroup.rows.length - 1].notice, true);
+
+  // the 200 most RECENT dates survive (base+50 .. base+249); the oldest 50
+  // (base .. base+49) are dropped entirely, not just hidden.
+  const keptDates = new Set(realRows.map(r => r.date));
+  for (let i = 0; i < 50; i++) assert.equal(keptDates.has(addDays(base, i)), false, `day ${i} should be dropped`);
+  for (let i = 50; i < 250; i++) assert.equal(keptDates.has(addDays(base, i)), true, `day ${i} should survive`);
+});
+
+test('historyRows: under the cap, no notice row is added anywhere', () => {
+  const act = { id: 'loe', chain: [{ id: 'loe-c', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 0 }] };
+  const log = Array.from({ length: 5 }, (_, i) => ({ date: addDays(TODAY, -i), activityId: 'loe', status: 'done' }));
+  const groups = historyRows(act, [], { overrides: [], log });
+  assert.equal(groups.flatMap(g => g.rows).length, 5);
+  assert.ok(!groups.flatMap(g => g.rows).some(r => r.notice));
 });

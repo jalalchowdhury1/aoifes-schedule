@@ -242,6 +242,15 @@ const monthLabelFor = (dateStr, todayYm) => {
 
 const isISO = s => typeof s === 'string' && ISO.test(s);
 
+// A multi-year install's log grows forever, and unlike timelineRows (capped
+// at WALK_CAP for exactly this reason) history has no natural ceiling of
+// its own — a subject logged daily for years would otherwise hand the Year
+// view thousands of rows to build and render every time a <details> opens.
+// Bound the window at the most recent HISTORY_CAP rows and SAY SO (a muted
+// notice row, never a silent truncation) rather than either hanging the
+// page or pretending the older sessions never happened.
+export const HISTORY_CAP = 200;
+
 // Template event ids for one category — the same "cat must not be null"
 // guard weekAttendance uses: a null/undefined cat must never match the
 // corrupt {id:'e999'} record the live blob still carries (its own cat is
@@ -269,8 +278,10 @@ const ownsRow = (e, act, tplIds, ovIds) =>
 // EITHER `timeLabel` (a timed row: the template event's or one-off
 // override's start/end) OR `sessionLabel` (a paced row: the log row's own
 // `label` when present, else sessionLabel() replayed against its chain +
-// session index) — never both. Pure and side-effect-free: `plan` is read
-// only, never mutated.
+// session index) — never both. Capped at the most recent HISTORY_CAP rows;
+// when capped, the LAST group gets one extra `{notice: true, label}` row
+// (no date/status — the UI renders it muted, not as a session). Pure and
+// side-effect-free: `plan` is read only, never mutated.
 export function historyRows(act, events, plan) {
   if (!act || !plan) return [];
   const log = Array.isArray(plan.log) ? plan.log : [];
@@ -300,14 +311,19 @@ export function historyRows(act, events, plan) {
     })
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));   // newest first, stable
 
+  const overflow = rows.length - HISTORY_CAP;
+  const kept = overflow > 0 ? rows.slice(0, HISTORY_CAP) : rows;
+
   const todayYm = ym(todayStr());
   const groups = [];
-  for (const r of rows) {
+  for (const r of kept) {
     const label = monthLabelFor(r.date, todayYm);
     const last = groups[groups.length - 1];
     if (last && last.monthLabel === label) last.rows.push(r);
     else groups.push({ monthLabel: label, rows: [r] });
   }
+  if (overflow > 0 && groups.length)
+    groups[groups.length - 1].rows.push({ notice: true, label: `…older sessions not shown (${overflow} more)` });
   return groups;
 }
 
@@ -365,6 +381,9 @@ function historyHtml(subjectRows, coreList) {
   if (!items.length) return '';
   const rowsHtml = groups => groups.map(g =>
     `<div class="yh-mo">${esc(g.monthLabel)}</div>${g.rows.map(r => {
+      // The HISTORY_CAP overflow notice is not a session — no date/status,
+      // just a muted, left-aligned line closing out the visible window.
+      if (r.notice) return `<div class="yh-row yh-notice">${esc(r.label)}</div>`;
       const icon = r.status === 'done' ? '✓' : r.status === 'partial' ? '◐' : '✗';
       const label = r.timeLabel || r.sessionLabel || '';
       return `<div class="yh-row"><span>${esc(r.dayLabel)}${

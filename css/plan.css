@@ -285,6 +285,9 @@ html[data-theme='dark'] {
 .yh-row { display: flex; justify-content: space-between; align-items: baseline;
           gap: 8px; padding: 6px 2px; font-size: 11.5px; color: var(--text-sub); }
 .yh-row + .yh-row { border-top: 1px solid var(--line); }
+/* HISTORY_CAP overflow notice — a muted, left-aligned line, never a
+   session row (no name/status columns to align). */
+.yh-notice { color: var(--text-muted); font-style: italic; }
 
 /* Add/edit sheet — a card on desktop, a bottom sheet on phones */
 .ysh-bd { position: fixed; inset: 0; background: var(--backdrop); z-index: 80; }
