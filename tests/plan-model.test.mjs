@@ -4,7 +4,7 @@ import {
   addDays, dayIdx, mondayOf, weeksBetween, daysBetween, isOnWeek, isWorkDay,
   sessionsCount, nextSession, actTotal, actDone, actRemaining,
   dayAway, dayStatus, awayDaysInWeek, effectiveDaysInWeek,
-  sanitizePlan, serializePlan,
+  sanitizePlan, serializePlan, lessonTotals,
 } from '../js/plan/model.js';
 
 test('date helpers: Mon-first indexing and week math', () => {
@@ -858,6 +858,71 @@ test('timelineRows/chainTimeline: a chain mixing tb-wb and simple items keeps te
   const ct = chainTimeline(act, '2026-08-19', plan);
   const last = [...ct].reverse().find(r => !r.complete);
   assert.equal(last.finish, projectFinish(act, '2026-08-19', plan).date);
+});
+
+// ── lessonTotals (planner-v2.8: "2/60 lessons" header) ───────
+test('lessonTotals: tb-wb half-done lesson + tests excluded, simple chain 1:1, mixed chain', () => {
+  const act = { chain: [
+    { id: 'c1', pattern: 'tb-wb', lessons: 3, tests: 2, done: 5 },   // 2 full + 1 half of 3
+    { id: 's1', pattern: 'simple', firstUnit: 1, lastUnit: 10, done: 4 },
+  ] };
+  assert.deepEqual(lessonTotals(act), { done: 6.5, total: 13 });
+});
+
+test('lessonTotals: review/test sessions past lessons*2 contribute 0 and done clamps at lessons', () => {
+  const act = { chain: [{ id: 'c1', pattern: 'tb-wb', lessons: 3, tests: 2, done: 8 }] };  // 6 lesson + 2 test sessions, all done
+  assert.deepEqual(lessonTotals(act), { done: 3, total: 3 });
+});
+
+test('lessonTotals: LoE-shaped mixed chains (101-120 done 2, 121-160 done 0) -> 2/60', () => {
+  const act = { chain: [
+    { id: 'loe-c', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 2, bandSize: 5 },
+    { id: 'loe-d', pattern: 'simple', firstUnit: 121, lastUnit: 160, done: 0, bandSize: 5 },
+  ] };
+  assert.deepEqual(lessonTotals(act), { done: 2, total: 60 });
+});
+
+test('lessonTotals: negative/overshoot done clamps at both ends; empty/junk chains contribute nothing', () => {
+  assert.deepEqual(lessonTotals({}), { done: 0, total: 0 });
+  assert.deepEqual(lessonTotals({ chain: [] }), { done: 0, total: 0 });
+  const act = { chain: [
+    { id: 'neg', pattern: 'simple', firstUnit: 1, lastUnit: 10, done: -5 },
+    { id: 'over', pattern: 'tb-wb', lessons: 2, tests: 0, done: 99 },
+    { id: 'nounits', pattern: 'simple', done: 3 },              // no firstUnit/lastUnit -> skipped
+    { id: 'junk', pattern: 'weird', done: 3 },                  // unknown pattern -> skipped
+    null,
+  ] };
+  assert.deepEqual(lessonTotals(act), { done: 2, total: 12 });   // over clamps to 2/2, neg clamps to 0
+});
+
+test('timelineRows: per-chain bandSize=5 keys 101-105…156-160, else falls back to BAND_SIZE', () => {
+  const act = { chain: [
+    { id: 'lc', pattern: 'simple', firstUnit: 101, lastUnit: 120, done: 2, bandSize: 5 },
+    { id: 'ld', pattern: 'simple', firstUnit: 121, lastUnit: 160, done: 0, bandSize: 5 },
+    { id: 'g', pattern: 'simple', firstUnit: 1, lastUnit: 15, done: 0 },   // no bandSize -> default 10
+  ] };
+  const rows = timelineRows(act);
+  assert.deepEqual(rows.map(r => r.key), [
+    'lc:101-105', 'lc:106-110', 'lc:111-115', 'lc:116-120',
+    'ld:121-125', 'ld:126-130', 'ld:131-135', 'ld:136-140',
+    'ld:141-145', 'ld:146-150', 'ld:151-155', 'ld:156-160',
+    'g:1-10', 'g:11-15',
+  ]);
+  assert.deepEqual(rows.map(r => r.sessions).slice(0, 4), [5, 5, 5, 5]);
+});
+
+test('sanitizePlan: a valid positive-integer bandSize is preserved on the cleaned chain', () => {
+  const p = sanitizePlan({ activities: [{ id: 'a', type: 'paced', status: 'active',
+    chain: [{ id: 'c', pattern: 'simple', firstUnit: 1, lastUnit: 20, done: 0, bandSize: 5 }] }] });
+  assert.equal(p.activities[0].chain[0].bandSize, 5);
+});
+
+test('sanitizePlan: an invalid bandSize (non-int, zero, negative) is dropped from the cleaned chain', () => {
+  for (const bad of [0, -1, 2.5, 'five', null, NaN]) {
+    const p = sanitizePlan({ activities: [{ id: 'a', type: 'paced', status: 'active',
+      chain: [{ id: 'c', pattern: 'simple', firstUnit: 1, lastUnit: 20, done: 0, bandSize: bad }] }] });
+    assert.equal('bandSize' in p.activities[0].chain[0], false, JSON.stringify(bad));
+  }
 });
 
 test('chainTimeline: an activity with no rhythm (zero capacity forever) leaves unfinished rows at finish null, no hang', () => {

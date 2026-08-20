@@ -114,6 +114,35 @@ export const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCo
 export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);
 export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 
+// ── Lesson-based totals (Subjects header: "2/60 lessons") ───
+// A session count and a LESSON count differ for tb-wb chains: two sessions
+// (textbook + workbook) make one lesson, and a chapter's Review sessions
+// (`tests`) are teaching-order bookkeeping, not lessons — they are EXCLUDED
+// from both numbers entirely, the same way a chapter test doesn't move a
+// "lessons done" counter in real life. A simple chain (LoE) has no such split:
+// each unit already IS a lesson, so it counts 1:1, same as actTotal/actDone.
+export function lessonTotals(act) {
+  let done = 0, total = 0;
+  for (const c of act?.chain || []) {
+    if (!c || typeof c !== 'object') continue;
+    if (c.pattern === 'tb-wb') {
+      const lessons = Math.max(0, c.lessons || 0);
+      const lessonSessions = lessons * 2;
+      // Clamp to the lesson sessions BEFORE halving: review/test sessions
+      // logged past lessons*2 must contribute 0, not a phantom half-lesson.
+      const d = Math.min(Math.max(0, c.done || 0), lessonSessions);
+      total += lessons;
+      done += Math.min(Math.floor(d / 2) + (d % 2 ? 0.5 : 0), lessons);
+    } else if (c.pattern === 'simple') {
+      if (c.firstUnit == null || c.lastUnit == null) continue;
+      const units = Math.max(0, c.lastUnit - c.firstUnit + 1);
+      total += units;
+      done += Math.min(Math.max(0, c.done || 0), units);
+    }
+  }
+  return { done, total };
+}
+
 // ── Chapter timeline (Subjects 📅 Timeline) ─────────────────
 // Row descriptors for a paced activity's chain, in teaching order.
 // tb-wb chains (Singapore chapters) are one row each; simple chains (LoE books)
@@ -139,9 +168,13 @@ export function timelineRows(act) {
     } else {
       if (c.firstUnit == null || c.lastUnit == null) continue;
       const word = c.unitWord || 'Lesson';
+      // Per-chain display band size (LoE ships 5-lesson bands while Singapore's
+      // simple chains, if any, keep the default) — DISPLAY ONLY, same as
+      // BAND_SIZE itself: nothing stored changes shape.
+      const bandSize = Number.isInteger(c.bandSize) && c.bandSize > 0 ? c.bandSize : BAND_SIZE;
       let left = done;
-      for (let a = c.firstUnit; a <= c.lastUnit && rows.length < WALK_CAP; a += BAND_SIZE) {
-        const b = Math.min(a + BAND_SIZE - 1, c.lastUnit);
+      for (let a = c.firstUnit; a <= c.lastUnit && rows.length < WALK_CAP; a += bandSize) {
+        const b = Math.min(a + bandSize - 1, c.lastUnit);
         const n = b - a + 1;
         const d = Math.min(left, n);
         left -= d;
@@ -264,7 +297,17 @@ export function sanitizePlan(raw) {
       // `id` is required: togglePaced records it in the log and finds the
       // curriculum by it on uncheck. An id-less entry would break that identity.
       const o = { ...a, chain: Array.isArray(a.chain)
-          ? a.chain.filter(c => c && c.pattern && c.id).map(c => ({ ...c, done: Math.max(0, c.done || 0) }))
+          ? a.chain.filter(c => c && c.pattern && c.id).map(c => {
+              const cc = { ...c, done: Math.max(0, c.done || 0) };
+              // bandSize is a DISPLAY knob for timelineRows: a non-positive or
+              // non-integer value would either loop forever or misdraw bands,
+              // so an invalid one is dropped rather than carried through —
+              // timelineRows then falls back to BAND_SIZE, same as if it were
+              // never set.
+              if ('bandSize' in cc && !(Number.isInteger(cc.bandSize) && cc.bandSize > 0))
+                delete cc.bandSize;
+              return cc;
+            })
           : [] };
       if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
       // Baseline (Subjects 📅 Timeline): rebuild to exactly {setOn, rows} or
