@@ -11,7 +11,19 @@
 // AGENTS.md "Concurrent writes & merge"), then GETs again and verifies
 // every single edit actually landed, printing a ✅/❌ checklist. Nothing here
 // is run automatically; nothing here touches localStorage or the browser.
+//
+// RUN OFF-HOURS ONLY (family asleep — overnight, same house rule as every
+// other scheduled job in this fleet). The window between this script's GET
+// and its POST is exactly when a concurrent write (the Telegram bot, or a
+// family phone) could collide with the synthetic lesson-102 row on the same
+// log key (date|activityId) and get silently dropped by mergePlanWrites'
+// own de-dup — see the pre/post log snapshot guard below. Running while the
+// family is awake and actively using the app is what turns that theoretical
+// window into a real one. The guard below makes the loudest failure mode a
+// REFUSAL (exit nonzero, nothing corrupted) rather than a silent loss, but
+// "loud at 3am with nobody watching" is still worse than "never triggered".
 import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { chainTimeline } from '../js/plan/model.js';
 
 const SITE = process.env.AOIFE_SITE_URL || 'https://aoifes-schedule.vercel.app';
@@ -27,7 +39,14 @@ const MIGRATION_DATE = '2026-08-19';
 // Titles are committed beside this script (extracted 2026-08-19 from the BYL
 // 'Around the World' PDF, 30-week program) so the migration is runnable from
 // any session, not just the one that extracted them.
-const GEO_TITLES_PATH = new URL('./geography-titles.json', import.meta.url).pathname;
+// fileURLToPath, NEVER `new URL(...).pathname` — this repo's own checkout
+// path has a space in it ("Aoife's Schedule"), which .pathname leaves
+// percent-encoded ("Aoife's%20Schedule") instead of decoding; existsSync on
+// that encoded string silently returns false, and the whole geography step
+// silently no-ops even though the file is right there. Caught in dry-run
+// testing (verified: .pathname resolved to a path that doesn't exist on
+// disk; fileURLToPath resolves to the real one).
+const GEO_TITLES_PATH = fileURLToPath(new URL('./geography-titles.json', import.meta.url));
 // The book states "This is a 30-week program" (TOC confirmed: Wk1 intro,
 // 2-5 N.America, 6-9 S.America, 10-14 Europe, 15-19 Asia, 20-24 Africa,
 // 25-27 Oceania, 28-30 Antarctica/review) — NOT 36 as first assumed in
@@ -73,6 +92,21 @@ function applyLoeChainEdits(plan) {
 // stamped `v28Remap: true`; a second run skips any row that already carries
 // it, so nothing is ever double-shifted or wrongly re-labeled. Rows without
 // that stamp and without curriculum:'loe-c' are never touched.
+//
+// Pure per-row rule, factored out so the "nothing pre-existing was lost"
+// guard in main() can compute the SAME expected post-migration shape for
+// verification without re-implementing it. Returns the fields to overwrite,
+// or null when this row is not (or no longer) ours to touch: wrong
+// curriculum, no numeric session, dated on/after migration day (see the
+// comment on that guard below), or already stamped.
+function loeCRemapFields(e) {
+  if (!e || e.curriculum !== 'loe-c' || typeof e.session !== 'number') return null;
+  if (e.date >= MIGRATION_DATE || e.v28Remap === true) return null;
+  return e.session >= 20
+    ? { session: e.session - 20, v28Remap: true }
+    : { label: `Lesson ${81 + e.session}`, v28Remap: true };
+}
+
 function remapLoeCLogRows(plan) {
   const log = Array.isArray(plan.log) ? plan.log : [];
   let remapped = 0, labeled = 0, skipped = 0;
@@ -85,11 +119,10 @@ function remapLoeCLogRows(plan) {
     // guard is what keeps the row appendLesson102Row() creates (session 1,
     // no marker yet in the SAME run) from being caught if step order ever
     // changed, and protects any real tick logged on migration day itself.
-    if (e.date >= MIGRATION_DATE) { skipped++; continue; }
-    if (e.v28Remap === true) { skipped++; continue; }
-    if (e.session >= 20) { e.session = e.session - 20; remapped++; }
-    else { e.label = `Lesson ${81 + e.session}`; labeled++; }
-    e.v28Remap = true;
+    const fields = loeCRemapFields(e);
+    if (!fields) { skipped++; continue; }
+    Object.assign(e, fields);
+    if ('session' in fields) remapped++; else labeled++;
   }
   return { ok: true, remapped, labeled, skipped };
 }
@@ -133,6 +166,11 @@ function clearNotes(plan) {
 // later reproduces byte-identical output rather than drifting the
 // reference plan). Singapore's baseline is a completely separate object on
 // a completely separate activity and is never touched here.
+// A blind re-run of this whole script on a LATER day (after real logging
+// happened in between) re-freezes AT THAT LATER done state, not the one
+// from migration night — that is a re-derivation, not corruption (it is
+// exactly what pressing "Re-baseline" again would do), and is an accepted,
+// documented trade-off rather than a bug.
 function refreezeLoeBaseline(plan) {
   const loe = findAct(plan, 'loe');
   if (!loe) return { ok: false, reason: 'activity "loe" not found' };
@@ -159,6 +197,41 @@ function applyGeographyTitles(plan) {
   const changed = 'note' in geography;
   if (changed) delete geography.note;
   return { ok: true, skipped: false, changed };
+}
+
+// ── "Nothing pre-existing was lost" guard ─────────────────────
+// A concurrent write (the bot, a family phone) landing between this
+// script's GET and its POST can collide on the SAME log key
+// (date|eventId||activityId — see js/plan/model.js mergePlanWrites) as a
+// row this script also writes for that key: the synthetic lesson-102 row
+// is the one case that applies today (date=MIGRATION_DATE,
+// activityId='loe'). mergePlanWrites keeps whichever row is already in
+// `incoming` for a shared key and never arbitrates content between the two,
+// so the OTHER writer's row for that key can be silently replaced — the
+// repo's own documented principle is that a silently DELETED entry is the
+// worst failure mode (see AGENTS.md "Concurrent writes & merge" — losing a
+// logged session is silent, an unexpected extra tick is at least visible).
+// This is a POST-HOC guardrail, not a lock (there is no way for a plain
+// script talking to this endpoint to take one): it snapshots the log
+// EXACTLY as fetched before any mutation, and after the save, re-fetches
+// and confirms every one of those rows is still present in ITS EXPECTED
+// form — either byte-identical (nothing here touched it) or exactly what
+// this script's own known, intentional edit (the loe-c remap) would
+// produce (`expectedLogRow`, which reuses `loeCRemapFields` so the two can
+// never drift apart). Anything missing means REFUSE loudly rather than
+// report success over a real loss.
+//
+// Order-independent content equality for a flat log row (every field here —
+// date/activityId/status/curriculum/session/label/timed/eventId — is a
+// primitive), so sorting keys before stringifying is a complete, honest
+// canonical form, not an approximation.
+const canonRow = e => JSON.stringify(e, Object.keys(e).sort());
+const expectedLogRow = e => { const fields = loeCRemapFields(e); return fields ? { ...e, ...fields } : e; };
+
+function findMissingLogRows(before, after) {
+  const afterSet = new Set((Array.isArray(after) ? after : []).filter(Boolean).map(canonRow));
+  return (Array.isArray(before) ? before : [])
+    .filter(e => e && !afterSet.has(canonRow(expectedLogRow(e))));
 }
 
 // ── Fetch helpers (mirrors AGENTS.md's double-wrap / unwrap convention) ──
@@ -238,9 +311,12 @@ async function main() {
   const plan = await fetchPlan();
   const base = plan.savedAt || null;
 
-  // Snapshot BEFORE any mutation, purely to verify singapore.baseline is
-  // untouched (deep-compared, not just "still present").
+  // Snapshots BEFORE any mutation: singapore.baseline (to verify it stays
+  // untouched, deep-compared not just "still present") and the FULL log
+  // (the "nothing pre-existing was lost" guard below — a plain deep clone,
+  // never the same object references the edits below go on to mutate).
   const singaporeBaselineBefore = findAct(plan, 'singapore')?.baseline ?? null;
+  const logBefore = (Array.isArray(plan.log) ? plan.log : []).map(e => ({ ...e }));
 
   const results = {
     loeChain: applyLoeChainEdits(plan),
@@ -260,6 +336,31 @@ async function main() {
 
   console.log('[migrate-v28] re-fetching to verify…');
   const verified = await fetchPlan();
+
+  // The loudest failure mode is now a REFUSAL, not a loss: this check runs
+  // BEFORE the normal checklist and short-circuits the whole script on any
+  // hit, because a lost log row is not something the usual per-edit ✅/❌
+  // checklist below is built to describe.
+  const missing = findMissingLogRows(logBefore, verified.log);
+  if (missing.length) {
+    console.error(`\n[migrate-v28] REFUSING — ${missing.length} pre-existing log row(s) are missing after save:`);
+    for (const m of missing) console.error('  ', JSON.stringify(m));
+    console.error(`
+[migrate-v28] This is exactly the race the pre/post log snapshot guards
+against: a concurrent write (the Telegram bot, or a family phone) most
+likely landed between this script's GET and its POST and lost a race on a
+shared log key (see the comment above findMissingLogRows). RESTORE:
+  1. GET ${SITE}/api/plan-get?prev=1  (the copy taken immediately before
+     this script's write)
+  2. POST it back to ${SAVE_URL} as {"data": "<that exact JSON, stringified>"}
+     WITHOUT a \`base\` field, so it is applied verbatim.
+Do NOT re-run this script blindly first — investigate what the missing
+row(s) represent (a real session someone logged today) before deciding
+whether to restore, replay it by hand, or re-run once it's safe.`);
+    process.exitCode = 1;
+    return;
+  }
+
   const checks = verify(verified, {
     singaporeBaselineBefore,
     geoTitlesApplied: !results.geography.skipped,
