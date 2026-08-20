@@ -111,14 +111,51 @@
         background: var(--el, var(--border)); margin-right: 7px; }
 .smeta { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .sline { font-size: 11.5px; color: var(--text-sub); margin-top: 4px; }
-.sbar { height: 5px; border-radius: 4px; background: var(--eb, var(--bg-input));
-        margin-top: 7px; position: relative; overflow: hidden; }
-.sbar i { position: absolute; inset: 0 auto 0 0; background: var(--el, var(--accent-soft)); border-radius: 4px; }
 .sdet { margin-top: 8px; }
 .sdet summary { font-size: 11px; color: var(--text-muted); cursor: pointer; }
 .sctl { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
 .sctl-l { font-size: 11px; color: var(--text-sub); display: flex; gap: 5px; align-items: center; margin: 0; }
 .sctl-l select { width: auto; font-size: 12px; padding: 4px 6px; }
+
+/* Dot grid / mini-bars (Subjects: planner-v2.8) — replaces the single .sbar
+   for paced-with-chain cards. One cluster per tb-wb chapter (a dot per
+   lesson, half-fill via CSS, a small ◆ per chapter Review at the cluster's
+   end) or one row of mini-bars per simple-chain display band (LoE), chain-
+   colored via --dgc set on the cluster and inherited by its dots/bars — see
+   the --dg0…--dg14 rotating palette below. Phone-first: both the wrap and
+   each cluster wrap their children, so a long book NEVER forces the card to
+   scroll sideways, even at 320px — it just grows taller. */
+.dgwrap { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 7px; }
+.dgc { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.dg-dot { width: 7px; height: 7px; border-radius: 99px; flex: 0 0 auto;
+          background-color: var(--bg-input); border: 1px solid var(--border); }
+.dg-dot.full { background-color: var(--dgc); border-color: var(--dgc); }
+.dg-dot.half { border-color: var(--dgc);
+               background: linear-gradient(90deg, var(--dgc) 50%, var(--bg-input) 50%); }
+.dg-rev { font-size: 7px; line-height: 1; color: var(--border); margin-left: 1px; }
+.dg-rev.full { color: var(--dgc); }
+.dgc-bars { gap: 4px; }
+.dg-bar { width: 18px; height: 8px; border-radius: 3px; flex: 0 0 auto; position: relative;
+          overflow: hidden; background-color: var(--bg-input); border: 1px solid var(--border); }
+.dg-bar i { position: absolute; inset: 0 auto 0 0; background-color: var(--dgc); border-radius: 2px; }
+
+/* 15-color rotating palette (chapter/book index mod 15), distinct hues 24°
+   apart around the wheel. Darker/more-saturated for the light theme (reads
+   on white panels), lighter for dark (reads on --bg-panel #1a1a1e). */
+:root {
+  --dg0: hsl(0 60% 42%); --dg1: hsl(24 60% 40%); --dg2: hsl(48 55% 36%);
+  --dg3: hsl(72 45% 34%); --dg4: hsl(96 40% 34%); --dg5: hsl(120 40% 34%);
+  --dg6: hsl(144 45% 32%); --dg7: hsl(168 55% 30%); --dg8: hsl(192 55% 36%);
+  --dg9: hsl(216 55% 46%); --dg10: hsl(240 50% 54%); --dg11: hsl(264 45% 48%);
+  --dg12: hsl(288 45% 42%); --dg13: hsl(312 50% 42%); --dg14: hsl(336 55% 42%);
+}
+html[data-theme='dark'] {
+  --dg0: hsl(0 70% 66%); --dg1: hsl(24 70% 62%); --dg2: hsl(48 65% 58%);
+  --dg3: hsl(72 55% 56%); --dg4: hsl(96 50% 56%); --dg5: hsl(120 50% 58%);
+  --dg6: hsl(144 55% 56%); --dg7: hsl(168 60% 54%); --dg8: hsl(192 65% 62%);
+  --dg9: hsl(216 70% 70%); --dg10: hsl(240 65% 74%); --dg11: hsl(264 60% 72%);
+  --dg12: hsl(288 55% 70%); --dg13: hsl(312 60% 68%); --dg14: hsl(336 65% 66%);
+}
 
 /* 📅 Timeline (Subjects): per-chapter plan-vs-now rows.
    Deliberate two-line stack — chapter name, then a dates line — so a narrow

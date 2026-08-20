@@ -6,9 +6,10 @@
 import { esc } from '../model.js';
 import { catLabel } from '../state.js';
 import {
-  todayStr, actTotal, actDone, currentCur, nextSession,
+  todayStr, actTotal, currentCur, nextSession,
   projectFinish, requiredPerCycle, targetStats, okCls,
   chainTimeline, actualFinishes, daysBetween, compareSubjects,
+  lessonTotals, timelineRows,
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode, setBaseline, getActivity } from './state.js';
 
@@ -89,18 +90,74 @@ function timelineHtml(a) {
   return `<details class="sdet"><summary>📅 Timeline</summary><div class="tl">${items}</div></details>`;
 }
 
+// ── Lessons header + dot grid / mini-bars (replaces the old
+//    "0/251 · next: …" line and single .sbar, paced-with-chain cards only) ──
+// A chain name like "3A Ch 1 · Numbers to 10,000" — the part the family
+// actually calls the chapter is what comes before the em-dash-style "·".
+const shortChainName = c => String(c?.name || '').split('·')[0].trim();
+
+function headerLine(a, cur) {
+  const lt = lessonTotals(a);
+  const pct = lt.total ? Math.round((lt.done / lt.total) * 100) : 0;
+  let next = '';
+  const ns = cur ? nextSession(cur) : null;
+  if (ns) {
+    const prefix = cur.pattern === 'tb-wb' ? shortChainName(cur) : '';
+    next = ` · next: ${esc(prefix ? `${prefix} · ${ns.label}` : ns.label)}`;
+  }
+  return `<div class="sline">${lt.done}/${lt.total} lessons · ${pct}%${next}</div>`;
+}
+
+// One cluster per tb-wb chapter: a dot per lesson (half-fill via CSS when
+// only the textbook session of a pair is done), plus a small ◆ per chapter
+// Review at the cluster's end — review sessions are always the chain's LAST
+// `tests` sessions (same layout sessionLabel() assumes), filled once that
+// review session is logged done.
+function dotCluster(c, idx) {
+  const lessons = Math.max(0, c.lessons || 0);
+  if (!lessons) return '';
+  const d = Math.min(Math.max(0, c.done || 0), lessons * 2);
+  const tests = Math.max(0, c.tests || 0);
+  const dots = Array.from({ length: lessons }, (_, i) => {
+    const cls = d >= (i + 1) * 2 ? ' full' : d === i * 2 + 1 ? ' half' : '';
+    return `<i class="dg-dot${cls}"></i>`;
+  }).join('');
+  const revs = Array.from({ length: tests }, (_, k) =>
+    `<i class="dg-rev${(c.done || 0) > lessons * 2 + k ? ' full' : ''}">◆</i>`).join('');
+  return `<div class="dgc" style="--dgc:var(--dg${idx % 15})" title="${esc(c.name || c.id)}">${dots}${revs}</div>`;
+}
+
+// One mini-bar per display band for a simple chain (LoE): the SAME band
+// split timelineRows uses (bandSize-aware, via that pure helper), so a bar
+// here always lines up with a row in the 📅 Timeline breakdown below it.
+function barCluster(c, idx, rows) {
+  const bars = rows.filter(r => r.chainId === c.id).map(r => {
+    const pct = r.sessions ? Math.round((r.done / r.sessions) * 100) : 0;
+    return `<span class="dg-bar" title="${esc(r.label)}"><i style="width:${pct}%"></i></span>`;
+  }).join('');
+  return bars ? `<div class="dgc dgc-bars" style="--dgc:var(--dg${idx % 15})">${bars}</div>` : '';
+}
+
+function dotGridHtml(a) {
+  const chain = a.chain || [];
+  if (!chain.length) return '';
+  const rows = chain.some(c => c.pattern === 'simple') ? timelineRows(a) : [];
+  const parts = chain.map((c, i) =>
+    c.pattern === 'tb-wb' ? dotCluster(c, i) : c.pattern === 'simple' ? barCluster(c, i, rows) : '');
+  const html = parts.filter(Boolean).join('');
+  return html ? `<div class="dgwrap">${html}</div>` : '';
+}
+
 function card(a) {
   const name = a.name || catLabel(a.cat);
-  const total = actTotal(a), done = actDone(a);
-  const cur = currentCur(a), ns = cur ? nextSession(cur) : null;
-  const pct = total ? Math.round((done / total) * 100) : 0;
+  const total = actTotal(a);
+  const cur = currentCur(a);
   const stChip = { planned: 'Planned', parked: 'Parked', cancelled: 'Cancelled', done: 'Done' }[a.status];
   let h = `<div class="pcard scard ${a.cls ? okCls(a.cls) : ''}${a.status !== 'active' ? ' dim' : ''}" data-id="${esc(a.id)}">
     <div class="trow"><span class="tnm"><i class="sdot"></i>${esc(name)}</span>
       <span class="smeta">${stChip ? `<span class="pchip">${stChip}</span>` : paceLine(a)}</span></div>`;
   if (a.type === 'paced' && total > 0)
-    h += `<div class="sline">${done}/${total}${ns ? ` · next: ${esc(ns.label)}` : ''}</div>
-          <div class="sbar"><i style="width:${pct}%"></i></div>`;
+    h += headerLine(a, cur) + dotGridHtml(a);
   if (a.note) h += `<div class="sline">${esc(a.note)}</div>`;
   h += timelineHtml(a);
   h += `<details class="sdet"><summary>Manage</summary><div class="sctl">`;
