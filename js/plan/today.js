@@ -6,7 +6,7 @@ import { store, catLabel, evLabel } from '../state.js';
 import {
   todayStr, addDays, dayIdx, isWorkDay, dayStatus, dayAway, daysBetween, nextSession,
   currentCur, cycleStats, doneOn, actTotal, okCls, teachingWeekNumber, dailyStreak,
-  weekCapacity,
+  weekCapacity, sessionLabel,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 import { syncedAt } from '../sync.js';
@@ -221,6 +221,31 @@ export function thisWeekHtml(dateStr) {
   return `<div class="psec">This week</div><div class="pcard">${lines.join('')}</div>`;
 }
 
+// A paced daily row's label used to be next-session based even AFTER the
+// family ticked it — checking LoE flipped "Lesson 102" straight to "Lesson
+// 103", as if she'd already done tomorrow's lesson too. When TODAY carries a
+// `done` log row for this activity (the exact row togglePaced writes/finds),
+// the row shows the label of the session that WAS completed instead: the
+// row's own `label` field when present (the migration stamps pre-tracking
+// rows with one so history is never mislabeled), else sessionLabel() replayed
+// against the chain + session index the row recorded. A row missing both
+// falls back to the ordinary next-session label — same as no row at all.
+// Un-ticking removes the row, so the next render naturally reverts.
+export function pacedRowLabel(a, log, today) {
+  const row = (Array.isArray(log) ? log : []).find(e =>
+    e && e.activityId === a.id && e.date === today && e.status === 'done' && !e.eventId);
+  if (row) {
+    if (row.label) return { label: row.label, cur: null };
+    if (row.curriculum != null && row.session != null) {
+      const cur = (a.chain || []).find(c => c && c.id === row.curriculum);
+      if (cur) return { label: sessionLabel(cur, row.session), cur };
+    }
+  }
+  const cur = currentCur(a);
+  const ns = cur ? nextSession(cur) : null;
+  return ns ? { label: ns.label, cur } : { label: null, cur: null };
+}
+
 export function renderToday() {
   const el = document.getElementById('view-today');
   if (!el || !plan.data) return;
@@ -257,8 +282,7 @@ export function renderToday() {
     h += `<div class="psec">Daily · no time slot</div>`;
     for (const a of dailies) {
       const done = doneOn(plan.data.log, a.id, today);
-      const cur = currentCur(a);
-      const ns = cur ? nextSession(cur) : null;
+      const { label, cur } = pacedRowLabel(a, plan.data.log, today);
       let sub = '';
       if (a.rhythm?.kind === 'cycle') {
         const cs = cycleStats(a, today, plan.data.parentCycle, plan.data.log);
@@ -266,7 +290,7 @@ export function renderToday() {
       } else if (a.rhythm?.kind === 'daily') sub = actTotal(a) === 0 ? esc(a.note || '') : 'every day';
       h += `<div class="drow${done ? ' ck' : ''}" data-act="${esc(a.id)}">
         <span class="dbx">${done ? '✓' : ''}</span>
-        <span class="dtx">${esc(a.name)}${ns ? ` — ${esc(cur.name ? cur.name + ' · ' : '')}${esc(ns.label)}` : ''}
+        <span class="dtx">${esc(a.name)}${label ? ` — ${esc(cur?.name ? cur.name + ' · ' : '')}${esc(label)}` : ''}
         ${sub ? `<small>${sub}</small>` : ''}</span></div>`;
     }
   }

@@ -39,7 +39,7 @@ const { markSynced, syncInfo } = await import('../js/sync.js');
 // a specific clock time marks BOTH stores at it.
 const bothSyncedAt = at => { syncInfo.plan = at; syncInfo.schedule = at; };
 const { renderToday, fmtUntil, dailyVisible, thisWeekHtml, yesterdayHtml,
-        syncedCaption, paintSynced } = await import('../js/plan/today.js');
+        syncedCaption, paintSynced, pacedRowLabel } = await import('../js/plan/today.js');
 
 // ── Pure helpers ─────────────────────────────────────────────
 test('fmtUntil: days under 2 weeks, weeks beyond', () => {
@@ -399,6 +399,66 @@ test('renderToday: the Yesterday receipt renders below the Tomorrow strip', () =
   assert.match(html, /Yesterday: ✓ Quran reading/);
   assert.ok(html.indexOf('Tomorrow:') < html.indexOf('Yesterday:'),
     'the Yesterday receipt must follow the Tomorrow strip');
+});
+
+// ── Completed-today label keeps the finished session's name (v2.8 T3) ──
+// Ticking LoE used to flip its Today label straight to the NEXT lesson
+// ("Lesson 103") the instant it was checked, as if she'd already done that
+// one too. Now a `done` log row dated today pins the label to the session
+// that was actually completed. Same LoE-C-shaped chain (101-120, done=2,
+// post-tick) used for both halves of the pair: with a today row -> the
+// completed label; without one -> the ordinary next label.
+const LOE_C_101 = () => ({ id: 'loe-c', name: 'Foundations C', pattern: 'simple',
+  firstUnit: 101, lastUnit: 120, done: 2 });
+function loadLoeOnly(log) {
+  const loe = { id: 'loe', name: 'Logic of English', type: 'paced', status: 'active', onGrid: false,
+    rhythm: { kind: 'cycle', perOnWeek: 1, perOffWeek: 2.5 }, travel: { mode: 'pause' },
+    chain: [LOE_C_101()] };
+  plan.data = sanitizePlan({
+    year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], activities: [loe], log, overrides: [],
+  });
+}
+
+test('renderToday: ticked today shows the COMPLETED session label ("Lesson 102"), not the next one', () => {
+  store.events = [];
+  loadLoeOnly([{ date: TODAY, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 1 }]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  assert.match(html, /Lesson 102/);
+  assert.doesNotMatch(html, /Lesson 103/);
+});
+
+test('renderToday: the same chain with nothing logged today shows the NEXT label ("Lesson 103")', () => {
+  store.events = [];
+  loadLoeOnly([]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  assert.match(html, /Lesson 103/);
+  assert.doesNotMatch(html, /Lesson 102/);
+});
+
+test('pacedRowLabel: an explicit row.label wins over curriculum+session lookup', () => {
+  const a = { id: 'loe', chain: [LOE_C_101()] };
+  const log = [{ date: TODAY, activityId: 'loe', status: 'done', curriculum: 'loe-c',
+    session: 1, label: 'Lesson 99 (pre-tracking)' }];
+  assert.deepEqual(pacedRowLabel(a, log, TODAY).label, 'Lesson 99 (pre-tracking)');
+});
+
+test('pacedRowLabel: a today row missing curriculum/session falls back to the next-session label', () => {
+  const a = { id: 'loe', chain: [{ id: 'loe-c', pattern: 'simple', firstUnit: 1, lastUnit: 10, done: 0 }] };
+  const log = [{ date: TODAY, activityId: 'loe', status: 'done' }];    // no curriculum/session
+  assert.deepEqual(pacedRowLabel(a, log, TODAY).label, 'Lesson 1');
+});
+
+test('pacedRowLabel: un-ticking (row removed) reverts to the next label, same identity as togglePaced', () => {
+  const a = { id: 'loe', chain: [LOE_C_101()] };
+  const ticked = pacedRowLabel(a, [{ date: TODAY, activityId: 'loe', status: 'done',
+    curriculum: 'loe-c', session: 1 }], TODAY);
+  assert.equal(ticked.label, 'Lesson 102');
+  const unticked = pacedRowLabel(a, [], TODAY);
+  assert.equal(unticked.label, 'Lesson 103');
 });
 
 // ── Freshness caption ("· synced HH:MM") ────────────────────
