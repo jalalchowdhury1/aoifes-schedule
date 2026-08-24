@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import sys
@@ -31,6 +32,7 @@ from . import model
 
 BASE = "https://aoifes-schedule.vercel.app"
 DEFAULT_SA = "~/.config/mcp-google-sheets/service-account.json"
+DEFAULT_STATE = "~/.local/state/aoife-gcal-sync.hash"
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TIMEOUT = 60
 
@@ -155,6 +157,11 @@ def main(argv=None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     ap.add_argument("--service-account", default=os.environ.get("AOIFE_GCAL_SA", DEFAULT_SA))
     ap.add_argument("--calendar", default=model.CALENDAR_NAME)
+    ap.add_argument("--if-changed", action="store_true",
+                    help="skip Google entirely when the desired-event hash matches the state file "
+                         "(the daytime tick's cheap mode; the nightly full run omits this)")
+    ap.add_argument("--state-file", default=DEFAULT_STATE,
+                    help="where the last successfully synced desired-state hash lives")
     args = ap.parse_args(argv)
 
     today = dt.date.today()
@@ -168,6 +175,23 @@ def main(argv=None) -> int:
         schedule = fetch_blob(f"{BASE}/api/get")
         plan_blob = fetch_blob(f"{BASE}/api/plan-get")
         desired = model.desired_state(schedule, plan_blob, today)
+
+        # The tick's cheap mode: identical desired state -> zero Google traffic.
+        # The hash is only ever written after a successful sync, so WAITING/FAIL
+        # runs leave it stale and the change is retried on the next tick. A
+        # hand-deleted calendar event is invisible to the hash by design — the
+        # nightly full run (no flag) is the reconciler of record for that.
+        state_path = os.path.expanduser(args.state_file)
+        digest = hashlib.sha256(
+            json.dumps(desired, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        if args.if_changed:
+            try:
+                if os.path.exists(state_path) and open(state_path).read().strip() == digest:
+                    print(f"GCAL-SYNC SKIP {stamp} unchanged")
+                    return 0
+            except OSError:
+                pass                                      # unreadable state = just sync
 
         service = build_service(sa_path)
         try:
@@ -219,6 +243,12 @@ def main(argv=None) -> int:
             print("GCAL-SYNC WAITING write-permission "
                   "(write rejected 403; calendar needs 'Make changes to events')")
             return 0
+        try:                                          # best-effort; never breaks the sync
+            os.makedirs(os.path.dirname(state_path), exist_ok=True)
+            with open(state_path, "w") as f:
+                f.write(digest + "\n")
+        except OSError:
+            pass
         print(f"GCAL-SYNC OK {stamp} {len(desired)}")
         return 0
     except Exception as e:                                # one line, never a traceback wall

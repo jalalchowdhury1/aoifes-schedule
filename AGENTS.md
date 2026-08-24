@@ -476,6 +476,18 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   inserted WITHOUT the aoifeSync property (parked in 2020 so nobody saw it)
   survived a full sync run untouched and was then removed. No `periods` existed
   in the plan that night, so the all-day path has unit coverage only.
+- **Daytime freshness (2026-08-23):** the bot-tick job (aoife-school-bot repo,
+  `scripts/tick.sh`, every 30 min 07:00–21:30 ET — the ONE sanctioned daytime
+  job) also runs `run.sh --if-changed` after each tick, so a bot-added one-off
+  ("voice note → calendar") reaches Google within ≤30 min. `--if-changed`
+  sha256-hashes the computed desired state and compares it to
+  `~/.local/state/aoife-gcal-sync.hash` (`--state-file` to override): match →
+  `GCAL-SYNC SKIP <date> unchanged`, exit 0, ZERO Google API calls. The hash is
+  written only after a successful `OK` sync (never on DRY-RUN/WAITING/FAIL), so
+  an unsynced change retries every tick. The hash sees PLAN changes only — a
+  synced event hand-deleted from the calendar comes back on the next plan change
+  or the nightly full run, which stays the reconciler of record and keeps the
+  fleet probe; daytime `GCAL …` lines land in the TICK log and are informational.
 - **launchd**: `com.jalal.aoife-gcal-sync` at 04:10 daily (overnight window per
   the house rule; after the 03:40 backup, before the 05:00 fleet check).
   `com.jalal.aoife-gcal-sync.plist` is committed at the repo root and installed
@@ -495,7 +507,7 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   - Periods are NOT windowed (the list is short and curated); overrides are.
   - Overrides with no times are Today-list items and have no calendar shape.
   - No reverse sync and no reminders/attendees/colors are set.
-- **Tests**: `cd scripts/gcal-sync && uv run pytest` (64, all offline — Google is
+- **Tests**: `cd scripts/gcal-sync && uv run pytest` (68, all offline — Google is
   a fake discovery client, the two blobs are patched). These are NOT part of the
   repo's `node --test` suite; run both before shipping a change here.
   `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before

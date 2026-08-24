@@ -253,3 +253,65 @@ def test_stale_synced_event_is_deleted_and_a_changed_one_patched(wired, capsys):
     assert svc.events().inserted == []
     assert [eid for eid, _ in svc.events().patched] == ["g1"]
     assert svc.events().deleted == ["g2"]
+
+
+# ── --if-changed: the daytime tick's cheap skip ─────────────────────────────
+def _plan_with_override():
+    """Matches the real bot shape: numeric start/end minutes, near-future date."""
+    date = (dt.date.today() + dt.timedelta(days=3)).isoformat()
+    return {"overrides": [{"id": "x9", "action": "add", "name": "Science trial",
+                           "date": date, "start": 720, "end": 780}]}
+
+
+def test_if_changed_skips_google_entirely_when_the_plan_hash_matches(wired, capsys, tmp_path, monkeypatch):
+    state = tmp_path / "hash"
+    wired(FakeService(calendars=[shared()]))
+    assert cli.main(["--state-file", str(state)]) == 0            # seeds the hash
+    assert "GCAL-SYNC OK" in capsys.readouterr().out
+    assert state.exists()
+
+    def boom(path):                                               # Google must not be touched
+        raise AssertionError("build_service called on a skip")
+
+    monkeypatch.setattr(cli, "build_service", boom)
+    assert cli.main(["--if-changed", "--state-file", str(state)]) == 0
+    assert "GCAL-SYNC SKIP" in capsys.readouterr().out
+
+
+def test_if_changed_syncs_when_the_plan_changed(wired, capsys, tmp_path):
+    state = tmp_path / "hash"
+    wired(FakeService(calendars=[shared()]))
+    assert cli.main(["--state-file", str(state)]) == 0
+    capsys.readouterr()
+
+    service = wired(FakeService(calendars=[shared()]), plan=_plan_with_override())
+    assert cli.main(["--if-changed", "--state-file", str(state)]) == 0
+    out = capsys.readouterr().out
+    assert "GCAL-SYNC OK" in out and "SKIP" not in out
+    assert any(b["summary"] == "Science trial" for b in service.events().inserted)
+
+
+def test_waiting_does_not_update_state_so_the_change_retries(wired, capsys, tmp_path):
+    state = tmp_path / "hash"
+    wired(FakeService(calendars=[shared()]))
+    assert cli.main(["--state-file", str(state)]) == 0            # hash = base plan
+    seeded = state.read_text()
+    capsys.readouterr()
+
+    wired(FakeService(calendars=[]), plan=_plan_with_override())  # not shared yet
+    assert cli.main(["--if-changed", "--state-file", str(state)]) == 0
+    assert "GCAL-SYNC WAITING" in capsys.readouterr().out
+    assert state.read_text() == seeded                            # unchanged → next tick retries
+
+    service = wired(FakeService(calendars=[shared()]), plan=_plan_with_override())
+    assert cli.main(["--if-changed", "--state-file", str(state)]) == 0
+    assert "GCAL-SYNC OK" in capsys.readouterr().out
+    assert any(b["summary"] == "Science trial" for b in service.events().inserted)
+
+
+def test_dry_run_does_not_write_state(wired, capsys, tmp_path):
+    state = tmp_path / "hash"
+    wired(FakeService(calendars=[shared()]))
+    assert cli.main(["--dry-run", "--state-file", str(state)]) == 0
+    assert "GCAL-SYNC DRY-RUN" in capsys.readouterr().out
+    assert not state.exists()
