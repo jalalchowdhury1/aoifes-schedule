@@ -13,13 +13,9 @@ import {
 } from './model.js';
 import { plan, setActivityStatus, setTravelMode, setBaseline, getActivity } from './state.js';
 
-// "May 16 ’27", not "May 16, 27" — the comma + 2-digit year read like a list
-// (user request 2026-08-23); the apostrophe marks the year unmistakably while
-// staying narrow enough for the Timeline's plan/now date pairs on a phone.
-const fmtDate = s => {
-  const d = new Date(s + 'T12:00');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ’' + String(d.getFullYear()).slice(-2);
-};
+// Full year — "May 9, 2027" (owner choice 2026-08-23 after trying "May 9 ’27";
+// the original "May 9, 27" was confusing). Keep the 4-digit year.
+const fmtDate = s => new Date(s + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 // Two-tap Cancel. The armed button is mutated IN PLACE rather than re-rendered
 // because the controls live inside a <details>, and re-rendering would snap it
