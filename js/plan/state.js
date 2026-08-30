@@ -182,16 +182,38 @@ export function logTimed(eventId, activityId, status, date = todayStr()) {
 // the mark instead of stacking a second one. The lookup excludes any row
 // carrying a `curriculum` — a real logged session must never be mistaken for
 // (or clobbered by) a bare status marker.
+//
+// GUARD (review 2, mirrors the bot's `guard_missed_tap` in lib/ops.py):
+// creating or overwriting a marker is refused whenever a real curriculum-
+// bearing `done` row already exists for this activity/date — a marker must
+// never COEXIST with logged work. The bot only enforces this at the write
+// layer for tb-wb chains (its UI never even offers the button for a simple
+// daily once answered, so the write layer never sees the collision there);
+// this port generalizes the guard to every daily pattern, since /m's own UI
+// doesn't yet gate the option the same way and a blocked write is always
+// safe, while a collision would let `dailyStatus`'s marker-priority read
+// silently report "missed" for a day that was actually done, with the
+// chain's `done` counter never rolled back to match. Returns `false` when
+// refused (no commit — chain/log untouched), `true` on a normal write.
+// Toggling an EXISTING marker off (tapping the same status again) is exempt:
+// removing a marker can only resolve a collision, never create one.
 export function logDailyStatus(actId, status, date = todayStr()) {
   const act = getActivity(actId);
   if (!act) return;
   const match = e => e.activityId === actId && e.date === date &&
     !e.timed && !e.eventId && !e.curriculum;
   const i = plan.data.log.findIndex(match);
-  if (i >= 0 && plan.data.log[i].status === status) plan.data.log.splice(i, 1);
+  const togglingOff = i >= 0 && plan.data.log[i].status === status;
+  if (!togglingOff) {
+    const hasWork = plan.data.log.some(e => e.activityId === actId && e.date === date &&
+      e.status === 'done' && !e.timed && !e.eventId);
+    if (hasWork) return false;
+  }
+  if (togglingOff) plan.data.log.splice(i, 1);
   else if (i >= 0) plan.data.log[i].status = status;
   else plan.data.log.push({ date, activityId: actId, status });
   commit();
+  return true;
 }
 
 // ── Time away (day-precise periods) ─────────────────────────

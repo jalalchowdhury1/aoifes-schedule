@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build dfd25af499 */
+ * build 82c2c48cb3 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -910,8 +910,34 @@ function receipt(dateStr, events, plan, nameForEvent) {
       const cur = (act.chain || []).find(c => c && c.id === curId);
       if (!cur) continue;
       if (cur.pattern === 'tb-wb') {
-        const lessons = [...new Set(es.map(e => Math.floor((e.session ?? 0) / 2) + 1))].sort((a, b) => a - b);
-        details.push(lessons.map(n => `L${n}`).join(' + '));
+        // Mirror sessionLabel/_tb_wb_paired_sessions' own paired-region
+        // boundary (review 2 fix): a session at or past `lessons*2` is a
+        // trailing, unpaired review/test (the real dm3 shape — a chapter
+        // with an odd `tests` count, e.g. dm3-c4/c7/c11/c15 in production)
+        // and has no lesson number to fold into — the naive floor(session/2)
+        // math used to fabricate one ('L11' for the first test after an
+        // 10-lesson/20-session chapter). It now renders via sessionLabel
+        // itself ('Test 1'), same as the bot. Inside the paired region, a
+        // lesson touched by BOTH halves collapses to 'L6'; a lone half (the
+        // day only got the textbook, or only the workbook — an unfinished
+        // pair, still a real thing to show on a past day even though
+        // dailyStatus itself reads 'half' rather than 'done' for it) stays
+        // 'L6 textbook' / 'L6 workbook' rather than silently dropping which
+        // half actually happened.
+        const paired = (cur.lessons || 0) * 2;
+        const lessonHalves = new Map();      // lesson# -> Set(0=textbook,1=workbook)
+        const trailing = new Set();
+        for (const e of es) {
+          const s = e.session ?? 0;
+          if (s >= paired) { trailing.add(s); continue; }
+          const lesson = Math.floor(s / 2) + 1;
+          if (!lessonHalves.has(lesson)) lessonHalves.set(lesson, new Set());
+          lessonHalves.get(lesson).add(s % 2);
+        }
+        const lessonParts = [...lessonHalves.entries()].sort((a, b) => a[0] - b[0])
+          .map(([n, halves]) => halves.size >= 2 ? `L${n}` : `L${n} ${halves.has(1) ? 'workbook' : 'textbook'}`);
+        const trailingParts = [...trailing].sort((a, b) => a - b).map(s => sessionLabel(cur, s));
+        details.push([...lessonParts, ...trailingParts].join(' + '));
       } else {
         const labels = [...new Set(es.map(e => sessionLabel(cur, e.session ?? 0)))];
         details.push(labels.join(' + '));

@@ -305,12 +305,18 @@ function itemRowHtml(it, dateStr) {
         <button type="button" data-pickst="missed" class="${st === 'missed' ? 'sel' : ''}">✗ Missed</button>
       </div>`;
     } else if (isTbWbDaily) {
+      // 'half' (textbook alone logged) or 'done' (full lesson) both mean real
+      // work already exists today — offering ✗ there would just toast
+      // "Already logged today" (logDailyStatus's guard, review 2). Only
+      // "nothing yet" or an already-missed row (to un-mark it) get the
+      // button, matching the bot's own checkin_message, which drops the ✗
+      // button the moment ANY session is logged that day.
       row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
-        <button type="button" data-tbwbmiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>
+        ${!st || st === 'missed' ? `<button type="button" data-tbwbmiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>` : ''}
       </div>`;
     } else {
       row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
-        <button type="button" data-dailymiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>
+        ${!st || st === 'missed' ? `<button type="button" data-dailymiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>` : ''}
       </div>`;
     }
   }
@@ -389,13 +395,25 @@ function thisWeekCardHtml(today) {
 // ALSO fires the tap. No native context menu, no text-selection callout —
 // this runs on a phone, not a right-click surface.
 const LONG_PRESS_MS = 450;
+// A scroll typically self-cancels via a native pointercancel once the UA
+// commits to panning (touch-action: manipulation allows that on `.chk`), but
+// that decision is on the UA's own schedule — a slow drag can still be mid-
+// recognition when the 450ms timer fires. Track the finger explicitly and
+// cancel past 10px of movement (review 2) so a scroll that starts on a check
+// button can never pop the long-press menu instead.
+const MOVE_CANCEL_PX = 10;
 function wireLongPress(btn, onTap, onLong) {
-  let timer = null, fired = false;
+  let timer = null, fired = false, sx = 0, sy = 0;
   const clear = () => { clearTimeout(timer); timer = null; };
   btn.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     fired = false;
+    sx = e.clientX; sy = e.clientY;
     timer = setTimeout(() => { fired = true; onLong(); }, LONG_PRESS_MS);
+  });
+  btn.addEventListener('pointermove', e => {
+    if (!timer) return;
+    if (Math.hypot(e.clientX - sx, e.clientY - sy) > MOVE_CANCEL_PX) clear();
   });
   btn.addEventListener('pointerup', e => {
     clear();
@@ -439,9 +457,13 @@ function wireTodayEvents(el, items, today) {
   }));
   el.querySelectorAll('[data-tbwbmiss],[data-dailymiss]').forEach(b => b.addEventListener('click', () => {
     const actId = b.dataset.tbwbmiss || b.dataset.dailymiss;
-    logDailyStatus(actId, 'missed', today);
+    const ok = logDailyStatus(actId, 'missed', today);
     state.statusPickKey = null;
-    showToast(`Marked skipped`, () => logDailyStatus(actId, 'missed', today));
+    // logDailyStatus returns false when real work is already logged today
+    // (review 2 guard, mirrors the bot's guard_missed_tap) — nothing was
+    // written, so no toast claiming otherwise and no Undo to offer.
+    if (ok === false) showToast(`Already logged today`);
+    else showToast(`Marked skipped`, () => logDailyStatus(actId, 'missed', today));
     renderAll();
   }));
   el.querySelectorAll('[data-daily]').forEach(b => {

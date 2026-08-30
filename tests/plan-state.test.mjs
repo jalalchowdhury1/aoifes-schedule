@@ -194,18 +194,40 @@ test('logDailyStatus: a repeat tap with a DIFFERENT status overwrites in place, 
   assert.deepEqual(rows, [{ date: D, activityId: 'loe', status: 'partial' }]);
 });
 
-test('logDailyStatus: never matches (or clobbers) a real logged session row', () => {
+// review 2: the ORIGINAL version of this test asserted that a done row and a
+// new marker were left to coexist (two rows, one date/activity). That was
+// the bug — dailyStatus/item_status give a marker priority over a done row
+// (by design, for a marker written FIRST), so once a marker existed on top
+// of real work, the day would read 'missed' even though a session had
+// genuinely been logged and its curriculum counter advanced. Fixed to match
+// the bot's guard_missed_tap: a marker write is refused outright while a
+// done row already exists that day, generalized to every daily pattern (see
+// logDailyStatus's own comment for why the guard goes further than the
+// bot's tb-wb-only backend check).
+test('logDailyStatus: refuses to write a marker over a real logged session row (guard_missed_tap parity)', () => {
   initPlan();
   togglePaced('loe', D);                              // a real, curriculum-bearing session log
   const before = snap(plan.data);
-  logDailyStatus('loe', 'missed', D);
+  const result = logDailyStatus('loe', 'missed', D);
+  assert.equal(result, false);
+  assert.deepEqual(snap(plan.data), before);          // no marker, no commit, chain untouched
   const rows = plan.data.log.filter(e => e.date === D && e.activityId === 'loe');
-  assert.equal(rows.length, 2);                        // the session row survives, untouched...
-  assert.ok(rows.some(r => r.status === 'done' && r.curriculum));
-  assert.ok(rows.some(r => r.status === 'missed' && !r.curriculum));  // ...plus the new marker
-  logDailyStatus('loe', 'missed', D);                 // toggling the marker off restores the session
-  assert.deepEqual(snap(plan.data), before);
-  assert.equal(plan.data.log.filter(e => e.date === D && e.activityId === 'loe').length, 1);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'done');
+});
+
+test('logDailyStatus: an EXISTING marker can still be toggled off even if a done row also exists (legacy data)', () => {
+  initPlan();
+  const act = plan.data.activities.find(a => a.id === 'loe');
+  act.chain[0].done = 5;
+  plan.data.log.push(
+    { date: D, activityId: 'loe', status: 'done', curriculum: act.chain[0].id, session: 5 },
+    { date: D, activityId: 'loe', status: 'missed' },   // pre-existing collision, e.g. from before this fix
+  );
+  const result = logDailyStatus('loe', 'missed', D);    // same status -> toggling the marker off is always safe
+  assert.equal(result, true);
+  const rows = plan.data.log.filter(e => e.date === D && e.activityId === 'loe');
+  assert.deepEqual(rows, [{ date: D, activityId: 'loe', status: 'done', curriculum: act.chain[0].id, session: 5 }]);
 });
 
 test('logDailyStatus: unknown activity id is a silent no-op', () => {

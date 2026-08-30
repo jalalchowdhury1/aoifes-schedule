@@ -379,6 +379,53 @@ test('receipt: emoji/order — timed rows first (schedule order), then dailies',
   assert.equal(rows[0].emoji, '✏️');
 });
 
+// review 2 fix: the paired-region boundary was ignored, so a trailing
+// review/test session (the real dm3 shape — a chapter with an odd `tests`
+// count, e.g. dm3-c4/c7/c11/c15 in production) fabricated a bogus lesson
+// number via floor(session/2)+1 instead of reading as 'Test 1' — the exact
+// bug class AGENTS.md flags repeatedly for this codebase (found before in
+// session_label/_tb_wb_paired_sessions/_daily_log_note, not carried into the
+// brand-new receipt()). A lone half (only textbook OR only workbook logged
+// that day) also used to collapse to a bare 'L6', losing which half — fixed
+// to name it explicitly instead of guessing.
+const tbWbFixturePlan = sanitizePlan({
+  version: 2, year: 2026,
+  parentCycle: { anchorMonday: '2026-08-10', dutyStart: '2026-08-11', confirmed: true },
+  periods: [],
+  activities: [{ id: 'singapore', name: 'Singapore Math', type: 'paced', status: 'active',
+    cls: 'other', onGrid: false, slots: [],
+    chain: [{ id: 'dm3-c4', name: '3A Ch 4 · Multiplication and Division', pattern: 'tb-wb',
+      lessons: 10, tests: 1, done: 21 }] }],
+  overrides: [],
+  log: [
+    { date: '2026-09-01', activityId: 'singapore', status: 'done', curriculum: 'dm3-c4', session: 10 },   // L6 textbook alone
+    { date: '2026-09-02', activityId: 'singapore', status: 'done', curriculum: 'dm3-c4', session: 13 },   // L7 workbook alone
+    { date: '2026-09-03', activityId: 'singapore', status: 'done', curriculum: 'dm3-c4', session: 20 },   // trailing Test 1 (session 20 = index of the 21st session, past 10*2=20 paired)
+    { date: '2026-09-04', activityId: 'singapore', status: 'done', curriculum: 'dm3-c4', session: 2 },
+    { date: '2026-09-04', activityId: 'singapore', status: 'done', curriculum: 'dm3-c4', session: 3 },    // full pair, L2
+  ],
+});
+
+test('receipt: a lone textbook-only session names the half — "L6 textbook", not bare "L6"', () => {
+  const rows = receipt('2026-09-01', [], tbWbFixturePlan);
+  assert.equal(rows[0].detail, 'L6 textbook');
+});
+
+test('receipt: a lone workbook-only session names the half — "L7 workbook"', () => {
+  const rows = receipt('2026-09-02', [], tbWbFixturePlan);
+  assert.equal(rows[0].detail, 'L7 workbook');
+});
+
+test('receipt: a trailing review/test session reads "Test 1", never a fabricated lesson number', () => {
+  const rows = receipt('2026-09-03', [], tbWbFixturePlan);
+  assert.equal(rows[0].detail, 'Test 1');
+});
+
+test('receipt: a full textbook+workbook pair still collapses to a bare lesson number', () => {
+  const rows = receipt('2026-09-04', [], tbWbFixturePlan);
+  assert.equal(rows[0].detail, 'L2');
+});
+
 // ── buildTimed / statusOfTimed (the pieces today.js now reuses) ──
 test('buildTimed: a bot-written override renders under its own name, matching today.js\'s original behaviour', () => {
   const withOv = sanitizePlan({ ...rawPlan,
