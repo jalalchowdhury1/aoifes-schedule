@@ -522,6 +522,75 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before
   any behavior change reaches the family's phones.
 
+## The iPhone app (/m) and the widget (2026-08-31)
+A phone-first PWA at `/m/` plus a Scriptable home-screen widget, both reading
+the SAME two blobs (`/api/get` + `/api/plan-get`) the desktop site does.
+Built from a one-shot brief (not a committed spec doc); the rules below are
+the parts worth keeping.
+
+- **One engine.** `js/plan/mday.js` (NEW, pure, ES module, Node-tested —
+  tests/plan-mday.test.mjs) is the single source of "what does today look
+  like": `dayItems`, `dayHeader`, `nowBlock`, `subjectCards`, `widgetModel`.
+  today.js's `timedFor`/`statusOf`/`dailyVisible` are now thin wrappers
+  around mday.js's `buildTimed`/`statusOfTimed`/`dailyVisible` — ONE
+  implementation behind the desktop Today view, `/m`, AND the widget. The
+  desktop's existing behaviour is byte-identical (tests/plan-today.test.mjs
+  unchanged, still green). `dailyStatus` mirrors aoife-school-bot/lib/
+  compose.py's `item_status` (tb-wb needs BOTH halves of the SAME lesson
+  logged today) plus one addition the bot doesn't have: a `half` status
+  (only the textbook half logged) so the phone checkbox can show amber
+  instead of collapsing that into "nothing logged".
+- **Write-path rule.** `/m` never writes to the log or KV directly — every
+  mutation goes through `togglePaced`/`logTimed` (js/plan/state.js), the
+  exact same functions the desktop Subjects/Today views and the Telegram bot
+  use. A tap shows a toast ("Logged L6 textbook ✓ · Undo"); Undo is two taps
+  (tap → "Really undo?" for 3s → tap again → the exact inverse call).
+- **The Singapore-style dual card** (any active daily whose current chain
+  entry is `tb-wb`, not hardcoded to one id): the row's own check in "The
+  day" list is NOT a toggle (status-only). Both "✓ Textbook" and "✓
+  Workbook" buttons call the SAME `togglePaced(actId)` — there is no way to
+  address textbook vs workbook independently, the model only supports
+  "advance to whatever's next" — the primary/dim styling just reflects which
+  one `nextSession` says is next. Once today's pair is logged, the pair
+  hides behind a "➕ Add another lesson" prompt (transient UI state, not
+  persisted) so a second lesson the same day is a deliberate extra tap, not
+  an accident.
+- **The widget is GENERATED — never edit `m/widget.js` by hand.**
+  `node scripts/build-widget.mjs` concatenates `js/model.js` + `js/plan/
+  model.js` + `js/plan/mday.js` + `scripts/widget-ui.js` inside one async
+  IIFE (Scriptable's engine has no ES module system and rejects top-level
+  `await`), stripping `import`/`export` syntax with `stripModuleSyntax`
+  (tests/plan-widget.test.mjs pins bundle hygiene + build determinism +
+  the exact `widgetModel` strings the layout consumes). Edit the sources —
+  `js/plan/mday.js` above all — and rebuild.
+- **Loader** (paste into a new Scriptable script named "Aoife", then add a
+  medium Scriptable widget to the home screen pointed at it):
+  ```js
+  (async () => {
+    const BASE = "https://aoifes-schedule.vercel.app";
+    eval(await new Request(BASE + "/m/widget.js").loadString());
+  })();
+  ```
+  On a failed fetch the widget falls back to its `FileManager` cache,
+  visibly marked "cached" in red. `widget.refreshAfterDate` is 30 min. The
+  day boundary is the PHONE's local date/hour — this is a family-at-home
+  surface, not a market one (contrast nuts-radar, which is ET-anchored).
+- **State colors** (`body.day`/`body.done`/`body.late` in css/m.css, ported
+  from nuts-radar's assets/m.css field-drift mechanic): violet while the day
+  is in progress, green when every item's status is exactly `'done'`, amber
+  once it's past 18:00 local and something still has NO status at all (a
+  `'missed'` mark is a recorded outcome, not "still open" — it does not
+  trigger amber).
+- **What `/m` deliberately does NOT do**: no Manage (activate/park/cancel a
+  subject, edit the chain, set travel mode, freeze a baseline — Subjects'
+  sheet only offers the "oops, remove last logged session" undo plus a
+  "Full site ↗" link out to `/`), no print (no print CSS on this page at
+  all — printing is a separate, frozen surface), no editing the week grid
+  (Week tab is read-only, day chips + swipe, exactly what the family already
+  sees on the desktop's Day view). Phones do NOT auto-redirect to `/m/` in
+  v1 — Nabila uses the full site on her phone for Manage; the only link is
+  the desktop header's "📱 App" and `/m`'s own footer "Full site ↗".
+
 ## Env vars (Vercel project settings — names only, never values; repo is public)
 api/*.js read `KV_REST_API_URL`/`KV_REST_API_TOKEN` with fallback to
 `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`. Secrets live only in Vercel.

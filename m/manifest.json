@@ -1,0 +1,12 @@
+{
+  "name": "Aoife's School",
+  "short_name": "Aoife",
+  "start_url": "/m/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0d14",
+  "theme_color": "#0b0d14",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

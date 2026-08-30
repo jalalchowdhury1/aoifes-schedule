@@ -1,0 +1,111 @@
+{
+  "events": [
+    {
+      "id": "e999"
+    },
+    {
+      "cat": "quran",
+      "day": 0,
+      "start": 10,
+      "end": 11,
+      "note": "",
+      "name": "Quran",
+      "id": "e1001"
+    },
+    {
+      "cat": "quran",
+      "day": 2,
+      "start": 10,
+      "end": 11,
+      "note": "",
+      "name": "Quran",
+      "id": "e1003"
+    },
+    {
+      "cat": "quran",
+      "day": 4,
+      "start": 10,
+      "end": 11,
+      "note": "",
+      "name": "Quran",
+      "id": "e1004"
+    },
+    {
+      "cat": "ruhamah",
+      "day": 1,
+      "start": 11,
+      "end": 12,
+      "note": "",
+      "name": "",
+      "id": "e1005"
+    },
+    {
+      "cat": "ruhamah",
+      "day": 3,
+      "start": 11,
+      "end": 12,
+      "note": "",
+      "name": "",
+      "id": "e1006"
+    },
+    {
+      "cat": "ruhamah",
+      "day": 0,
+      "start": 11,
+      "end": 13,
+      "note": "",
+      "name": "",
+      "id": "e1007"
+    },
+    {
+      "cat": "ruhamah",
+      "day": 5,
+      "start": 11,
+      "end": 13,
+      "note": "",
+      "name": "",
+      "id": "e1008"
+    },
+    {
+      "cat": "ruhamah",
+      "day": 6,
+      "start": 11,
+      "end": 13,
+      "note": "",
+      "name": "",
+      "id": "e1009"
+    },
+    {
+      "cat": "hala",
+      "day": 1,
+      "start": 14,
+      "end": 15,
+      "note": "",
+      "name": "",
+      "id": "e1010"
+    },
+    {
+      "cat": "hala",
+      "day": 2,
+      "start": 14,
+      "end": 15,
+      "note": "",
+      "name": "",
+      "id": "e1011"
+    },
+    {
+      "cat": "hala",
+      "day": 3,
+      "start": 14,
+      "end": 15,
+      "note": "",
+      "name": "",
+      "id": "e1012"
+    }
+  ],
+  "altSun": false,
+  "catLabels": {
+    "art": "Art Class with Arya",
+    "barakot": "Mama Classes"
+  }
+}

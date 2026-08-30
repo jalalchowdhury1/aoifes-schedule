@@ -1,0 +1,265 @@
+// The ONE engine behind the /m PWA page and the Scriptable widget. Fixture is
+// a trimmed snapshot of REAL production shapes (curl'd from
+// https://aoifes-schedule.vercel.app/api/get and /api/plan-get on
+// 2026-08-30) — tests/fixtures/plan-mday-{schedule,plan}.json. Numbers below
+// (5/123 · 4% · finish Dec 27 · streak 3) are the actual live state on that
+// date, not invented — cross-checked against js/plan/model.js's own
+// lessonTotals/projectFinish/chainTimeline/dailyStreak before being pinned
+// here as assertions.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { sanitizePlan } from '../js/plan/model.js';
+import {
+  dayItems, dayHeader, nowBlock, subjectCards, widgetModel, fmtHM,
+  dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
+  EMOJI_MAP, EMOJI_FALLBACK,
+} from '../js/plan/mday.js';
+
+const events = JSON.parse(readFileSync(new URL('./fixtures/plan-mday-schedule.json', import.meta.url), 'utf8')).events;
+const rawPlan = JSON.parse(readFileSync(new URL('./fixtures/plan-mday-plan.json', import.meta.url), 'utf8'));
+const plan = sanitizePlan(rawPlan);
+
+const MON = '2026-08-31';   // Monday — the spec's pinned test date (tomorrow relative to the fixture's "now", 2026-08-30)
+const TODAY = '2026-08-30'; // the fixture's real "as of" date (streak/finish asserted against this)
+
+// ── dayItems: 4 items, in order, for Mon Aug 31 ──────────────
+test('dayItems: Mon Aug 31 — 4 items, timed first (Quran, Ruhama) then no-slot dailies (Singapore, LoE)', () => {
+  const items = dayItems(MON, events, plan);
+  assert.equal(items.length, 4);
+  assert.deepEqual(items.map(it => it.kind), ['timed', 'timed', 'daily', 'daily']);
+
+  const [quran, ruhama, sm, loe] = items;
+  assert.equal(quran.name, 'Quran');
+  assert.equal(quran.start, 10);
+  assert.equal(quran.end, 11);
+  assert.equal(quran.emoji, '📖');
+
+  assert.match(ruhama.name, /Ruhama/);
+  assert.equal(ruhama.start, 11);
+  assert.equal(ruhama.end, 13);
+  assert.equal(ruhama.emoji, '✏️');
+
+  assert.equal(sm.activityId, 'singapore');
+  assert.equal(sm.note, '3A Ch 1 · Lesson 6 · textbook');
+  assert.equal(sm.emoji, '➗');
+  assert.equal(sm.status, undefined);         // nothing logged yet for this future date
+
+  assert.equal(loe.activityId, 'loe');
+  assert.equal(loe.note, 'Lesson 105');
+  assert.equal(loe.emoji, '📚');
+  assert.equal(loe.status, undefined);
+});
+
+test('dayItems: away day — timed blocks vanish, dailies still filtered by dailyVisible', () => {
+  const away = sanitizePlan({ ...rawPlan,
+    periods: [{ id: 'pX', start: MON, end: MON, type: 'travel', label: 'Trip' }] });
+  const items = dayItems(MON, events, away);
+  assert.ok(items.every(it => it.kind !== 'timed'));
+  // singapore travels 'reduced' -> still visible; loe pauses -> hidden
+  assert.ok(items.some(it => it.activityId === 'singapore'));
+  assert.ok(!items.some(it => it.activityId === 'loe'));
+});
+
+// ── dailyStatus: mirrors the bot's item_status, plus the 'half' state ──
+test('dailyStatus: a missed marker settles the day outright (real fixture date 2026-08-20)', () => {
+  const sm = plan.activities.find(a => a.id === 'singapore');
+  assert.equal(dailyStatus(sm, plan.log, '2026-08-20'), 'missed');
+});
+
+test('dailyStatus: both halves of the latest lesson logged today -> done (real fixture date 2026-08-30)', () => {
+  const sm = plan.activities.find(a => a.id === 'singapore');
+  // 2026-08-30 log: sessions 6,7,8,9 done (two full lesson pairs) — latest lesson (4) has both halves.
+  assert.equal(dailyStatus(sm, plan.log, '2026-08-30'), 'done');
+});
+
+test('dailyStatus: only the textbook half of the latest lesson logged today -> half', () => {
+  const sm = plan.activities.find(a => a.id === 'singapore');
+  // cur.done is 10 sessions in on the fixture -> next session index 10 (lesson 6, textbook).
+  const log = [...plan.log, { date: MON, activityId: 'singapore', status: 'done', curriculum: 'dm3-c1', session: 10 }];
+  assert.equal(dailyStatus(sm, log, MON), 'half');
+  const log2 = [...log, { date: MON, activityId: 'singapore', status: 'done', curriculum: 'dm3-c1', session: 11 }];
+  assert.equal(dailyStatus(sm, log2, MON), 'done');       // workbook half lands -> done
+});
+
+test('dailyStatus: nothing logged today -> undefined', () => {
+  const sm = plan.activities.find(a => a.id === 'singapore');
+  assert.equal(dailyStatus(sm, plan.log, MON), undefined);
+});
+
+test('dailyStatus: a simple-pattern (non tb-wb) chain reads done from a bare done row', () => {
+  const loe = plan.activities.find(a => a.id === 'loe');
+  const log = [{ date: MON, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 4 }];
+  assert.equal(dailyStatus(loe, log, MON), 'done');
+});
+
+// ── dayHeader ─────────────────────────────────────────────────
+test('dayHeader: Mon Aug 31 — date label, Mama work day (LoE is an active cycle-rhythm subject), no away banner', () => {
+  const h = dayHeader(MON, plan);
+  assert.equal(h.dateLabel, 'Mon Aug 31');
+  assert.equal(h.mama, 'work');
+  assert.equal(h.away, null);
+});
+
+test('dayHeader: an away period produces the away banner with the icon stripped from the label', () => {
+  const away = sanitizePlan({ ...rawPlan,
+    periods: [{ id: 'pX', start: MON, end: MON, type: 'travel', label: 'Dhaka ✈' }] });
+  const h = dayHeader(MON, away);
+  assert.deepEqual(h.away, { type: 'travel', label: 'Dhaka' });
+});
+
+test('dayHeader: mama is null when no active cycle-rhythm subject exists', () => {
+  const noCycle = sanitizePlan({ ...rawPlan,
+    activities: rawPlan.activities.map(a => (a.id === 'loe' ? { ...a, status: 'parked' } : a)) });
+  assert.equal(dayHeader(MON, noCycle).mama, null);
+});
+
+// ── nowBlock ──────────────────────────────────────────────────
+test('nowBlock: mid-block -> state "now" with minutesLeft', () => {
+  const items = dayItems(MON, events, plan);
+  const nb = nowBlock(MON, items, 11.5);          // 11:30, inside Ruhama 11-13
+  assert.equal(nb.state, 'now');
+  assert.match(nb.item.name, /Ruhama/);
+  assert.equal(nb.minutesLeft, 90);
+});
+
+test('nowBlock: before the first block -> state "next" with minutesUntil', () => {
+  const items = dayItems(MON, events, plan);
+  const nb = nowBlock(MON, items, 9);             // 9:00, before Quran at 10
+  assert.equal(nb.state, 'next');
+  assert.equal(nb.item.name, 'Quran');
+  assert.equal(nb.minutesUntil, 60);
+});
+
+test('nowBlock: after the last timed block -> state "after" with a count of unlogged items', () => {
+  // Log the two timed blocks so only the two dailies are left unlogged.
+  const logged = sanitizePlan({ ...rawPlan, log: [...rawPlan.log,
+    { date: MON, eventId: 'e1001', status: 'done', timed: true },
+    { date: MON, eventId: 'e1007', status: 'done', timed: true }] });
+  const items = dayItems(MON, events, logged);
+  const nb = nowBlock(MON, items, 14);            // 2pm, after Ruhama ends at 13
+  assert.equal(nb.state, 'after');
+  assert.equal(nb.item, null);
+  assert.equal(nb.left, 2);                       // Singapore + LoE still unlogged
+
+  const nothingLogged = nowBlock(MON, dayItems(MON, events, plan), 14);
+  assert.equal(nothingLogged.left, 4);            // real fixture: nothing logged yet for a future date
+});
+
+// ── subjectCards ──────────────────────────────────────────────
+test('subjectCards: order is SUBJECT_ORDER (paced only) — Singapore, LoE, Geography, History', () => {
+  const cards = subjectCards(plan, TODAY);
+  assert.deepEqual(cards.map(c => c.id), ['singapore', 'loe', 'geography', 'history']);
+});
+
+test('subjectCards: Singapore as of 2026-08-30 — 5/123 lessons, 4%, finish Dec 27, on-plan delta, 3-day streak', () => {
+  const sm = subjectCards(plan, TODAY).find(c => c.id === 'singapore');
+  assert.equal(sm.lessonsDone, 5);
+  assert.equal(sm.lessonsTotal, 123);
+  assert.equal(sm.pct, 4);
+  assert.equal(sm.finish, '2026-12-27');
+  assert.deepEqual(sm.delta, { state: 'on', weeks: 0 });
+  assert.equal(sm.streak, 3);
+  assert.equal(sm.isTbWb, true);
+  assert.equal(sm.chapterLabel, '3A Ch 1 · Numbers to 10,000');
+  assert.equal(sm.chapterDone, 5);
+  assert.equal(sm.chapterSessions, 11);
+  assert.equal(sm.nextLabel, 'Lesson 6 · textbook');
+  assert.equal(sm.color, '#e8834a');
+  assert.equal(sm.status, 'active');
+});
+
+test('subjectCards: a planned subject (Geography) carries its status and zero counts, but no finish/delta', () => {
+  const geo = subjectCards(plan, TODAY).find(c => c.id === 'geography');
+  assert.equal(geo.status, 'planned');
+  assert.equal(geo.lessonsDone, 0);
+  assert.equal(geo.lessonsTotal, 30);
+  assert.equal(geo.finish, null);
+  assert.equal(geo.delta, null);
+  assert.equal(geo.isTbWb, false);
+  assert.equal(geo.color, '#4cc9b0');
+});
+
+test('subjectCards: an unlisted id sorts after every known one and gets the neutral color', () => {
+  const withExtra = sanitizePlan({ ...rawPlan, activities: [...rawPlan.activities,
+    { id: 'zzz-future', name: 'Future Subject', type: 'paced', status: 'planned', onGrid: false, chain: [] }] });
+  const cards = subjectCards(withExtra, TODAY);
+  assert.equal(cards[cards.length - 1].id, 'zzz-future');
+  assert.equal(cards[cards.length - 1].color, '#9aa0b4');
+});
+
+// ── widgetModel ───────────────────────────────────────────────
+test('widgetModel: Mon Aug 31 — the exact strings the widget renders', () => {
+  const w = widgetModel(MON, events, plan, 8);
+  assert.equal(w.dayLabel, 'Today · Mon');
+  assert.equal(w.first, '10:00 Quran');
+  assert.equal(w.rest, '11:00 Ruhama · then Singapore + LoE');
+  assert.equal(w.done, 0);
+  assert.equal(w.total, 4);
+  assert.equal(w.mama, 'Mama: work day');
+});
+
+test('widgetModel: done counts items whose status is "done"', () => {
+  const withLog = sanitizePlan({ ...rawPlan,
+    log: [...rawPlan.log, { date: MON, eventId: events.find(e => e.name === 'Quran' && e.day === 0).id, status: 'done', timed: true }] });
+  const w = widgetModel(MON, events, withLog, 8);
+  assert.equal(w.done, 1);
+  assert.equal(w.total, 4);
+});
+
+// ── fmtHM ─────────────────────────────────────────────────────
+test('fmtHM: h:mm, no am/pm suffix', () => {
+  assert.equal(fmtHM(10), '10:00');
+  assert.equal(fmtHM(11), '11:00');
+  assert.equal(fmtHM(13), '1:00');            // 1pm -> 1:00, no suffix (mirrors the bot's fmt_hm)
+  assert.equal(fmtHM(9.5), '9:30');
+  assert.equal(fmtHM(0), '12:00');
+});
+
+// ── dailyVisible (moved here from today.js; today.js re-exports it) ──
+test('dailyVisible: normal day always visible; travel-day respects travel.mode; off-day hides all', () => {
+  const reduced = { travel: { mode: 'reduced', factor: 0.5 } };
+  const pause = { travel: { mode: 'pause' } };
+  const away = t => ({ away: true, type: t });
+  assert.equal(dailyVisible(reduced, { away: false }), true);
+  assert.equal(dailyVisible(reduced, away('travel')), true);
+  assert.equal(dailyVisible(pause, away('travel')), false);
+  assert.equal(dailyVisible(reduced, away('off')), false);
+});
+
+// ── emojiFor / colorFor ───────────────────────────────────────
+test('emojiFor: known keys map to the bot\'s EMOJI_MAP, unknown keys fall back', () => {
+  assert.equal(emojiFor('quran'), '📖');
+  assert.equal(emojiFor('singapore'), '➗');
+  assert.equal(emojiFor('loe'), '📚');
+  assert.equal(emojiFor('nonsense'), EMOJI_FALLBACK);
+  assert.equal(emojiFor(undefined), EMOJI_FALLBACK);
+  assert.equal(Object.keys(EMOJI_MAP).length, 10);
+});
+
+test('colorFor: the three named subjects get their dot color, everything else neutral', () => {
+  assert.equal(colorFor('singapore'), '#e8834a');
+  assert.equal(colorFor('loe'), '#5ea3f2');
+  assert.equal(colorFor('geography'), '#4cc9b0');
+  assert.equal(colorFor('history'), '#9aa0b4');
+});
+
+// ── buildTimed / statusOfTimed (the pieces today.js now reuses) ──
+test('buildTimed: a bot-written override renders under its own name, matching today.js\'s original behaviour', () => {
+  const withOv = sanitizePlan({ ...rawPlan,
+    overrides: [...rawPlan.overrides, { date: MON, action: 'add', id: 'xTest', name: 'Arya art', start: 15.5, end: 16.5 }] });
+  const items = buildTimed(MON, events, withOv);
+  const ov = items.find(it => it.key === 'ov:xTest');
+  assert.equal(ov.name, 'Arya art');
+  assert.equal(ov.eventId, 'xTest');
+});
+
+test('statusOfTimed: requires a non-null key (no cross-match on keyless rows)', () => {
+  const withLog = sanitizePlan({ ...rawPlan,
+    log: [...rawPlan.log, { date: MON, status: 'missed', timed: true, eventId: 'e1001' }] });
+  const items = buildTimed(MON, events, withLog);
+  const quran = items.find(it => it.eventId === 'e1001');
+  assert.equal(statusOfTimed(withLog, MON, quran), 'missed');
+  const ruhama = items.find(it => it.eventId === 'e1007');
+  assert.equal(statusOfTimed(withLog, MON, ruhama), undefined);
+});

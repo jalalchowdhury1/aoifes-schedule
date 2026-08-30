@@ -27,6 +27,8 @@ button:hover { opacity: .8; }
 .danger-btn { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
 .ghost-btn { background: transparent; color: var(--text-muted); display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 5px 9px; }
 .ghost-btn.on { background: var(--bg-input); color: var(--text); }
+/* /m app link (header) is an <a>, not a <button> — ghost-btn otherwise never sets text-decoration */
+#app-link { text-decoration: none; }
 .icon-btn { padding: 6px 7px; }
 .icon-btn svg { display: block; }
 

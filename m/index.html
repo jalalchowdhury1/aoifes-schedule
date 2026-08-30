@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Aoife's School</title>
+<meta name="theme-color" content="#0b0d14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Aoife">
+<link rel="manifest" href="/m/manifest.json">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="../css/m.css?v=2026-08-31">
+</head>
+<body class="day">
+
+<div id="field" aria-hidden="true"></div>
+
+<header id="topbar">
+  <div id="top-normal"><b>Today</b><span id="top-date" class="dim"></span></div>
+  <div id="top-compact" hidden><b id="top-frac"></b><span id="top-next" class="dim"></span></div>
+</header>
+
+<div id="ptr" aria-hidden="true">&#8595; pull to refresh</div>
+
+<main>
+  <section id="tab-today" class="tab" role="tabpanel" aria-label="Today"></section>
+  <section id="tab-week" class="tab" role="tabpanel" aria-label="Week" hidden></section>
+  <section id="tab-subjects" class="tab" role="tabpanel" aria-label="Subjects" hidden></section>
+  <section id="tab-year" class="tab" role="tabpanel" aria-label="Year" hidden></section>
+  <p class="foot dim"><span id="stamp"></span> &middot; <a id="to-desktop" href="/">Full site &#8594;</a></p>
+</main>
+
+<div id="sheet-dim" hidden></div>
+<div id="sheet" hidden>
+  <div id="sheet-grab"><span></span></div>
+  <div id="sheet-body"></div>
+</div>
+
+<div id="toast" hidden></div>
+
+<nav id="tabbar" aria-label="Sections">
+  <button type="button" data-tab="today" class="on" aria-pressed="true">Today</button>
+  <button type="button" data-tab="week" aria-pressed="false">Week</button>
+  <button type="button" data-tab="subjects" aria-pressed="false">Subjects</button>
+  <button type="button" data-tab="year" aria-pressed="false">Year</button>
+</nav>
+
+<script type="module" src="../js/m.js?v=2026-08-31"></script>
+</body>
+</html>

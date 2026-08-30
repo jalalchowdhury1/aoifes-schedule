@@ -1,15 +1,16 @@
 // Today view: date header, away-day banner, timed blocks for the real date
 // (template + planner slots + overrides), one-tap statuses, daily no-slot
 // checklist, tomorrow strip.
-import { DAYS, fmt, esc, CATS } from '../model.js';
+import { DAYS, fmt, esc } from '../model.js';
 import { store, catLabel, evLabel } from '../state.js';
 import {
   todayStr, addDays, dayIdx, isWorkDay, dayStatus, dayAway, daysBetween, nextSession,
-  currentCur, cycleStats, doneOn, actTotal, okCls, teachingWeekNumber, dailyStreak,
+  currentCur, cycleStats, doneOn, actTotal, teachingWeekNumber, dailyStreak,
   weekCapacity, sessionLabel,
 } from './model.js';
 import { plan, togglePaced, logTimed } from './state.js';
 import { syncedAt } from '../sync.js';
+import { buildTimed, statusOfTimed, dailyVisible } from './mday.js';
 
 const ST = [['done', '✓ Done'], ['partial', '◐ Didn’t finish'], ['missed', '✗ Missed']];
 const AWAY_ICON = { travel: '✈', off: '⏸' };
@@ -54,59 +55,23 @@ export function paintSynced() {
   if (el) el.textContent = syncedCaption(syncedAt());    // textContent: never HTML
 }
 
-// A daily (no-time-slot) activity shows on a normal day; on a travel-type
-// away day only if it doesn't pause for travel; never on an off-type day.
-export function dailyVisible(act, status) {
-  if (!status.away) return true;
-  if (status.type === 'off') return false;
-  return (act.travel?.mode || 'pause') !== 'pause';
-}
+// dailyVisible/timedFor/statusOf are the ONE-engine refactor (js/plan/mday.js,
+// the /m PWA + Scriptable widget's pure model): mday.js owns the canonical
+// implementation now, and this view is a thin wrapper around it so the
+// desktop Today view and the phone app can never silently disagree about
+// what "today" looks like. Behaviour is byte-identical to the pre-refactor
+// code (tests/plan-today.test.mjs, unchanged, still pins it) — `dailyVisible`
+// is re-exported here since that test (and possibly others) import it
+// straight from today.js.
+export { dailyVisible };
 
-function timedFor(dateStr) {
-  const d = dayIdx(dateStr);
-  const items = [];
-  for (const ev of store.events.filter(e => e.day === d))
-    items.push({ key: `ev:${ev.id}`, eventId: ev.id, cls: okCls(CATS[ev.cat]?.cls),
-                 name: evLabel(ev) || catLabel(ev.cat), start: ev.start, end: ev.end, note: ev.note });
-  for (const a of plan.data.activities.filter(a => a.status === 'active' && a.onGrid))
-    for (const s of a.slots || [])
-      if (s.day === d) {
-        const cur = currentCur(a);
-        items.push({ key: `act:${a.id}`, activityId: a.id, cls: okCls(a.cls),
-                     name: a.name, start: s.start, end: s.end,
-                     note: cur && nextSession(cur) ? nextSession(cur).label : '' });
-      }
-  for (const [i, o] of plan.data.overrides.entries())
-    if (o.date === dateStr && o.action === 'add') {
-      const a = plan.data.activities.find(x => x.id === o.activityId);
-      // An override's own `id` IS its identity in the log: that is how the
-      // Telegram bot writes and reads a one-off ({eventId: 'x<n>'}). Without
-      // carrying it here the row had NO key at all, so statusOf's activityId
-      // branch matched `undefined === undefined` against the first other timed
-      // entry on the date, and a website tap wrote an ownerless row that
-      // logTimed could never find again. A bot-written `name` wins over the
-      // makeup label; `note` is suppressed when it only repeats the name.
-      items.push({ key: `ov:${o.id || i}`, eventId: o.id || undefined,
-                   activityId: o.activityId, cls: okCls(a?.cls),
-                   name: o.name || (a?.name || 'Extra') + ' · makeup',
-                   start: o.start, end: o.end,
-                   note: o.note && o.note !== o.name ? o.note : '' });
-    }
-  const skips = new Set(plan.data.overrides
-    .filter(o => o.date === dateStr && o.action === 'skip')
-    .map(o => o.eventId || `act:${o.activityId}`));
-  return items.filter(it => !skips.has(it.eventId) && !skips.has(it.key))
-    .sort((a, b) => a.start - b.start);
-}
+// nameForEvent (mday.js's buildTimed takes a resolver) reproduces the
+// original `evLabel(ev) || catLabel(ev.cat)` exactly — evLabel already falls
+// back to catLabel internally, so this is just evLabel with the same
+// catLabels-aware renames the rest of the app honors.
+const timedFor = dateStr => buildTimed(dateStr, store.events, plan.data, evLabel);
 
-// A non-null key is REQUIRED to match. The activityId branch used to run for
-// keyless rows too, and `undefined === undefined` is true in JS — so an item
-// with no ids at all matched the first other timed log entry on the date that
-// also lacked an activityId (typically a template event's own entry), and the
-// block rendered as already-logged. `it.activityId != null` closes that trap.
-const statusOf = (dateStr, it) => plan.data.log.find(e => e.date === dateStr &&
-  (it.eventId ? e.eventId === it.eventId
-              : it.activityId != null && e.activityId === it.activityId && e.timed))?.status;
+const statusOf = (dateStr, it) => statusOfTimed(plan.data, dateStr, it);
 
 function chips(dateStr) {
   const p = plan.data;
