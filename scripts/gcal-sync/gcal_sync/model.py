@@ -254,6 +254,64 @@ def template_events(schedule: dict, today: dt.date) -> dict:
     return out
 
 
+def activity_slot_events(plan: dict, today: dt.date) -> dict:
+    """Planner ACTIVITY SLOTS -> weekly recurring events, keyed `act:<a.id>:<slot index>`.
+
+    Same shape and same weekly-anchor rules as `template_events` — an on-grid
+    activity slot IS a template event in every way that matters to the
+    calendar, it just lives in the `aoife_plan` blob instead of
+    `aoifes_schedule`. Only synced when `status === 'active'` AND `onGrid` is
+    truthy (the exact filter js/plan/mday.js `buildTimed` uses for the
+    Today/mobile-day timed blocks) — a planned/parked/done/cancelled activity,
+    or one not on the grid, contributes nothing. An empty `slots` list
+    naturally contributes nothing too (nothing to loop over).
+
+    The slot's position in the array IS its identity (`slotIndex`), so
+    removing a slot — or flipping status off 'active' — simply stops that key
+    from appearing here, and the normal reconcile diff deletes the calendar
+    event on the next run, exactly like a deleted template event. Reordering
+    the slots array (not just adding/removing at the end) is therefore a
+    delete+insert pair rather than a no-op patch — accepted, since the array
+    index is the documented key.
+
+    `action:'skip'` overrides are NOT reflected here either, for the same
+    reason `override_events`/AGENTS.md documents for template events: no
+    EXDATE handling in v1.
+    """
+    plan = plan if isinstance(plan, dict) else {}
+    monday = week_monday(today)
+    out = {}
+    for a in plan.get("activities", []) or []:
+        if not isinstance(a, dict) or a.get("status") != "active" or not a.get("onGrid"):
+            continue
+        aid = a.get("id")
+        slots = a.get("slots")
+        if aid is None or not isinstance(slots, list):
+            continue
+        name = (a.get("name") or "").strip() or str(aid)
+        for i, s in enumerate(slots):
+            if not isinstance(s, dict):
+                continue
+            day = _num(s.get("day"))
+            start, end = _num(s.get("start")), _num(s.get("end"))
+            if day is None or start is None or end is None:
+                continue
+            day = int(day)
+            if not 0 <= day <= 6 or end <= start:
+                continue
+            date = monday + dt.timedelta(days=day)
+            st, en = _timed(date, start, end)
+            key = f"act:{aid}:{i}"
+            out[key] = _event(
+                key,
+                name,
+                st,
+                en,
+                [f"RRULE:FREQ=WEEKLY;BYDAY={BYDAY[day]}"],
+            )
+    return out
+
+
 def override_events(plan: dict, today: dt.date) -> dict:
     """`action:'add'` overrides -> single timed events, keyed `ov:<o.id>`.
 
@@ -315,11 +373,12 @@ def period_events(plan: dict) -> dict:
 def desired_state(schedule: dict, plan: dict, today: dt.date) -> dict:
     """Everything the calendar should hold, keyed by syncKey.
 
-    Key prefixes (`tpl:`/`ov:`/`pd:`) keep the three id namespaces from ever
-    colliding — a period `p1` and an override `p1` are different events.
+    Key prefixes (`tpl:`/`act:`/`ov:`/`pd:`) keep the four id namespaces from
+    ever colliding — a period `p1` and an override `p1` are different events.
     """
     out = {}
     out.update(template_events(schedule, today))
+    out.update(activity_slot_events(plan, today))
     out.update(override_events(plan, today))
     out.update(period_events(plan))
     return out

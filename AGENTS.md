@@ -412,6 +412,7 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   | planner | calendar |
   |---|---|
   | template event | weekly recurring event, `RRULE:FREQ=WEEKLY;BYDAY=<MO..SU>`, DTSTART on this week's instance of that weekday, no UNTIL/COUNT |
+  | activity slot (`status:'active'`, `onGrid`, non-empty `slots`) | same weekly-recurring shape as a template event, keyed `act:<activityId>:<slotIndex>` — title `name` (fallback: id). Added 2026-08-30 for Jiu Jitsu (Mon 4–5pm); a removed slot or a status flip off `active` just stops the key appearing, so the normal reconcile deletes it like a dropped template event. Slot INDEX is the identity, so reordering the array (not appending/removing at the end) is a delete+insert, not a no-op. |
   | override `action:'add'` with numeric start/end | one timed event, window today−7 … today+365 |
   | period `travel` / `off` | all-day event `start … end+1` (GCal's `end.date` is EXCLUSIVE), titled `✈️ <label>` / `⏸ <label>` |
   Times are `America/New_York` (`dateTime` + `timeZone`, no hardcoded offset, so
@@ -505,18 +506,19 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   fleet (`github-notion-sync`: `log_marker` probe + `schedule_snapshot.py`
   CATALOG entry).
 - **Known limitations (v1, deliberate)**
-  - **`action:'skip'` overrides are NOT reflected.** A cancelled session still
-    shows on the calendar as its recurring instance. Doing it right means EXDATE
-    on the master (or a cancelled-instance write on that occurrence), which is
-    fiddly enough to be its own change; the planner's Today view remains the
-    authority on what actually happened. **Do not "fix" this by deleting the
-    master series** — that would drop every future occurrence too.
+  - **`action:'skip'` overrides are NOT reflected** — for template events NOR
+    activity slots. A cancelled session still shows on the calendar as its
+    recurring instance. Doing it right means EXDATE on the master (or a
+    cancelled-instance write on that occurrence), which is fiddly enough to be
+    its own change; the planner's Today view remains the authority on what
+    actually happened. **Do not "fix" this by deleting the master series** —
+    that would drop every future occurrence too.
   - **`altSun` is ignored** — the regular-week shape is synced. (Same reason the
     print sheet always shows the week grid.)
   - Periods are NOT windowed (the list is short and curated); overrides are.
   - Overrides with no times are Today-list items and have no calendar shape.
   - No reverse sync and no reminders/attendees/colors are set.
-- **Tests**: `cd scripts/gcal-sync && uv run pytest` (68, all offline — Google is
+- **Tests**: `cd scripts/gcal-sync && uv run pytest` (76, all offline — Google is
   a fake discovery client, the two blobs are patched). These are NOT part of the
   repo's `node --test` suite; run both before shipping a change here.
   `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before

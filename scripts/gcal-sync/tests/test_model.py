@@ -115,6 +115,81 @@ def test_altsun_is_ignored_in_v1():
     assert a == b
 
 
+# ── planner activity slots ──────────────────────────────────────────────────
+def activity(id="jj", name="Jiu Jitsu", status="active", on_grid=True, slots=None):
+    return {"id": id, "name": name, "status": status, "onGrid": on_grid,
+            "slots": [{"day": 0, "start": 16, "end": 17}] if slots is None else slots}
+
+
+def test_activity_slot_becomes_a_weekly_event():
+    """The live jj example: Mondays 4-5pm, America/New_York."""
+    out = model.activity_slot_events({"activities": [activity()]}, TODAY)
+    body = out["act:jj:0"]
+    assert body["summary"] == "Jiu Jitsu"
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+    assert body["start"] == {"dateTime": "2026-08-17T16:00:00", "timeZone": "America/New_York"}
+    assert body["end"] == {"dateTime": "2026-08-17T17:00:00", "timeZone": "America/New_York"}
+    priv = body["extendedProperties"]["private"]
+    assert priv["aoifeSync"] == "v1" and priv["syncKey"] == "act:jj:0"
+
+
+def test_activity_slot_included_in_desired_state():
+    plan = {"activities": [activity()]}
+    keys = set(model.desired_state(schedule(), plan, TODAY))
+    assert keys == {"act:jj:0"}
+
+
+def test_activity_slot_name_falls_back_to_id():
+    out = model.activity_slot_events({"activities": [activity(name="")]}, TODAY)
+    assert out["act:jj:0"]["summary"] == "jj"
+
+
+def test_inactive_or_off_grid_or_empty_slot_activities_produce_nothing():
+    acts = [
+        activity(id="parked", status="parked"),          # a parked activity: nothing
+        activity(id="planned", status="planned"),
+        activity(id="off-grid", on_grid=False),
+        activity(id="no-slots", slots=[]),
+        {**activity(id="null-slots"), "slots": None},     # malformed: not a list
+        {**activity(id="no-id"), "id": None},
+    ]
+    assert model.activity_slot_events({"activities": acts}, TODAY) == {}
+
+
+def test_activity_slot_skips_impossible_days_and_zero_length_blocks():
+    acts = [
+        activity(id="a1", slots=[{"day": 9, "start": 10, "end": 11}]),
+        activity(id="a2", slots=[{"day": 0, "start": 10, "end": 10}]),
+        activity(id="a3", slots=[{"day": 0, "start": 12, "end": 11}]),
+    ]
+    assert model.activity_slot_events({"activities": acts}, TODAY) == {}
+
+
+def test_multiple_slots_key_by_index():
+    acts = [activity(id="two", slots=[{"day": 0, "start": 9, "end": 10}, {"day": 2, "start": 14, "end": 15}])]
+    out = model.activity_slot_events({"activities": acts}, TODAY)
+    assert set(out) == {"act:two:0", "act:two:1"}
+    assert out["act:two:0"]["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+    assert out["act:two:1"]["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=WE"]
+
+
+def test_activity_slot_removed_yields_a_delete():
+    """Same reconciler path as a deleted template event."""
+    before = model.desired_state(schedule(), {"activities": [activity()]}, TODAY)
+    existing = [gcal_row("g1", before["act:jj:0"])]
+    after_slot_gone = model.desired_state(schedule(), {"activities": [activity(slots=[])]}, TODAY)
+    plan = model.reconcile(after_slot_gone, existing)
+    assert plan.deletes == ["g1"] and not plan.inserts and not plan.patches
+
+
+def test_activity_status_no_longer_active_yields_a_delete():
+    before = model.desired_state(schedule(), {"activities": [activity()]}, TODAY)
+    existing = [gcal_row("g1", before["act:jj:0"])]
+    after = model.desired_state(schedule(), {"activities": [activity(status="parked")]}, TODAY)
+    plan = model.reconcile(after, existing)
+    assert plan.deletes == ["g1"] and not plan.inserts and not plan.patches
+
+
 # ── overrides ───────────────────────────────────────────────────────────────
 def override(id="x1", date="2026-08-19", action="add", start=15.5, end=16.5, name="Arya art"):
     return {"id": id, "date": date, "action": action, "start": start, "end": end, "name": name}
