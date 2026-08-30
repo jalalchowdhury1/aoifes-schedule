@@ -597,8 +597,16 @@ the parts worth keeping.
   IIFE (Scriptable's engine has no ES module system and rejects top-level
   `await`), stripping `import`/`export` syntax with `stripModuleSyntax`
   (tests/plan-widget.test.mjs pins bundle hygiene + build determinism +
-  the exact `widgetModel` strings the layout consumes). Edit the sources —
+  the exact `widgetNext` strings the layout consumes). Edit the sources —
   `js/plan/mday.js` above all — and rebuild.
+- **Widget layout (2026-08-31 redesign):** one live countdown, not the old
+  two-column first/rest·done/total grid. `mday.js`'s `widgetNext(dateStr,
+  events, plan, now, nameForEvent?)` returns `{mode, name, at, atLabel, rest,
+  doneCount, total}`; widget-ui.js draws `at` via Scriptable's
+  `addDate(...).applyRelativeStyle()`/`.applyTimerStyle()` (ticks live, no
+  refresh) + the class name, then a dim "then …" line from `rest` (later
+  timed blocks + unlogged dailies, omitted when empty). `widgetModel` stays
+  exported for compatibility but is no longer used by the widget.
 - **Loader** (paste into a new Scriptable script named "Aoife's Schedule", then add a
   medium Scriptable widget to the home screen pointed at it):
   ```js

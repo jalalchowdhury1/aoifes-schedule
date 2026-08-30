@@ -362,12 +362,18 @@
       "id": "jj",
       "name": "Jiu Jitsu",
       "type": "target",
-      "status": "planned",
+      "status": "active",
       "cls": "j",
       "onGrid": true,
-      "slots": [],
-      "target": 20,
-      "note": "Not enrolled yet \u2014 target 20/yr is a default, adjust on enrollment",
+      "slots": [
+        {
+          "day": 0,
+          "start": 16,
+          "end": 17
+        }
+      ],
+      "target": 10,
+      "note": "10 free trial classes (Mon 4\u20135pm from Aug 2026). #1 Aug 17, #2 Aug 24 back-logged 2026-08-30; #3 = Aug 31. Set the real yearly target after the trial.",
       "chain": []
     },
     {

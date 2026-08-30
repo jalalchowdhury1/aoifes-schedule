@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { sanitizePlan } from '../js/plan/model.js';
 import {
-  dayItems, dayHeader, nowBlock, subjectCards, widgetModel, fmtHM,
+  dayItems, dayHeader, nowBlock, subjectCards, widgetModel, widgetNext, fmtHM,
   dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
   EMOJI_MAP, EMOJI_FALLBACK, dayState, fieldClassFor, receipt,
 } from '../js/plan/mday.js';
@@ -23,13 +23,15 @@ const plan = sanitizePlan(rawPlan);
 const MON = '2026-08-31';   // Monday — the spec's pinned test date (tomorrow relative to the fixture's "now", 2026-08-30)
 const TODAY = '2026-08-30'; // the fixture's real "as of" date (streak/finish asserted against this)
 
-// ── dayItems: 4 items, in order, for Mon Aug 31 ──────────────
-test('dayItems: Mon Aug 31 — 4 items, timed first (Quran, Ruhama) then no-slot dailies (Singapore, LoE)', () => {
+// ── dayItems: 5 items, in order, for Mon Aug 31 ──────────────
+// jj (Jiu Jitsu) went live as an active onGrid Monday 16-17 slot 2026-08-30 —
+// it now sorts in as a THIRD timed block, ahead of the two no-slot dailies.
+test('dayItems: Mon Aug 31 — 5 items, timed first (Quran, Ruhama, Jiu Jitsu) then no-slot dailies (Singapore, LoE)', () => {
   const items = dayItems(MON, events, plan);
-  assert.equal(items.length, 4);
-  assert.deepEqual(items.map(it => it.kind), ['timed', 'timed', 'daily', 'daily']);
+  assert.equal(items.length, 5);
+  assert.deepEqual(items.map(it => it.kind), ['timed', 'timed', 'timed', 'daily', 'daily']);
 
-  const [quran, ruhama, sm, loe] = items;
+  const [quran, ruhama, jj, sm, loe] = items;
   assert.equal(quran.name, 'Quran');
   assert.equal(quran.start, 10);
   assert.equal(quran.end, 11);
@@ -39,6 +41,11 @@ test('dayItems: Mon Aug 31 — 4 items, timed first (Quran, Ruhama) then no-slot
   assert.equal(ruhama.start, 11);
   assert.equal(ruhama.end, 13);
   assert.equal(ruhama.emoji, '✏️');
+
+  assert.equal(jj.activityId, 'jj');
+  assert.equal(jj.start, 16);
+  assert.equal(jj.end, 17);
+  assert.equal(jj.emoji, '🥋');
 
   assert.equal(sm.activityId, 'singapore');
   assert.equal(sm.note, '3A Ch 1 · Lesson 6 · textbook');
@@ -142,18 +149,21 @@ test('nowBlock: before the first block -> state "next" with minutesUntil', () =>
 });
 
 test('nowBlock: after the last timed block -> state "after" with a count of unlogged items', () => {
-  // Log the two timed blocks so only the two dailies are left unlogged.
+  // Log all three timed blocks (Quran, Ruhama, Jiu Jitsu) so only the two
+  // dailies are left unlogged. 6pm is after Jiu Jitsu ends at 17 — the real
+  // "last timed block" now that it's an active onGrid Monday slot.
   const logged = sanitizePlan({ ...rawPlan, log: [...rawPlan.log,
     { date: MON, eventId: 'e1001', status: 'done', timed: true },
-    { date: MON, eventId: 'e1007', status: 'done', timed: true }] });
+    { date: MON, eventId: 'e1007', status: 'done', timed: true },
+    { date: MON, activityId: 'jj', status: 'done', timed: true }] });
   const items = dayItems(MON, events, logged);
-  const nb = nowBlock(MON, items, 14);            // 2pm, after Ruhama ends at 13
+  const nb = nowBlock(MON, items, 18);            // 6pm, after Jiu Jitsu ends at 17
   assert.equal(nb.state, 'after');
   assert.equal(nb.item, null);
   assert.equal(nb.left, 2);                       // Singapore + LoE still unlogged
 
-  const nothingLogged = nowBlock(MON, dayItems(MON, events, plan), 14);
-  assert.equal(nothingLogged.left, 4);            // real fixture: nothing logged yet for a future date
+  const nothingLogged = nowBlock(MON, dayItems(MON, events, plan), 18);
+  assert.equal(nothingLogged.left, 5);            // real fixture: nothing logged yet for a future date
 });
 
 // ── subjectCards ──────────────────────────────────────────────
@@ -198,21 +208,22 @@ test('subjectCards: an unlisted id sorts after every known one and gets the neut
   assert.equal(cards[cards.length - 1].color, '#9aa0b4');
 });
 
-// ── widgetModel ───────────────────────────────────────────────
+// ── widgetModel (kept for compatibility; widgetNext below is what the
+// redesigned widget actually draws) ─────────────────────────────
 test('widgetModel: Mon Aug 31 — the exact strings the widget renders', () => {
   const w = widgetModel(MON, events, plan, 8);
   assert.equal(w.dayLabel, 'Today · Mon');
   assert.equal(w.first, '10:00 Quran');
-  assert.equal(w.rest, '11:00 Ruhama · then Singapore + LoE');
+  assert.equal(w.rest, '11:00 Ruhama · then Jiu Jitsu + Singapore + LoE');
   assert.equal(w.done, 0);
-  assert.equal(w.total, 4);
+  assert.equal(w.total, 5);
   assert.equal(w.mama, 'Mama: work day');
 });
 
 test('widgetModel: an optional nameForEvent resolver renames the timed strings ("first"/"rest") the widget draws', () => {
   const w = widgetModel(MON, events, plan, 8, () => 'Renamed');
   assert.equal(w.first, '10:00 Renamed');
-  assert.equal(w.rest, '11:00 Renamed · then Singapore + LoE');
+  assert.equal(w.rest, '11:00 Renamed · then Jiu Jitsu + Singapore + LoE');
 });
 
 test('widgetModel: done counts items whose status is "done"', () => {
@@ -220,7 +231,7 @@ test('widgetModel: done counts items whose status is "done"', () => {
     log: [...rawPlan.log, { date: MON, eventId: events.find(e => e.name === 'Quran' && e.day === 0).id, status: 'done', timed: true }] });
   const w = widgetModel(MON, events, withLog, 8);
   assert.equal(w.done, 1);
-  assert.equal(w.total, 4);
+  assert.equal(w.total, 5);
 });
 
 test('widgetModel: a day with only ONE timed block never fabricates a time for the no-slot daily that lands in "rest"', () => {
@@ -240,6 +251,63 @@ test('widgetModel: a day with NO timed blocks at all never fabricates a time for
   const w = widgetModel('2026-08-30', events, allAway, 8);
   assert.doesNotMatch(w.first, /^\d/);
   assert.equal(w.first, 'Singapore');   // only the reduced-travel daily survives
+});
+
+// ── widgetNext (2026-08-31 redesign): what the widget actually draws —
+// hours/minutes to the next-or-current class, its name, and a small "then …"
+// line of what's left today. jj (Jiu Jitsu) went live as an active onGrid
+// Monday 16-17 slot 2026-08-30, so it's a real timed block in these moments
+// (previously 'planned'/no slots — see the fixture refresh note above).
+test('widgetNext: Mon Aug 31 09:30 — next Quran at 10:00, rest lists the day\'s remaining timed blocks then the unlogged dailies', () => {
+  const r = widgetNext(MON, events, plan, new Date(2026, 7, 31, 9, 30));
+  assert.equal(r.mode, 'next');
+  assert.equal(r.name, 'Quran');
+  assert.equal(r.atLabel, '10:00');
+  assert.equal(r.at, '2026-08-31T10:00:00');
+  assert.deepEqual(r.rest, ['11:00 Ruhama', '4:00 Jiu Jitsu', 'Singapore', 'LoE']);
+  assert.equal(r.doneCount, 0);
+  assert.equal(r.total, 5);
+});
+
+test('widgetNext: Mon Aug 31 12:00 — now Ruhama until 1:00, rest drops Ruhama itself (already current, not "after")', () => {
+  const r = widgetNext(MON, events, plan, new Date(2026, 7, 31, 12, 0));
+  assert.equal(r.mode, 'now');
+  assert.equal(r.name, 'Ruhama');
+  assert.equal(r.atLabel, '1:00');
+  assert.equal(r.at, '2026-08-31T13:00:00');
+  assert.deepEqual(r.rest, ['4:00 Jiu Jitsu', 'Singapore', 'LoE']);
+  assert.equal(r.doneCount, 0);
+  assert.equal(r.total, 5);
+});
+
+test('widgetNext: Mon Aug 31 17:30 — done (every timed block is over), rest is just the unlogged dailies', () => {
+  const r = widgetNext(MON, events, plan, new Date(2026, 7, 31, 17, 30));
+  assert.equal(r.mode, 'done');
+  assert.equal(r.name, null);
+  assert.equal(r.at, null);
+  assert.equal(r.atLabel, null);
+  assert.deepEqual(r.rest, ['Singapore', 'LoE']);
+  assert.equal(r.doneCount, 0);
+  assert.equal(r.total, 5);
+});
+
+test('widgetNext: Sun Aug 30 08:00 — next Ruhama at 11:00 even though it\'s already logged "missed" (time-only anchor, not status-filtered); rest is empty because both dailies are already logged for that date', () => {
+  // Real fixture log for 2026-08-30: e1009 (Ruhama) logged 'missed', loe
+  // logged 'missed', singapore logged done (4 sessions) — all BEFORE the
+  // block's own 11am start, in this test's 8am "now". The anchor pick stays
+  // time-only (current/next never look at .status — see the function's own
+  // header comment), so Ruhama is still "next"; only `rest` — which DOES
+  // drop anything logged — ends up empty, proving that exclusion actually
+  // does something on real data (every other fixture moment above has
+  // nothing logged, so it never bites there).
+  const r = widgetNext(TODAY, events, plan, new Date(2026, 7, 30, 8, 0));
+  assert.equal(r.mode, 'next');
+  assert.equal(r.name, 'Ruhama');
+  assert.equal(r.atLabel, '11:00');
+  assert.equal(r.at, '2026-08-30T11:00:00');
+  assert.deepEqual(r.rest, []);
+  assert.equal(r.doneCount, 3);
+  assert.equal(r.total, 3);
 });
 
 // ── fmtHM ─────────────────────────────────────────────────────
@@ -300,28 +368,33 @@ test('dayState: before the first block -> phase "next"', () => {
 });
 
 test('dayState: after the last block, everything answered -> phase "done" (green field), never an ISO-date caption bug', () => {
+  // Jiu Jitsu (16-17) is the real last timed block now, so all three timed
+  // blocks plus both dailies need a status, checked at 6pm.
   const logged = sanitizePlan({ ...rawPlan, log: [...rawPlan.log,
     { date: MON, eventId: 'e1001', status: 'done', timed: true },
     { date: MON, eventId: 'e1007', status: 'done', timed: true },
+    { date: MON, activityId: 'jj', status: 'done', timed: true },
     { date: MON, activityId: 'singapore', status: 'missed' },   // a MISS still counts as "answered"
     { date: MON, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 5 }] });
   const items = dayItems(MON, events, logged);
-  const ds = dayState(items, 14);
+  const ds = dayState(items, 18);
   assert.equal(ds.phase, 'done');
-  assert.equal(ds.total, 4);
-  assert.equal(ds.answered, 4);
+  assert.equal(ds.total, 5);
+  assert.equal(ds.answered, 5);
   assert.equal(fieldClassFor(ds), 'done');
 });
 
 test('dayState: after the last block, something unanswered -> phase "left" with names, violet before 18:00', () => {
+  // 5:30pm: Jiu Jitsu (16-17, the real last timed block) is over but it's
+  // still before the 18:00 late threshold.
   const logged = sanitizePlan({ ...rawPlan, log: [...rawPlan.log,
     { date: MON, eventId: 'e1001', status: 'done', timed: true },
     { date: MON, eventId: 'e1007', status: 'done', timed: true }] });
   const items = dayItems(MON, events, logged);
-  const ds = dayState(items, 14);          // 2pm — before the late threshold
+  const ds = dayState(items, 17.5);
   assert.equal(ds.phase, 'left');
-  assert.equal(ds.left, 2);
-  assert.deepEqual(ds.names.sort(), ['Logic of English', 'Singapore Math'].sort());
+  assert.equal(ds.left, 3);
+  assert.deepEqual(ds.names.sort(), ['Jiu Jitsu', 'Logic of English', 'Singapore Math'].sort());
   assert.equal(ds.late, false);
   assert.equal(fieldClassFor(ds), 'day');
 });

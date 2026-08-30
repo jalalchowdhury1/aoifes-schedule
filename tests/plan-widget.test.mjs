@@ -3,15 +3,17 @@
 // cover what a Node process CAN verify without a phone: the bundle is
 // syntactically legal for Scriptable's engine (no ESM syntax, no top-level
 // await, no browser globals), the build is deterministic, and the exact
-// strings widget-ui.js draws (via widgetModel) match the fixture. Drawing
-// itself (ListWidget/Font/Color calls) can only be eyeballed on-device or via
-// a throwaway stub harness — not part of this suite.
+// strings widget-ui.js draws (via widgetNext, the 2026-08-31 redesign —
+// countdown to the next/current class + the rest of today) match the
+// fixture. Drawing itself (ListWidget/Font/Color/addDate calls) can only be
+// eyeballed on-device or via a throwaway stub harness — not part of this
+// suite.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildBundle, stripModuleSyntax, SOURCES } from '../scripts/build-widget.mjs';
 import { sanitizePlan } from '../js/plan/model.js';
-import { widgetModel } from '../js/plan/mday.js';
+import { widgetNext } from '../js/plan/mday.js';
 
 const { bundle: bundleA, hash: hashA } = buildBundle();
 
@@ -68,16 +70,26 @@ test('SOURCES lists the real engine files in dependency order (root model before
   assert.deepEqual(SOURCES, ['js/model.js', 'js/plan/model.js', 'js/plan/mday.js', 'scripts/widget-ui.js']);
 });
 
-// ── widgetModel strings for the fixture (same contract widget-ui.js draws) ──
+// ── widgetNext strings for the fixture (same contract widget-ui.js draws) ──
+// jj (Jiu Jitsu) is an active onGrid Monday 16-17 slot as of 2026-08-30 —
+// tests/fixtures/plan-mday-plan.json was refreshed from the live
+// /api/plan-get to reflect that (it used to be 'planned' with no slots).
 const events = JSON.parse(readFileSync(new URL('./fixtures/plan-mday-schedule.json', import.meta.url), 'utf8')).events;
 const plan = sanitizePlan(JSON.parse(readFileSync(new URL('./fixtures/plan-mday-plan.json', import.meta.url), 'utf8')));
 
-test('widgetModel: Mon Aug 31 fixture — the exact strings the widget layout consumes', () => {
-  const m = widgetModel('2026-08-31', events, plan, 8);
-  assert.equal(m.dayLabel, 'Today · Mon');
-  assert.equal(m.dayLabel.toUpperCase(), 'TODAY · MON');   // widget-ui.js's left caption
-  assert.equal(m.first, '10:00 Quran');
-  assert.equal(m.rest, '11:00 Ruhama · then Singapore + LoE');
-  assert.equal(`${m.done}/${m.total}`, '0/4');              // widget-ui.js's right "N/total"
-  assert.equal(m.mama, 'Mama: work day');
+test('widgetNext: Mon Aug 31 09:30 fixture — the exact strings the widget layout consumes', () => {
+  const m = widgetNext('2026-08-31', events, plan, new Date(2026, 7, 31, 9, 30));
+  assert.equal(m.mode, 'next');                              // widget-ui.js's "NEXT CLASS" caption
+  assert.equal(m.name, 'Quran');
+  assert.equal(m.atLabel, '10:00');
+  assert.equal(m.at, '2026-08-31T10:00:00');                 // fed to addDate().applyRelativeStyle()
+  assert.deepEqual(m.rest, ['11:00 Ruhama', '4:00 Jiu Jitsu', 'Singapore', 'LoE']);
+  assert.equal(`${m.doneCount}/${m.total}`, '0/5');
+});
+
+test('widgetNext: Mon Aug 31 12:00 fixture — "now" mode, the widget\'s "NOW · until …" caption', () => {
+  const m = widgetNext('2026-08-31', events, plan, new Date(2026, 7, 31, 12, 0));
+  assert.equal(m.mode, 'now');
+  assert.equal(m.name, 'Ruhama');
+  assert.equal(m.atLabel, '1:00');                           // widget-ui.js: `NOW · until ${atLabel}`
 });

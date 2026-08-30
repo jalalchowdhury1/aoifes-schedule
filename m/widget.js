@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 82c2c48cb3 */
+ * build 2b75a39f32 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -1127,26 +1127,103 @@ function widgetModel(dateStr, events, plan, hourFloat, nameForEvent) {
   return { dayLabel, first, rest, done, total: items.length, mama };
 }
 
+// A local-time ISO-ish stamp with NO trailing offset/Z — the Date Time String
+// Format (ES2015+) parses a date-time form (has a "T") with no zone as LOCAL
+// time, so `new Date(isoLocal(...))` on the phone lands on the phone's own
+// clock, matching todayStr()/localHourFloat()'s existing "device clock only"
+// rule (see widget-ui.js's header comment). A date-ONLY string ("2026-08-31")
+// would parse as UTC instead — that's why the "T00:00:00" time part matters.
+function isoLocal(dateStr, hourFloat) {
+  let hh = Math.floor(hourFloat), mm = Math.round((hourFloat - hh) * 60);
+  if (mm === 60) { hh += 1; mm = 0; }
+  return `${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+}
+
+// ── widgetNext: what the redesigned widget actually draws — "hours/minutes
+// to the next class, its name, and a small line of what's left today"
+// (2026-08-31 redesign; widgetModel above is kept for compatibility but no
+// longer used by scripts/widget-ui.js). Deliberately COARSER than dayState:
+// picking the current/next timed block is TIME-ONLY off the day's `timed`
+// blocks (ignores any already-logged status on that same block — same as
+// dayState/the hero elsewhere — so a block backfilled with a status ahead of
+// its own clock time still counts as "next" until its start time actually
+// passes; see tests/plan-mday.test.mjs's 2026-08-30 08:00 case, where Ruhama
+// is already logged 'missed' yet is still the widget's "next" class at that
+// hour). 'rest', however, DOES drop anything already logged — that is the
+// one place "logged" matters here.
+//   'now'  — a timed block is running: countdown target = its end.
+//   'next' — a later timed block exists today: countdown target = its start.
+//   'done' — every timed block for the day is in the past (there WERE some)
+//            — independent of whether the day's dailies are logged yet; the
+//            "All done ✓" vs "N left" split is left to widget-ui.js off
+//            doneCount/total, not encoded in the mode.
+//   'none' — no timed blocks at all today (including an away day, where
+//            dayItems/buildTimed already empty out `timed`).
+function widgetNext(dateStr, events, plan, now, nameForEvent) {
+  const hourFloat = now.getHours() + now.getMinutes() / 60;
+  const status = dayStatus(plan?.periods, dateStr);
+  const timed = status.away ? [] : buildTimed(dateStr, events, plan, nameForEvent)
+    .map(it => ({ ...it, status: statusOfTimed(plan, dateStr, it) }));
+  const dailies = (plan?.activities || []).filter(a =>
+    a && a.status === 'active' && a.type === 'paced' && !a.onGrid && dailyVisible(a, status));
+  const dailyItems = dailies.map(a => ({
+    key: `act:${a.id}`, kind: 'daily', activityId: a.id, name: a.name || a.id,
+    status: dailyStatus(a, plan?.log, dateStr),
+  }));
+  const total = timed.length + dailyItems.length;
+  const doneCount = [...timed, ...dailyItems].filter(it => it.status != null).length;
+  const unloggedDailies = dailyItems.filter(it => it.status == null).map(widgetName);
+
+  const current = timed.find(it => hourFloat >= it.start && hourFloat < it.end);
+  const anchor = current || timed.filter(it => it.start > hourFloat).sort((a, b) => a.start - b.start)[0];
+  if (anchor) {
+    const laterTimed = timed
+      .filter(it => it.start > anchor.start && it.status == null)
+      .sort((a, b) => a.start - b.start)
+      .map(widgetLabel);
+    const rest = [...laterTimed, ...unloggedDailies];
+    return current
+      ? { mode: 'now', name: widgetName(current), at: isoLocal(dateStr, current.end),
+          atLabel: fmtHM(current.end), rest, doneCount, total }
+      : { mode: 'next', name: widgetName(anchor), at: isoLocal(dateStr, anchor.start),
+          atLabel: fmtHM(anchor.start), rest, doneCount, total };
+  }
+  return { mode: timed.length ? 'done' : 'none', name: null, at: null, atLabel: null,
+    rest: unloggedDailies, doneCount, total };
+}
+
 /* ── scripts/widget-ui.js ── */
 // Scriptable rendering layer for Aoife's School medium widget.
 // NEVER served or run alone — scripts/build-widget.mjs concatenates this
 // after js/model.js + js/plan/model.js + js/plan/mday.js inside one async
 // IIFE (Scriptable rejects top-level `await`, so the fetch below only works
 // because the whole bundle is wrapped in `(async () => { ... })()`).
-// Everything numeric/text comes from mday.js's widgetModel/sanitizePlan/
+// Everything numeric/text comes from mday.js's widgetNext/sanitizePlan/
 // todayStr — this file only fetches the two blobs and draws.
+//
+// 2026-08-31 redesign: countdown to the next/current class + the rest of
+// today, replacing the old two-column "first/rest | done/total" layout.
+// The big number is a live-ticking Scriptable date view (`addDate` +
+// `applyRelativeStyle`/`applyTimerStyle`) so it counts down on its own,
+// second by second, with NO widget refresh needed in between.
 /* global Request, ListWidget, FileManager, Script, Color, Font, LinearGradient, config */
-/* global sanitizePlan, todayStr, widgetModel, CATS */
+/* global sanitizePlan, todayStr, widgetNext, CATS */
 
 const APP_BASE = 'https://aoifes-schedule.vercel.app';
 
 const WCOL = {
   ground: new Color('#12141f'), ink: new Color('#eef0f6'),
   dim: new Color('#eef0f6', 0.58), faint: new Color('#eef0f6', 0.42),
-  red: new Color('#f0655a'),
+  vio: new Color('#c9c0ff'), grn: new Color('#3ddc97'), red: new Color('#f0655a'),
 };
 
-const localHourFloat = d => d.getHours() + d.getMinutes() / 60;
+// Top-left tiny caption per widgetNext's mode — 'now' deliberately keeps
+// "until" lowercase (the approved copy is "NOW · until 1:00", not shouted).
+function captionFor(m) {
+  if (m.mode === 'next') return 'NEXT CLASS';
+  if (m.mode === 'now') return `NOW · until ${m.atLabel}`;
+  return 'TODAY';                                    // 'done' and 'none' both read as a plain day caption
+}
 
 async function fetchJSON(url) {
   const req = new Request(url);
@@ -1155,8 +1232,8 @@ async function fetchJSON(url) {
 }
 
 // The day boundary is the PHONE's local date (this is a family-at-home
-// surface, not a market one) — todayStr()/localHourFloat() both read the
-// device clock, never anything server-supplied.
+// surface, not a market one) — todayStr()/`now` both read the device clock,
+// never anything server-supplied.
 async function loadData() {
   const fm = FileManager.local();
   const cachePath = fm.joinPath(fm.cacheDirectory(), 'aoife-widget-cache.json');
@@ -1205,7 +1282,6 @@ async function makeWidget() {
   const plan = sanitizePlan(data.planRaw);
   const now = new Date();
   const dateStr = todayStr();
-  const hourFloat = localHourFloat(now);
   const events = Array.isArray(data.schedule?.events) ? data.schedule.events : [];
   // Same catLabels-aware name resolution the app's own evLabel (js/state.js)
   // uses, so a renamed category (e.g. catLabels.barakot = "Mama Classes")
@@ -1213,53 +1289,60 @@ async function makeWidget() {
   // comes from js/model.js, bundled ahead of this file by build-widget.mjs.
   const catLabels = data.schedule?.catLabels || {};
   const nameForEvent = ev => ev.name || catLabels[ev.cat] || CATS[ev.cat]?.label || 'Event';
-  const m = widgetModel(dateStr, events, plan, hourFloat, nameForEvent);
+  const m = widgetNext(dateStr, events, plan, now, nameForEvent);
 
-  const cols = w.addStack();
-  cols.spacing = 14;
+  const cap = w.addText(captionFor(m));
+  cap.font = Font.boldSystemFont(9);
+  cap.textColor = WCOL.faint;
+  w.addSpacer(8);
 
-  const left = cols.addStack();
-  left.layoutVertically();
-  const lcap = left.addText(m.dayLabel.toUpperCase());
-  lcap.font = Font.boldSystemFont(9);
-  lcap.textColor = WCOL.faint;
-  left.addSpacer(6);
-  const lbig = left.addText(m.first || '—');
-  lbig.font = Font.boldMonospacedSystemFont(19);
-  lbig.textColor = WCOL.ink;
-  lbig.lineLimit = 1;
-  lbig.minimumScaleFactor = 0.7;
-  left.addSpacer(4);
-  const lsub = left.addText(m.rest || '');
-  lsub.font = Font.regularSystemFont(11);
-  lsub.textColor = WCOL.dim;
-  lsub.lineLimit = 2;
-  lsub.minimumScaleFactor = 0.8;
+  if (m.mode === 'next' || m.mode === 'now') {
+    // A self-updating date view: iOS ticks the on-screen number by itself,
+    // with no widget refresh in between (see the module header). 'next'
+    // reads as a phrase ("in 1 hr, 25 min"); 'now' as a digital countdown
+    // to the end of the running class ("0:34:12") — both target `m.at`,
+    // an offset-less local ISO stamp `new Date()` parses as the phone's own
+    // local time (see mday.js's isoLocal).
+    const wd = w.addDate(new Date(m.at));
+    if (m.mode === 'next') wd.applyRelativeStyle();
+    else wd.applyTimerStyle();
+    wd.font = Font.boldSystemFont(32);
+    wd.textColor = WCOL.vio;
+    wd.lineLimit = 1;
+    wd.minimumScaleFactor = 0.6;
+    w.addSpacer(4);
+    const name = w.addText(m.name);
+    name.font = Font.semiboldSystemFont(17);
+    name.textColor = WCOL.ink;
+    name.lineLimit = 1;
+    name.minimumScaleFactor = 0.7;
+  } else if (m.mode === 'done') {
+    const left = m.total - m.doneCount;
+    const big = w.addText(left > 0 ? `${left} left` : 'All done for today ✓');
+    big.font = Font.semiboldSystemFont(21);
+    big.textColor = left > 0 ? WCOL.ink : WCOL.grn;
+    big.lineLimit = 2;
+    big.minimumScaleFactor = 0.75;
+  } else {
+    const big = w.addText('No classes today');
+    big.font = Font.semiboldSystemFont(21);
+    big.textColor = WCOL.ink;
+    big.lineLimit = 1;
+    big.minimumScaleFactor = 0.75;
+  }
 
-  cols.addSpacer();          // flexible: pushes DONE to the right column
+  w.addSpacer();          // flexible: pushes "then …" (+ the cache flag) to the bottom
 
-  const right = cols.addStack();
-  right.layoutVertically();
-  const rcap = right.addText('DONE');
-  rcap.font = Font.boldSystemFont(9);
-  rcap.textColor = WCOL.faint;
-  right.addSpacer(6);
-  const rrow = right.addStack();
-  const rbig = rrow.addText(String(m.done));
-  rbig.font = Font.boldMonospacedSystemFont(19);
-  rbig.textColor = WCOL.ink;
-  const rtot = rrow.addText(`/${m.total}`);
-  rtot.font = Font.mediumMonospacedSystemFont(14);
-  rtot.textColor = WCOL.faint;
-  right.addSpacer(4);
-  const rsub = right.addText(m.mama || '');
-  rsub.font = Font.regularSystemFont(11);
-  rsub.textColor = WCOL.dim;
-  rsub.lineLimit = 1;
-  rsub.minimumScaleFactor = 0.8;
+  if (m.rest.length) {
+    const rest = w.addText(`then ${m.rest.join(' · ')}`);
+    rest.font = Font.regularSystemFont(11);
+    rest.textColor = WCOL.dim;
+    rest.lineLimit = 2;
+    rest.minimumScaleFactor = 0.8;
+  }
 
   if (fromCache) {
-    w.addSpacer(8);
+    w.addSpacer(6);
     const c = w.addText('cached');
     c.font = Font.mediumSystemFont(8);
     c.textColor = WCOL.red;

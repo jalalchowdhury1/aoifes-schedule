@@ -400,3 +400,68 @@ export function widgetModel(dateStr, events, plan, hourFloat, nameForEvent) {
   const mama = header.mama ? `Mama: ${header.mama} day` : '';
   return { dayLabel, first, rest, done, total: items.length, mama };
 }
+
+// A local-time ISO-ish stamp with NO trailing offset/Z — the Date Time String
+// Format (ES2015+) parses a date-time form (has a "T") with no zone as LOCAL
+// time, so `new Date(isoLocal(...))` on the phone lands on the phone's own
+// clock, matching todayStr()/localHourFloat()'s existing "device clock only"
+// rule (see widget-ui.js's header comment). A date-ONLY string ("2026-08-31")
+// would parse as UTC instead — that's why the "T00:00:00" time part matters.
+function isoLocal(dateStr, hourFloat) {
+  let hh = Math.floor(hourFloat), mm = Math.round((hourFloat - hh) * 60);
+  if (mm === 60) { hh += 1; mm = 0; }
+  return `${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+}
+
+// ── widgetNext: what the redesigned widget actually draws — "hours/minutes
+// to the next class, its name, and a small line of what's left today"
+// (2026-08-31 redesign; widgetModel above is kept for compatibility but no
+// longer used by scripts/widget-ui.js). Deliberately COARSER than dayState:
+// picking the current/next timed block is TIME-ONLY off the day's `timed`
+// blocks (ignores any already-logged status on that same block — same as
+// dayState/the hero elsewhere — so a block backfilled with a status ahead of
+// its own clock time still counts as "next" until its start time actually
+// passes; see tests/plan-mday.test.mjs's 2026-08-30 08:00 case, where Ruhama
+// is already logged 'missed' yet is still the widget's "next" class at that
+// hour). 'rest', however, DOES drop anything already logged — that is the
+// one place "logged" matters here.
+//   'now'  — a timed block is running: countdown target = its end.
+//   'next' — a later timed block exists today: countdown target = its start.
+//   'done' — every timed block for the day is in the past (there WERE some)
+//            — independent of whether the day's dailies are logged yet; the
+//            "All done ✓" vs "N left" split is left to widget-ui.js off
+//            doneCount/total, not encoded in the mode.
+//   'none' — no timed blocks at all today (including an away day, where
+//            dayItems/buildTimed already empty out `timed`).
+export function widgetNext(dateStr, events, plan, now, nameForEvent) {
+  const hourFloat = now.getHours() + now.getMinutes() / 60;
+  const status = dayStatus(plan?.periods, dateStr);
+  const timed = status.away ? [] : buildTimed(dateStr, events, plan, nameForEvent)
+    .map(it => ({ ...it, status: statusOfTimed(plan, dateStr, it) }));
+  const dailies = (plan?.activities || []).filter(a =>
+    a && a.status === 'active' && a.type === 'paced' && !a.onGrid && dailyVisible(a, status));
+  const dailyItems = dailies.map(a => ({
+    key: `act:${a.id}`, kind: 'daily', activityId: a.id, name: a.name || a.id,
+    status: dailyStatus(a, plan?.log, dateStr),
+  }));
+  const total = timed.length + dailyItems.length;
+  const doneCount = [...timed, ...dailyItems].filter(it => it.status != null).length;
+  const unloggedDailies = dailyItems.filter(it => it.status == null).map(widgetName);
+
+  const current = timed.find(it => hourFloat >= it.start && hourFloat < it.end);
+  const anchor = current || timed.filter(it => it.start > hourFloat).sort((a, b) => a.start - b.start)[0];
+  if (anchor) {
+    const laterTimed = timed
+      .filter(it => it.start > anchor.start && it.status == null)
+      .sort((a, b) => a.start - b.start)
+      .map(widgetLabel);
+    const rest = [...laterTimed, ...unloggedDailies];
+    return current
+      ? { mode: 'now', name: widgetName(current), at: isoLocal(dateStr, current.end),
+          atLabel: fmtHM(current.end), rest, doneCount, total }
+      : { mode: 'next', name: widgetName(anchor), at: isoLocal(dateStr, anchor.start),
+          atLabel: fmtHM(anchor.start), rest, doneCount, total };
+  }
+  return { mode: timed.length ? 'done' : 'none', name: null, at: null, atLabel: null,
+    rest: unloggedDailies, doneCount, total };
+}
