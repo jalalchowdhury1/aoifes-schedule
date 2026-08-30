@@ -19,7 +19,7 @@ TZ = "America/New_York"
 CALENDAR_NAME = "Aoife's School"
 
 DESCRIPTION = (
-    "Synced from aoifes-schedule.vercel.app — do not edit here; "
+    "Synced from aoifes-schedule.vercel.app/m — do not edit here; "
     "edits will be overwritten nightly."
 )
 
