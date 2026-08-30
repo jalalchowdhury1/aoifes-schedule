@@ -13,7 +13,7 @@ import { sanitizePlan } from '../js/plan/model.js';
 import {
   dayItems, dayHeader, nowBlock, subjectCards, widgetModel, fmtHM,
   dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
-  EMOJI_MAP, EMOJI_FALLBACK,
+  EMOJI_MAP, EMOJI_FALLBACK, dayState, fieldClassFor, receipt,
 } from '../js/plan/mday.js';
 
 const events = JSON.parse(readFileSync(new URL('./fixtures/plan-mday-schedule.json', import.meta.url), 'utf8')).events;
@@ -277,6 +277,106 @@ test('colorFor: the three named subjects get their dot color, everything else ne
   assert.equal(colorFor('loe'), '#5ea3f2');
   assert.equal(colorFor('geography'), '#4cc9b0');
   assert.equal(colorFor('history'), '#9aa0b4');
+});
+
+// ── dayState / fieldClassFor (polish round 2, item A/G): the ONE function
+// behind both the Today hero and the field's state color ──────
+test('dayState: mid-block -> phase "now", agrees with nowBlock', () => {
+  const items = dayItems(MON, events, plan);
+  const ds = dayState(items, 11.5);
+  assert.equal(ds.phase, 'now');
+  assert.match(ds.item.name, /Ruhama/);
+  assert.equal(ds.minutesLeft, 90);
+  assert.equal(fieldClassFor(ds), 'day');
+});
+
+test('dayState: before the first block -> phase "next"', () => {
+  const items = dayItems(MON, events, plan);
+  const ds = dayState(items, 9);
+  assert.equal(ds.phase, 'next');
+  assert.equal(ds.item.name, 'Quran');
+  assert.equal(ds.minutesUntil, 60);
+  assert.equal(fieldClassFor(ds), 'day');
+});
+
+test('dayState: after the last block, everything answered -> phase "done" (green field), never an ISO-date caption bug', () => {
+  const logged = sanitizePlan({ ...rawPlan, log: [...rawPlan.log,
+    { date: MON, eventId: 'e1001', status: 'done', timed: true },
+    { date: MON, eventId: 'e1007', status: 'done', timed: true },
+    { date: MON, activityId: 'singapore', status: 'missed' },   // a MISS still counts as "answered"
+    { date: MON, activityId: 'loe', status: 'done', curriculum: 'loe-c', session: 5 }] });
+  const items = dayItems(MON, events, logged);
+  const ds = dayState(items, 14);
+  assert.equal(ds.phase, 'done');
+  assert.equal(ds.total, 4);
+  assert.equal(ds.answered, 4);
+  assert.equal(fieldClassFor(ds), 'done');
+});
+
+test('dayState: after the last block, something unanswered -> phase "left" with names, violet before 18:00', () => {
+  const logged = sanitizePlan({ ...rawPlan, log: [...rawPlan.log,
+    { date: MON, eventId: 'e1001', status: 'done', timed: true },
+    { date: MON, eventId: 'e1007', status: 'done', timed: true }] });
+  const items = dayItems(MON, events, logged);
+  const ds = dayState(items, 14);          // 2pm — before the late threshold
+  assert.equal(ds.phase, 'left');
+  assert.equal(ds.left, 2);
+  assert.deepEqual(ds.names.sort(), ['Logic of English', 'Singapore Math'].sort());
+  assert.equal(ds.late, false);
+  assert.equal(fieldClassFor(ds), 'day');
+});
+
+test('dayState: "left" past 18:00 -> late (amber field)', () => {
+  const items = dayItems(MON, events, plan);
+  const ds = dayState(items, 19);
+  assert.equal(ds.phase, 'left');
+  assert.equal(ds.late, true);
+  assert.equal(fieldClassFor(ds), 'late');
+});
+
+test('dayState: no loggable items at all -> phase "empty", never divides by zero into a false "done"', () => {
+  const ds = dayState([], 14);
+  assert.equal(ds.phase, 'empty');
+  assert.equal(ds.left, 0);
+  assert.equal(ds.total, 0);
+  assert.equal(fieldClassFor(ds), 'day');
+});
+
+test('nowBlock stays byte-compatible with dayState after the refactor (back-compat wrapper)', () => {
+  const items = dayItems(MON, events, plan);
+  assert.deepEqual(nowBlock(MON, items, 11.5), { state: 'now', item: dayState(items, 11.5).item, minutesLeft: 90 });
+});
+
+// ── receipt (polish round 2, item B): collapsed per-activity recap ──
+test('receipt: 2026-08-29 (real fixture) — Ruhama missed, Singapore L2 + L3, LoE Lesson 104', () => {
+  const rows = receipt('2026-08-29', events, plan);
+  const byName = Object.fromEntries(rows.map(r => [r.name, r]));
+  assert.equal(byName['Ruhama'].mark, '✗');
+  assert.equal(byName['Ruhama'].detail, '');
+  assert.equal(byName['Singapore'].mark, '✓');
+  assert.equal(byName['Singapore'].detail, 'L2 + L3');
+  assert.equal(byName['LoE'].mark, '✓');
+  assert.equal(byName['LoE'].detail, 'Lesson 104');
+});
+
+test('receipt: 2026-08-30 (real fixture) — Ruhama missed, LoE missed (marker, no detail), Singapore L4 + L5', () => {
+  const rows = receipt('2026-08-30', events, plan);
+  const byName = Object.fromEntries(rows.map(r => [r.name, r]));
+  assert.equal(byName['Ruhama'].mark, '✗');
+  assert.equal(byName['LoE'].mark, '✗');
+  assert.equal(byName['LoE'].detail, '');
+  assert.equal(byName['Singapore'].mark, '✓');
+  assert.equal(byName['Singapore'].detail, 'L4 + L5');
+});
+
+test('receipt: a day with nothing logged -> empty array (no empty line to render)', () => {
+  assert.deepEqual(receipt(MON, events, plan), []);
+});
+
+test('receipt: emoji/order — timed rows first (schedule order), then dailies', () => {
+  const rows = receipt('2026-08-30', events, plan);
+  assert.equal(rows[0].name, 'Ruhama');
+  assert.equal(rows[0].emoji, '✏️');
 });
 
 // ── buildTimed / statusOfTimed (the pieces today.js now reuses) ──

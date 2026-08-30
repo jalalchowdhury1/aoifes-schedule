@@ -6,14 +6,14 @@
 import { esc, fmt } from './model.js';
 import { store, initState, fetchRemote, catLabel } from './state.js';
 import {
-  initPlan, syncPlan, plan, onPlanChange, togglePaced, logTimed,
+  initPlan, syncPlan, plan, onPlanChange, togglePaced, logTimed, logDailyStatus,
 } from './plan/state.js';
 import {
   todayStr, addDays, mondayOf, dayStatus, currentCur, nextSession,
-  chainTimeline, planDeltaChip, actTotal, daysBetween,
+  chainTimeline, planDeltaChip, actTotal, daysBetween, dayIdx, isWorkDay,
+  actualFinishes,
 } from './plan/model.js';
-import { dayItems, dayHeader, nowBlock, subjectCards } from './plan/mday.js';
-import { yesterdayHtml } from './plan/today.js';
+import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt } from './plan/mday.js';
 import { syncedAt } from './sync.js';
 
 const $ = id => document.getElementById(id);
@@ -30,9 +30,10 @@ const nameForEvent = ev => ev.name || catLabel(ev.cat);
 const TK = 'aoife_mtab';
 const state = {
   tab: 'today',
-  weekDate: todayStr(),
+  weekStart: null,           // Monday of the visible week (Week tab); lazily set to this week
+  weekDate: todayStr(),      // the selected day within that week
   singaporeExtra: false,     // ➕ revealed for the current daily's NEXT lesson
-  statusPickKey: null,       // which timed row's "…" status picker is open
+  statusPickKey: null,       // which row's long-press status menu is open
   toastTimer: null,
   toastUndo: null,
   toastArmed: false,
@@ -84,17 +85,15 @@ function renderAll() {
 }
 
 // ── field state: violet in progress -> green all done -> amber late ──
+// Reads the SAME dayState() the Today hero renders from (mday.js) — one
+// function decides both, so the hero can never say "3 left" while the field
+// has already gone green (polish round 2, item G).
 function applyFieldState() {
   if (!plan.data) return;
   const today = todayStr();
   const items = dayItems(today, store.events, plan.data, nameForEvent);
-  // dayItems() only ever returns things the family is meant to log (timed
-  // blocks + visible no-slot dailies), so every item here already IS
-  // "loggable" — no further filter needed.
-  const allDone = items.length > 0 && items.every(it => it.status === 'done');
   const hourFloat = new Date().getHours() + new Date().getMinutes() / 60;
-  const late = !allDone && hourFloat >= 18 && items.some(it => it.status === undefined);
-  document.body.className = allDone ? 'done' : late ? 'late' : 'day';
+  document.body.className = fieldClassFor(dayState(items, hourFloat));
 }
 
 // ── top bar (normal <-> compact via IntersectionObserver) ────
@@ -201,20 +200,31 @@ function renderToday() {
 
   const items = dayItems(today, store.events, plan.data, nameForEvent);
   const hourFloat = new Date().getHours() + new Date().getMinutes() / 60;
-  const nb = nowBlock(today, items, hourFloat);
+  const ds = dayState(items, hourFloat);
 
+  // Hero (item A, polish round 2): "Right now" during a block, "Next" before
+  // one, and after the last block either a celebratory all-done line or the
+  // count + NAMES of what's still unlogged — never a raw ISO-date caption
+  // (header.dateLabel is always "Sun Aug 30"/the clock, per dayHeader).
   h += `<div class="glass hero">`;
-  if (nb.state === 'now') {
-    const pct = Math.max(0, Math.min(100, ((hourFloat - nb.item.start) / (nb.item.end - nb.item.start)) * 100));
+  if (ds.phase === 'now') {
+    const pct = Math.max(0, Math.min(100, ((hourFloat - ds.item.start) / (ds.item.end - ds.item.start)) * 100));
     h += `<div class="tiny">Right now · ${fmt(hourFloat)}</div>
-      <div class="big">${esc(nb.item.name)}</div>
-      <div class="pair"><span class="mono dim" style="font-size:13px">${fmt(nb.item.start)}–${fmt(nb.item.end)}</span><span class="rel">· ${fmtDur(nb.minutesLeft)} left</span></div>
+      <div class="big">${esc(ds.item.name)}</div>
+      <div class="pair"><span class="mono dim" style="font-size:13px">${fmt(ds.item.start)}–${fmt(ds.item.end)}</span><span class="rel">· ${fmtDur(ds.minutesLeft)} left</span></div>
       <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>`;
-  } else if (nb.state === 'next') {
-    h += `<div class="tiny">Next</div><div class="big">${fmt(nb.item.start)} ${esc(nb.item.name)}</div>
-      <div class="pair"><span class="rel">in ${fmtDur(nb.minutesUntil)}</span></div>`;
+  } else if (ds.phase === 'next') {
+    h += `<div class="tiny">Next</div><div class="big">${fmt(ds.item.start)} ${esc(ds.item.name)}</div>
+      <div class="pair"><span class="rel">in ${fmtDur(ds.minutesUntil)}</span></div>`;
+  } else if (ds.phase === 'done') {
+    h += `<div class="tiny">${esc(header.dateLabel)}</div>
+      <div class="big">All done for today 🎉 · ${ds.answered}/${ds.total}</div>`;
+  } else if (ds.phase === 'left') {
+    h += `<div class="tiny">${esc(header.dateLabel)}</div>
+      <div class="big">${ds.left} left</div>
+      <div class="pair"><span class="rel">${esc(ds.names.join(', '))}</span></div>`;
   } else {
-    h += `<div class="tiny">${today}</div><div class="big">${nb.left ? `${nb.left} left` : 'Day done 🎉'}</div>`;
+    h += `<div class="tiny">${esc(header.dateLabel)}</div><div class="big">Nothing scheduled</div>`;
   }
   h += `</div>`;
 
@@ -236,13 +246,34 @@ function renderToday() {
   }
 
   h += thisWeekCardHtml(today);
-  h += yesterdayHtml(addDays(today, -1));
+  h += yesterdayReceiptHtml(addDays(today, -1));
 
   el.innerHTML = h;
   wireTodayEvents(el, items, today);
   if (window.__mObserveHero) window.__mObserveHero();
 }
 
+// ── Yesterday receipt (item B, polish round 2) — collapsed per-activity
+// recap (mday.js's receipt()) instead of a raw one-line-per-tap dump, so
+// four Singapore Math taps read as "✓ Singapore L2 + L3", not four repeats
+// of the same name.
+function yesterdayReceiptHtml(dateStr) {
+  const h = dayHeader(dateStr, plan.data);
+  if (h.away) return `<div class="tmwrow">Yesterday: ${h.away.type === 'off' ? '⏸' : '✈'} ${esc(h.away.label)}</div>`;
+  const rows = receipt(dateStr, store.events, plan.data, nameForEvent);
+  if (!rows.length) return '';
+  const line = rows.map(r => `${r.mark} ${esc(r.name)}${r.detail ? ' ' + esc(r.detail) : ''}`).join(' · ');
+  return `<div class="tmwrow">Yesterday: ${line}</div>`;
+}
+
+// Item D (polish round 2): the "…" button is gone. Every row's ONLY status
+// control is the round check; a long-press on it (wireLongPress, ≥450ms)
+// opens a tiny inline menu instead. A faint chevron at the far right of
+// EVERY row hints that more exists — identical everywhere, so no one row
+// (Ruhama's old "…") looks singled out. The tb-wb daily's check stays
+// status-only (the dual textbook/workbook card below is what actually
+// advances it), but it now ALSO answers a long-press with "✗ skipped", so
+// a whole no-show Singapore day can be marked without touching that card.
 function itemRowHtml(it, dateStr) {
   const st = it.status;
   const time = it.kind === 'timed' ? `${fmt(it.start)}` : '—';
@@ -253,32 +284,64 @@ function itemRowHtml(it, dateStr) {
   })();
   const checkCls = st ? ` st-${st}` : '';
   const checkGlyph = st === 'done' ? '✓' : st === 'half' ? '◐' : st === 'partial' ? '◐' : st === 'missed' ? '✗' : '';
-  let actions;
+  let check;
   if (isTbWbDaily) {
-    // Not a toggle here — the dual textbook/workbook card below drives it.
-    actions = `<span class="chk${checkCls}" aria-hidden="true">${checkGlyph}</span>`;
+    check = `<button type="button" class="chk${checkCls}" data-tbwbcheck="${esc(it.key)}" aria-label="More options for ${esc(it.name)}">${checkGlyph}</button>`;
   } else if (it.kind === 'timed') {
-    actions = `<span class="ractions">
-      <button type="button" class="chk${checkCls}" data-check="${esc(it.key)}" aria-pressed="${st === 'done'}" aria-label="Mark ${esc(it.name)} done">${checkGlyph}</button>
-      <button type="button" class="more-btn" data-more="${esc(it.key)}" aria-label="More statuses for ${esc(it.name)}">…</button>
-    </span>`;
+    check = `<button type="button" class="chk${checkCls}" data-check="${esc(it.key)}" aria-pressed="${st === 'done'}" aria-label="Mark ${esc(it.name)} done">${checkGlyph}</button>`;
   } else {
-    actions = `<button type="button" class="chk${checkCls}" data-daily="${esc(it.activityId)}" aria-pressed="${st === 'done'}" aria-label="Toggle ${esc(it.name)}">${checkGlyph}</button>`;
+    check = `<button type="button" class="chk${checkCls}" data-daily="${esc(it.activityId)}" aria-pressed="${st === 'done'}" aria-label="Toggle ${esc(it.name)}">${checkGlyph}</button>`;
   }
   let row = `<div class="item" data-key="${esc(it.key)}">
     <span class="t mono">${it.kind === 'timed' ? esc(time) : '—'}</span>
     <span class="em" aria-hidden="true">${it.emoji}</span>
     <span class="n"><b>${esc(it.name)}</b>${it.note ? `<span>${esc(it.note)}</span>` : ''}</span>
-    ${actions}
+    <span class="ractions">${check}<i class="hintdot" aria-hidden="true">⌄</i></span>
   </div>`;
-  if (state.statusPickKey === it.key && it.kind === 'timed') {
-    row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
-      <button type="button" data-pickst="done" class="${st === 'done' ? 'sel' : ''}">✓ Done</button>
-      <button type="button" data-pickst="partial" class="${st === 'partial' ? 'sel' : ''}">◐ Didn't finish</button>
-      <button type="button" data-pickst="missed" class="${st === 'missed' ? 'sel' : ''}">✗ Missed</button>
-    </div>`;
+  if (state.statusPickKey === it.key) {
+    if (it.kind === 'timed') {
+      row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
+        <button type="button" data-pickst="partial" class="${st === 'partial' ? 'sel' : ''}">◐ Didn't finish</button>
+        <button type="button" data-pickst="missed" class="${st === 'missed' ? 'sel' : ''}">✗ Missed</button>
+      </div>`;
+    } else if (isTbWbDaily) {
+      row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
+        <button type="button" data-tbwbmiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>
+      </div>`;
+    } else {
+      row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
+        <button type="button" data-dailymiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>
+      </div>`;
+    }
   }
   return row;
+}
+
+// "3A Ch 1 · Numbers to 10,000" -> "3A Ch 1" (mday.js's own shortChainName
+// idiom, kept local here — one line, not worth a shared export for it).
+const shortChainName = c => String(c?.name || '').split('·')[0].trim();
+
+// Item F (polish round 2): a small pace line under the buttons —
+// "L6 · 2 of 22 sessions in 3A Ch 1 · ▲ 2 lessons ahead". The session count
+// is the chain's own raw done/lessons*2 (NOT subjectCards' lesson-fraction
+// numbers, which would read "2 of 22" as "1 of 11"); the ahead/behind figure
+// is in LESSONS, not weeks, via the exact plan-vs-now day gap the Subjects
+// sheet's own consequence sentence uses (chainTimeline + the frozen
+// baseline) — 1 extra lesson pulls the finish 1 day earlier.
+function tbWbPaceLine(act, cur, today) {
+  const sessDone = Math.min(Math.max(0, cur.done || 0), (cur.lessons || 0) * 2);
+  const sessTotal = (cur.lessons || 0) * 2;
+  let aheadTxt = '';
+  const rows = chainTimeline(act, today, plan.data);
+  const curRow = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
+  const base = act.baseline?.rows;
+  const baseDate = curRow && base ? base[curRow.key] : null;
+  if (curRow?.finish && baseDate) {
+    const dd = daysBetween(curRow.finish, baseDate);         // + = later (behind), - = earlier (ahead)
+    const gap = Math.round(Math.abs(dd));
+    if (gap) aheadTxt = ` · ${dd < 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd < 0 ? 'ahead' : 'behind'}`;
+  }
+  return `<div class="chline">L${Math.floor((cur.done || 0) / 2) + 1} · ${sessDone} of ${sessTotal} sessions in ${esc(shortChainName(cur))}${aheadTxt}</div>`;
 }
 
 function tbWbCardHtml(act, cur, item, today) {
@@ -295,6 +358,7 @@ function tbWbCardHtml(act, cur, item, today) {
       <button type="button" class="btn${nextIsWorkbook ? ' pri' : ''}" data-tbwb="${esc(act.id)}">✓ Workbook</button>
     </div>`;
   }
+  h += tbWbPaceLine(act, cur, today);
   h += `</div>`;
   return h;
 }
@@ -318,19 +382,52 @@ function thisWeekCardHtml(today) {
   return `<div class="psec">This week</div><div class="glass">${lines}</div>`;
 }
 
+// ── long-press (item D, polish round 2) ──────────────────────
+// Pointer Events only (works for touch AND a desktop mouse, e.g. testing in
+// a laptop browser): a short press fires `onTap` on release, a hold past
+// LONG_PRESS_MS fires `onLong` instead and swallows the release so it never
+// ALSO fires the tap. No native context menu, no text-selection callout —
+// this runs on a phone, not a right-click surface.
+const LONG_PRESS_MS = 450;
+function wireLongPress(btn, onTap, onLong) {
+  let timer = null, fired = false;
+  const clear = () => { clearTimeout(timer); timer = null; };
+  btn.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    fired = false;
+    timer = setTimeout(() => { fired = true; onLong(); }, LONG_PRESS_MS);
+  });
+  btn.addEventListener('pointerup', e => {
+    clear();
+    if (fired) { e.preventDefault(); return; }
+    onTap();
+  });
+  btn.addEventListener('pointercancel', clear);
+  btn.addEventListener('pointerleave', clear);
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+}
+
 function wireTodayEvents(el, items, today) {
-  el.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', () => {
+  el.querySelectorAll('[data-check]').forEach(b => {
     const it = items.find(x => x.key === b.dataset.check);
     if (!it) return;
-    logTimed(it.eventId || null, it.activityId || null, 'done');
-    state.statusPickKey = null;
-    showToast(`Logged ${esc(it.name)} ✓`, () => logTimed(it.eventId || null, it.activityId || null, 'done'));
-    renderAll();
-  }));
-  el.querySelectorAll('[data-more]').forEach(b => b.addEventListener('click', () => {
-    state.statusPickKey = state.statusPickKey === b.dataset.more ? null : b.dataset.more;
-    renderToday();
-  }));
+    wireLongPress(b,
+      () => {
+        logTimed(it.eventId || null, it.activityId || null, 'done');
+        state.statusPickKey = null;
+        showToast(`Logged ${esc(it.name)} ✓`, () => logTimed(it.eventId || null, it.activityId || null, 'done'));
+        renderAll();
+      },
+      () => { state.statusPickKey = state.statusPickKey === it.key ? null : it.key; renderToday(); });
+  });
+  el.querySelectorAll('[data-tbwbcheck]').forEach(b => {
+    const it = items.find(x => x.key === b.dataset.tbwbcheck);
+    if (!it) return;
+    // Short tap does nothing — status-only row, the dual card below is what
+    // actually advances it. Long-press still opens "✗ Skipped".
+    wireLongPress(b, () => {},
+      () => { state.statusPickKey = state.statusPickKey === it.key ? null : it.key; renderToday(); });
+  });
   el.querySelectorAll('[data-pickst]').forEach(b => b.addEventListener('click', () => {
     const wrap = b.closest('[data-pick-for]');
     const it = items.find(x => x.key === wrap.dataset.pickFor);
@@ -340,11 +437,23 @@ function wireTodayEvents(el, items, today) {
     showToast(`Logged ${esc(it.name)} ${b.dataset.pickst}`, () => logTimed(it.eventId || null, it.activityId || null, b.dataset.pickst));
     renderAll();
   }));
-  el.querySelectorAll('[data-daily]').forEach(b => b.addEventListener('click', () => {
-    togglePaced(b.dataset.daily);
-    showToast(`Logged ✓`, () => togglePaced(b.dataset.daily));
+  el.querySelectorAll('[data-tbwbmiss],[data-dailymiss]').forEach(b => b.addEventListener('click', () => {
+    const actId = b.dataset.tbwbmiss || b.dataset.dailymiss;
+    logDailyStatus(actId, 'missed', today);
+    state.statusPickKey = null;
+    showToast(`Marked skipped`, () => logDailyStatus(actId, 'missed', today));
     renderAll();
   }));
+  el.querySelectorAll('[data-daily]').forEach(b => {
+    const actId = b.dataset.daily;
+    wireLongPress(b,
+      () => {
+        togglePaced(actId);
+        showToast(`Logged ✓`, () => togglePaced(actId));
+        renderAll();
+      },
+      () => { state.statusPickKey = state.statusPickKey === `act:${actId}` ? null : `act:${actId}`; renderToday(); });
+  });
   el.querySelectorAll('[data-tbwb]').forEach(b => b.addEventListener('click', () => {
     const act = plan.data.activities.find(a => a.id === b.dataset.tbwb);
     const cur = act ? currentCur(act) : null;
@@ -360,55 +469,127 @@ function wireTodayEvents(el, items, today) {
   }));
 }
 
-// ── Week tab (read-only) ─────────────────────────────────────
+// ── Week tab (read-only; item E, polish round 2) ─────────────
+// Navigable week window (unlimited both directions — ‹ › buttons or a
+// horizontal swipe), a "This week" snap-back capsule when off the current
+// week, a per-day dot under each chip (green all-done/amber some-logged/
+// red-ish any-missed/none for empty or future), away days show ✈/⏸ in the
+// chip instead. A PAST selected day shows its collapsed receipt (mday.js's
+// receipt(), item B) instead of the plan list; today/future show the plan
+// list, same as before. The selected day is remembered only for the session.
+const WEEK_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function weekRangeLabel(start, end) {
+  const [ys, ms, ds] = start.split('-').map(Number);
+  const [ye, me, de] = end.split('-').map(Number);
+  const sameMonth = ys === ye && ms === me;
+  return `${WEEK_MON[ms - 1]} ${ds} – ${sameMonth ? de : `${WEEK_MON[me - 1]} ${de}`}`;
+}
+
+function dotClassFor(dateStr, today) {
+  if (dateStr > today) return null;
+  const items = dayItems(dateStr, store.events, plan.data, nameForEvent);
+  if (!items.length) return null;
+  if (items.some(it => it.status === 'missed')) return 'red';
+  if (items.every(it => it.status === 'done')) return 'grn';
+  if (items.some(it => it.status != null)) return 'amb';
+  return null;
+}
+
 function renderWeek() {
   const el = $('tab-week');
   if (!plan.data) { el.innerHTML = ''; return; }
   const today = todayStr();
-  const weekStart = mondayOf(today);
+  const curMon = mondayOf(today);
+  if (!state.weekStart) state.weekStart = curMon;
+  const weekStart = state.weekStart, weekEnd = addDays(weekStart, 6);
+  if (state.weekDate < weekStart || state.weekDate > weekEnd) state.weekDate = weekStart;
+  const isCurWeek = weekStart === curMon;
   const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  let chips = '<div class="daychips">';
+
+  const hasCycle = plan.data.activities.some(a => a && a.status === 'active' && a.rhythm?.kind === 'cycle');
+  const mamaTxt = hasCycle ? ` · Mama: ${isWorkDay(plan.data.parentCycle, weekStart) ? 'work' : 'home'}` : '';
+  let h = `<div class="wknav">
+    <button type="button" class="wkstep glass" data-wk="-1" aria-label="Previous week">‹</button>
+    <div class="wklabel"><b>${esc(weekRangeLabel(weekStart, weekEnd))}</b><span class="dim">${esc(mamaTxt)}</span></div>
+    <button type="button" class="wkstep glass" data-wk="1" aria-label="Next week">›</button>
+  </div>`;
+  if (!isCurWeek) h += `<button type="button" id="wk-today" class="cap vio wk-today-cap">This week</button>`;
+
+  h += '<div class="daychips">';
   for (let i = 0; i < 7; i++) {
     const d = addDays(weekStart, i);
     const dNum = Number(d.slice(-2));
-    chips += `<button type="button" class="daychip${d === state.weekDate ? ' on' : ''}${d === today ? ' today' : ''}" data-day="${d}"><b>${dNum}</b>${DOW[i]}</button>`;
+    const st = dayStatus(plan.data.periods, d);
+    const dotCls = st.away ? null : dotClassFor(d, today);
+    const mark = st.away ? `<i class="chipaway">${st.type === 'off' ? '⏸' : '✈'}</i>`
+      : dotCls ? `<i class="chipdot ${dotCls}"></i>` : '';
+    h += `<button type="button" class="daychip${d === state.weekDate ? ' on' : ''}${d === today ? ' today' : ''}" data-day="${d}"><b>${dNum}</b>${DOW[i]}${mark}</button>`;
   }
-  chips += '</div>';
+  h += '</div>';
 
-  const status = dayStatus(plan.data.periods, state.weekDate);
+  const sel = state.weekDate;
+  const status = dayStatus(plan.data.periods, sel);
   let body;
   if (status.away) {
     body = `<div class="glass away-banner">${status.type === 'off' ? '⏸' : '✈'} ${esc((status.label || '').replace(/[✈⏸]/g, '').trim() || (status.type === 'off' ? 'Off' : 'Time away'))} · day ${status.dayN} of ${status.total}</div>`;
+  } else if (sel < today) {
+    const rows = receipt(sel, store.events, plan.data, nameForEvent);
+    body = !rows.length ? `<div class="glass dim">Nothing logged.</div>`
+      : `<div class="glass">${rows.map(r => `<div class="item">
+      <span class="em" aria-hidden="true">${r.emoji}</span>
+      <span class="n"><b>${esc(r.name)}</b>${r.detail ? `<span>${esc(r.detail)}</span>` : ''}</span>
+      <span class="rcpt-mk">${r.mark}</span>
+    </div>`).join('')}</div>`;
   } else {
-    const items = dayItems(state.weekDate, store.events, plan.data, nameForEvent);
-    if (!items.length) body = `<div class="glass dim">Nothing scheduled.</div>`;
-    else body = `<div class="glass">${items.map(it => `<div class="item">
+    const items = dayItems(sel, store.events, plan.data, nameForEvent);
+    body = !items.length ? `<div class="glass dim">Nothing scheduled.</div>`
+      : `<div class="glass">${items.map(it => `<div class="item">
       <span class="t mono">${it.kind === 'timed' ? esc(fmt(it.start)) : '—'}</span>
       <span class="em" aria-hidden="true">${it.emoji}</span>
       <span class="n"><b>${esc(it.name)}</b>${it.note ? `<span>${esc(it.note)}</span>` : ''}</span>
     </div>`).join('')}</div>`;
   }
 
-  el.innerHTML = chips + body;
+  el.innerHTML = h + body;
+  wireWeekNav(el);
+}
+
+function shiftWeek(nWeeks) {
+  const idxInWeek = dayIdx(state.weekDate);
+  state.weekStart = addDays(state.weekStart, nWeeks * 7);
+  state.weekDate = addDays(state.weekStart, idxInWeek);
+  renderWeek();
+}
+
+function wireWeekNav(el) {
+  el.querySelectorAll('[data-wk]').forEach(b => b.addEventListener('click', () => shiftWeek(Number(b.dataset.wk))));
+  const t = $('wk-today');
+  if (t) t.addEventListener('click', () => { state.weekStart = mondayOf(todayStr()); state.weekDate = todayStr(); renderWeek(); });
   el.querySelectorAll('[data-day]').forEach(b => b.addEventListener('click', () => {
     state.weekDate = b.dataset.day;
     renderWeek();
   }));
-  wireWeekSwipe(el, weekStart);
+  wireWeekSwipe(el);
 }
 
-function wireWeekSwipe(el, weekStart) {
-  let startX = null;
-  el.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, { passive: true });
+// ≥40px horizontal, ignoring a vertical scroll: tracked via touchmove so a
+// gesture that moves mostly vertically never gets mistaken for a week swipe.
+function wireWeekSwipe(el) {
+  let startX = null, startY = null, horiz = false;
+  el.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY; horiz = false;
+  }, { passive: true });
+  el.addEventListener('touchmove', e => {
+    if (startX == null) return;
+    const dx = e.touches[0].clientX - startX, dy = e.touches[0].clientY - startY;
+    if (Math.abs(dx) > Math.abs(dy)) horiz = true;
+  }, { passive: true });
   el.addEventListener('touchend', e => {
     if (startX == null) return;
     const dx = e.changedTouches[0].clientX - startX;
     startX = null;
-    if (Math.abs(dx) < 40) return;
-    const idx = daysBetween(weekStart, state.weekDate);
-    const next = Math.max(0, Math.min(6, idx + (dx < 0 ? 1 : -1)));
-    state.weekDate = addDays(weekStart, next);
-    renderWeek();
+    if (!horiz || Math.abs(dx) < 40) return;
+    shiftWeek(dx < 0 ? 1 : -1);
   });
 }
 
@@ -552,7 +733,46 @@ function wireSheetInteractive(body, act) {
   });
 }
 
-// ── Year tab (read-only) ─────────────────────────────────────
+// ── Year tab (read-only; item C, polish round 2) ─────────────
+// Each chapter row: label (one line, ellipsis) left; a compact mono
+// "plan → now" date pair right (no year unless it differs from the plan
+// year; a complete row shows the log-attested actual date instead of a
+// projection, with a ✓), plus a small state chip. The current (in-progress)
+// row is highlighted, same "first not-complete row with sessions" idiom
+// subjects.js's own 📅 Timeline uses.
+const YEAR_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtCompactDate(iso, showYear) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${YEAR_MON[m - 1]} ${d}${showYear ? `, ${y}` : ''}`;
+}
+
+function yearRowHtml(r, base, actual, isCurrent) {
+  const planD = base ? base[r.key] : null;
+  const nowD = r.complete ? (actual[r.key] || null) : r.finish;
+  const planYear = planD ? planD.slice(0, 4) : null;
+  const nowYear = nowD ? nowD.slice(0, 4) : null;
+  let chip;
+  if (r.complete) chip = `<span class="ychip ok">✓</span>`;
+  else if (isCurrent) chip = `<span class="ychip cur">●</span>`;
+  else {
+    const delta = planD && nowD ? planDeltaChip(nowD, planD) : null;
+    chip = delta?.state === 'ahead' ? `<span class="ychip ahead">▲</span>`
+      : delta?.state === 'behind' ? `<span class="ychip behind">▼</span>`
+      : `<span class="ychip pend">—</span>`;
+  }
+  let dt;
+  if (r.complete) dt = nowD ? `✓ ${fmtCompactDate(nowD, true)}` : '✓';
+  else {
+    const planTxt = planD ? fmtCompactDate(planD, false) : '—';
+    const nowTxt = nowD ? fmtCompactDate(nowD, planYear !== nowYear) : '—';
+    dt = `${planTxt} → ${nowTxt}`;
+  }
+  return `<div class="ychrow${isCurrent ? ' cur' : ''}">
+    <span class="ynm" title="${esc(r.label)}">${esc(r.label)}</span>
+    <span class="ydt mono">${dt}</span>${chip}
+  </div>`;
+}
+
 function renderYear() {
   const el = $('tab-year');
   if (!plan.data) { el.innerHTML = ''; return; }
@@ -563,18 +783,24 @@ function renderYear() {
   if (next) {
     const label = String(next.label || '').replace(/[✈⏸]/g, '').trim() || (next.type === 'off' ? 'Off' : 'Time away');
     const days = daysBetween(today, next.start);
-    h += `<div class="glass trip-card"><div><div class="tiny">Next</div><div class="big" style="font-size:17px">${next.type === 'off' ? '⏸' : '✈'} ${esc(label)}</div><div class="dim" style="font-size:12px">${fmtDateShort(next.start)} – ${fmtDateShort(next.end)}</div></div><div class="rel dim">in ${days} day${days === 1 ? '' : 's'}</div></div>`;
+    h += `<div class="glass trip-card"><div class="tc-body">
+      <div class="tiny">Next</div>
+      <div class="tc-label">${next.type === 'off' ? '⏸' : '✈'} ${esc(label)}</div>
+      <div class="dim tc-dates">${fmtDateShort(next.start)} – ${fmtDateShort(next.end)}</div>
+    </div><span class="cap vio tc-days">in ${days} day${days === 1 ? '' : 's'}</span></div>`;
   }
 
   const acts = (plan.data.activities || []).filter(a => a.type === 'paced' && a.status === 'active' && actTotal(a) > 0);
   for (const a of acts) {
     const rows = chainTimeline(a, today, plan.data);
     const base = a.baseline?.rows;
+    const actual = actualFinishes(a, plan.data.log);
+    let curSeen = false;
     h += `<div class="psec">${esc(a.name)}</div><div class="glass">`;
     for (const r of rows.slice(0, 40)) {
-      const planD = base ? base[r.key] : null;
-      const state = r.complete ? '✓ done' : r.finish ? fmtDateShort(r.finish) : '—';
-      h += `<div class="tl-mini"><span class="nm">${esc(r.label)}</span><span class="dt">${planD ? `plan ${fmtDateShort(planD)} · ` : ''}${state}</span></div>`;
+      let isCurrent = false;
+      if (!curSeen && !r.complete && r.sessions > 0) { curSeen = true; isCurrent = true; }
+      h += yearRowHtml(r, base, actual, isCurrent);
     }
     h += `</div>`;
   }

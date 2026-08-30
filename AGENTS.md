@@ -522,29 +522,63 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   `uv run gcal-sync --dry-run` prints the plan and writes nothing — use it before
   any behavior change reaches the family's phones.
 
-## The iPhone app (/m) and the widget (2026-08-31)
+## The iPhone app (/m) and the widget (2026-08-31, polish round 2 2026-08-31)
 A phone-first PWA at `/m/` plus a Scriptable home-screen widget, both reading
 the SAME two blobs (`/api/get` + `/api/plan-get`) the desktop site does.
 Built from a one-shot brief (not a committed spec doc); the rules below are
 the parts worth keeping.
 
-- **One engine.** `js/plan/mday.js` (NEW, pure, ES module, Node-tested —
+- **One engine.** `js/plan/mday.js` (pure, ES module, Node-tested —
   tests/plan-mday.test.mjs) is the single source of "what does today look
-  like": `dayItems`, `dayHeader`, `nowBlock`, `subjectCards`, `widgetModel`.
-  today.js's `timedFor`/`statusOf`/`dailyVisible` are now thin wrappers
-  around mday.js's `buildTimed`/`statusOfTimed`/`dailyVisible` — ONE
-  implementation behind the desktop Today view, `/m`, AND the widget. The
-  desktop's existing behaviour is byte-identical (tests/plan-today.test.mjs
-  unchanged, still green). `dailyStatus` mirrors aoife-school-bot/lib/
-  compose.py's `item_status` (tb-wb needs BOTH halves of the SAME lesson
-  logged today) plus one addition the bot doesn't have: a `half` status
-  (only the textbook half logged) so the phone checkbox can show amber
-  instead of collapsing that into "nothing logged".
+  like": `dayItems`, `dayHeader`, `nowBlock`, `subjectCards`, `widgetModel`,
+  and (polish round 2) `dayState`/`fieldClassFor`/`receipt`. today.js's
+  `timedFor`/`statusOf`/`dailyVisible` are thin wrappers around mday.js's
+  `buildTimed`/`statusOfTimed`/`dailyVisible` — ONE implementation behind
+  the desktop Today view, `/m`, AND the widget. The desktop's existing
+  behaviour is byte-identical (tests/plan-today.test.mjs unchanged, still
+  green). `dailyStatus` mirrors aoife-school-bot/lib/compose.py's
+  `item_status` (tb-wb needs BOTH halves of the SAME lesson logged today)
+  plus one addition the bot doesn't have: a `half` status (only the
+  textbook half logged) so the phone checkbox can show amber instead of
+  collapsing that into "nothing logged".
+  - `dayState(items, hourFloat)` is the SINGLE function behind both the
+    Today hero and the field's state color, so they can never disagree
+    (`fieldClassFor(dayState(...))` maps its phase to `body.day/.done/
+    .late`). Phases: `now`/`next` (a timed block running/upcoming), `done`
+    (every loggable item has SOME status — done/partial/missed all count as
+    "answered", same as the bot's unlogged-items check), `left` (something
+    has no status; carries `left`/`names`/`late`), `empty` (nothing
+    loggable that day at all).
+  - `receipt(dateStr, events, plan, nameForEvent)` → `[{emoji, name, mark,
+    detail}]`, a COLLAPSED per-activity recap of a past date: a tb-wb
+    daily's textbook+workbook taps for the same lesson become one row
+    ("✓ Singapore L4 + L5" — every distinct lesson touched that day, not
+    one row per tap), a simple daily's session becomes "✓ LoE Lesson 104",
+    a timed block is its own row keyed off its own status. Feeds both the
+    Today "Yesterday" line and a tapped past day on Week.
 - **Write-path rule.** `/m` never writes to the log or KV directly — every
-  mutation goes through `togglePaced`/`logTimed` (js/plan/state.js), the
-  exact same functions the desktop Subjects/Today views and the Telegram bot
-  use. A tap shows a toast ("Logged L6 textbook ✓ · Undo"); Undo is two taps
-  (tap → "Really undo?" for 3s → tap again → the exact inverse call).
+  mutation goes through `togglePaced`/`logTimed`/`logDailyStatus`
+  (js/plan/state.js), the exact same functions the desktop Subjects/Today
+  views and the Telegram bot use (`logDailyStatus` is the one exception
+  that is NEW, not shared with the desktop — see the long-press bullet
+  below). A tap shows a toast ("Logged L6 textbook ✓ · Undo"); Undo is two
+  taps (tap → "Really undo?" for 3s → tap again → the exact inverse call).
+- **Long-press status menu (polish round 2).** Every row's ONLY status
+  control is the round check — the old lone "…" button (which made one row
+  look singled out) is gone. A faint chevron (`.hintdot`, opacity .35,
+  10px) at the far right of EVERY row hints that more exists, identically
+  everywhere. A long-press (≥450ms, Pointer Events, `wireLongPress` in
+  js/m.js, no context menu / no text-selection callout) on a row's check
+  opens a tiny inline capsule menu right under it: a timed row offers ◐
+  Didn't finish / ✗ Missed, a plain daily or the tb-wb daily (Singapore)
+  offers ✗ Skipped. A short tap still means quick ✓ (or, on the tb-wb
+  daily's status-only check, nothing — the dual textbook/workbook card
+  below is what advances it). The desktop has no daily-missed control at
+  all, so `logDailyStatus(actId, status, date)` (js/plan/state.js) is new:
+  it writes the Telegram bot's own marker shape exactly —
+  `{date, activityId, status}`, no `curriculum`/`session`/`timed`/
+  `eventId` — and is idempotent/toggling like togglePaced/logTimed
+  (tests/plan-state.test.mjs).
 - **The Singapore-style dual card** (any active daily whose current chain
   entry is `tb-wb`, not hardcoded to one id): the row's own check in "The
   day" list is NOT a toggle (status-only). Both "✓ Textbook" and "✓
@@ -577,19 +611,38 @@ the parts worth keeping.
   surface, not a market one (contrast nuts-radar, which is ET-anchored).
 - **State colors** (`body.day`/`body.done`/`body.late` in css/m.css, ported
   from nuts-radar's assets/m.css field-drift mechanic): violet while the day
-  is in progress, green when every item's status is exactly `'done'`, amber
-  once it's past 18:00 local and something still has NO status at all (a
-  `'missed'` mark is a recorded outcome, not "still open" — it does not
-  trigger amber).
+  is in progress OR something is still unlogged before 18:00, green once
+  `dayState`'s `done` phase is reached (every loggable item has SOME status
+  — a `'missed'` mark is a recorded outcome, not "still open", so it counts
+  same as a `'done'`), amber once `dayState`'s `left` phase is past 18:00
+  local with something still unanswered. (Corrected in polish round 2: an
+  earlier version of this note said green required every status to be
+  exactly `'done'` — that was never what the hero copy said, and `dayState`
+  is now the one place this is decided, so hero and field can't drift
+  apart again.)
+- **Week tab navigation (polish round 2).** No longer locked to the current
+  week: ‹ › glass buttons or a horizontal swipe (≥40px, touch-tracked so a
+  vertical scroll is never mistaken for a swipe) move the whole week,
+  unlimited both directions; a "This week" capsule appears whenever off the
+  current week and snaps back to it. Each day chip carries a 5px dot below
+  the date — green if every loggable item that day logged `'done'`, amber
+  if something logged but not everything, red-ish if anything is
+  `'missed'`, none for an empty or future day; an away day shows ✈/⏸ in
+  that slot instead. Tapping a PAST day shows its `receipt()` (collapsed,
+  same as Today's "Yesterday" line) instead of the plan list; today/future
+  still show the plan list. The selected day and week are session-only
+  (never written to localStorage) — same "remembered only this session"
+  rule as everything else view-local in `state` (js/m.js).
 - **What `/m` deliberately does NOT do**: no Manage (activate/park/cancel a
   subject, edit the chain, set travel mode, freeze a baseline — Subjects'
   sheet only offers the "oops, remove last logged session" undo plus a
   "Full site ↗" link out to `/`), no print (no print CSS on this page at
   all — printing is a separate, frozen surface), no editing the week grid
-  (Week tab is read-only, day chips + swipe, exactly what the family already
-  sees on the desktop's Day view). Phones do NOT auto-redirect to `/m/` in
-  v1 — Nabila uses the full site on her phone for Manage; the only link is
-  the desktop header's "📱 App" and `/m`'s own footer "Full site ↗".
+  (Week tab is read-only — navigable and receipt-aware since polish round
+  2, but a tap never writes anything, exactly like the desktop's Day view).
+  Phones do NOT auto-redirect to `/m/` in v1 — Nabila uses the full site on
+  her phone for Manage; the only link is the desktop header's "📱 App" and
+  `/m`'s own footer "Full site ↗".
 
 ## Env vars (Vercel project settings — names only, never values; repo is public)
 api/*.js read `KV_REST_API_URL`/`KV_REST_API_TOKEN` with fallback to

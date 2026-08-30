@@ -12,7 +12,7 @@ globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 globalThis.document = { dispatchEvent: () => {} };
 const S = await import('../js/plan/state.js');
-const { plan, initPlan, togglePaced, logTimed, addPeriod, updatePeriod, deletePeriod } = S;
+const { plan, initPlan, togglePaced, logTimed, logDailyStatus, addPeriod, updatePeriod, deletePeriod } = S;
 
 const curOf = (p, actId, curId) =>
   p.activities.find(a => a.id === actId).chain.find(c => c.id === curId);
@@ -170,6 +170,48 @@ test('logTimed: an override id logs as an eventId, toggles off, and refuses owne
   const before = snap(plan.data);
   logTimed(null, null, 'done', D);                    // no key at all -> nothing written
   assert.deepEqual(rows(), []);
+  assert.deepEqual(snap(plan.data), before);
+});
+
+// ── logDailyStatus: the phone's long-press "skipped" write (planner-v2.9,
+// item D) — the desktop has no daily-missed control, so this is new, not a
+// wrapper. Must write the bot's own marker shape and never touch a `done`
+// row that carries a `curriculum`.
+test('logDailyStatus: writes the bot\'s exact marker shape, toggles off on a repeat tap', () => {
+  initPlan();
+  const rows = () => plan.data.log.filter(e => e.date === D && e.activityId === 'loe');
+  logDailyStatus('loe', 'missed', D);
+  assert.deepEqual(rows(), [{ date: D, activityId: 'loe', status: 'missed' }]);
+  logDailyStatus('loe', 'missed', D);                 // same status again -> toggle off
+  assert.deepEqual(rows(), []);
+});
+
+test('logDailyStatus: a repeat tap with a DIFFERENT status overwrites in place, not a second row', () => {
+  initPlan();
+  logDailyStatus('loe', 'missed', D);
+  logDailyStatus('loe', 'partial', D);
+  const rows = plan.data.log.filter(e => e.date === D && e.activityId === 'loe');
+  assert.deepEqual(rows, [{ date: D, activityId: 'loe', status: 'partial' }]);
+});
+
+test('logDailyStatus: never matches (or clobbers) a real logged session row', () => {
+  initPlan();
+  togglePaced('loe', D);                              // a real, curriculum-bearing session log
+  const before = snap(plan.data);
+  logDailyStatus('loe', 'missed', D);
+  const rows = plan.data.log.filter(e => e.date === D && e.activityId === 'loe');
+  assert.equal(rows.length, 2);                        // the session row survives, untouched...
+  assert.ok(rows.some(r => r.status === 'done' && r.curriculum));
+  assert.ok(rows.some(r => r.status === 'missed' && !r.curriculum));  // ...plus the new marker
+  logDailyStatus('loe', 'missed', D);                 // toggling the marker off restores the session
+  assert.deepEqual(snap(plan.data), before);
+  assert.equal(plan.data.log.filter(e => e.date === D && e.activityId === 'loe').length, 1);
+});
+
+test('logDailyStatus: unknown activity id is a silent no-op', () => {
+  initPlan();
+  const before = snap(plan.data);
+  logDailyStatus('nonsense', 'missed', D);
   assert.deepEqual(snap(plan.data), before);
 });
 

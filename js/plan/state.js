@@ -168,6 +168,32 @@ export function logTimed(eventId, activityId, status, date = todayStr()) {
   commit();
 }
 
+// Mark a no-slot daily as an outright miss for a date (the phone's
+// long-press menu, planner-v2.9 polish round item D). The desktop Today view
+// has no daily-missed control at all — its `.drow` tap only ever calls
+// togglePaced, which can only ADVANCE the chain — so this is a genuinely new
+// write path, not a wrapper around an existing one. Writes EXACTLY the
+// Telegram bot's own marker shape (`callback_data(it.target, "missed", …)` in
+// aoife-school-bot/lib/compose.py): `{date, activityId, status}`, no
+// `curriculum`/`session`/`timed`/`eventId` — so mday.js's `dailyStatus`
+// (whose marker-priority read doesn't care which writer produced the row)
+// treats a phone-written and a bot-written miss identically. Idempotent like
+// togglePaced/logTimed: tapping the same status again on the same day clears
+// the mark instead of stacking a second one. The lookup excludes any row
+// carrying a `curriculum` — a real logged session must never be mistaken for
+// (or clobbered by) a bare status marker.
+export function logDailyStatus(actId, status, date = todayStr()) {
+  const act = getActivity(actId);
+  if (!act) return;
+  const match = e => e.activityId === actId && e.date === date &&
+    !e.timed && !e.eventId && !e.curriculum;
+  const i = plan.data.log.findIndex(match);
+  if (i >= 0 && plan.data.log[i].status === status) plan.data.log.splice(i, 1);
+  else if (i >= 0) plan.data.log[i].status = status;
+  else plan.data.log.push({ date, activityId: actId, status });
+  commit();
+}
+
 // ── Time away (day-precise periods) ─────────────────────────
 const isISO = s => typeof s === 'string' && ISO.test(s);
 const okType = t => (PERIOD_TYPES.includes(t) ? t : 'travel');

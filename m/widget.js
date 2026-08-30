@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 802ed8eff2 */
+ * build dfd25af499 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -862,6 +862,66 @@ function noteForDaily(cur) {
   return prefix ? `${prefix} · ${ns.label}` : ns.label;
 }
 
+// ── receipt: a short, COLLAPSED recap of what actually got logged on a past
+// date (planner-v2.9 polish round B) — the phone's "Yesterday" line and a
+// tapped past day on Week both read this instead of a raw one-row-per-tap
+// dump. A timed block is one row, keyed off its own logged status (no
+// collapsing needed — one block, one status). A no-slot daily COLLAPSES its
+// raw session taps: a tb-wb chain's textbook+workbook rows for the same
+// lesson become ONE line naming every distinct lesson touched that day
+// ("Singapore L2 + L3" — floor(session/2)+1 is the lesson number, same math
+// tbWbCardHtml already uses), a simple chain's rows become one line per
+// distinct session label (sessionLabel, the exact string year.js's
+// historyRows shows). A marker row (missed/partial, or a plain 'done' bump
+// with no curriculum) is its own mark-only line — same priority as
+// dailyStatus: a marker settles the whole day, so it wins over any session
+// rows logged alongside it. `nameForEvent` is passed straight through to
+// buildTimed (see its own comment) so a catLabels rename shows here too.
+const markFor = status => status === 'done' ? '✓' : status === 'half' || status === 'partial' ? '◐' : '✗';
+
+function receipt(dateStr, events, plan, nameForEvent) {
+  const out = [];
+  const timed = buildTimed(dateStr, events, plan, nameForEvent);
+  for (const it of timed) {
+    const st = statusOfTimed(plan, dateStr, it);
+    if (st == null) continue;
+    out.push({ emoji: it.emoji, name: widgetName(it), mark: markFor(st), detail: '' });
+  }
+
+  const byAct = new Map();
+  for (const e of plan?.log || []) {
+    if (!e || e.date !== dateStr || e.timed || e.eventId || e.activityId == null) continue;
+    if (!byAct.has(e.activityId)) byAct.set(e.activityId, []);
+    byAct.get(e.activityId).push(e);
+  }
+  for (const [actId, entries] of byAct) {
+    const act = (plan?.activities || []).find(a => a && a.id === actId);
+    if (!act) continue;
+    const nick = WIDGET_NICK[actId] || shortName(act.name || act.id);
+    const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
+    if (marker) { out.push({ emoji: emojiFor(actId), name: nick, mark: markFor(marker.status), detail: '' }); continue; }
+    const byChain = new Map();
+    for (const e of entries) {
+      if (!byChain.has(e.curriculum)) byChain.set(e.curriculum, []);
+      byChain.get(e.curriculum).push(e);
+    }
+    const details = [];
+    for (const [curId, es] of byChain) {
+      const cur = (act.chain || []).find(c => c && c.id === curId);
+      if (!cur) continue;
+      if (cur.pattern === 'tb-wb') {
+        const lessons = [...new Set(es.map(e => Math.floor((e.session ?? 0) / 2) + 1))].sort((a, b) => a - b);
+        details.push(lessons.map(n => `L${n}`).join(' + '));
+      } else {
+        const labels = [...new Set(es.map(e => sessionLabel(cur, e.session ?? 0)))];
+        details.push(labels.join(' + '));
+      }
+    }
+    out.push({ emoji: emojiFor(actId), name: nick, mark: '✓', detail: details.filter(Boolean).join(' · ') });
+  }
+  return out;
+}
+
 // ── dayItems: the whole day's list, timed first then no-slot dailies ──
 // `nameForEvent` (see buildTimed) is optional and passed straight through —
 // a caller with catLabels renames (js/m.js, the widget) can get the SAME
@@ -900,17 +960,56 @@ function dayHeader(dateStr, plan) {
   return { dateLabel, mama, away };
 }
 
-// ── nowBlock: the current timed item, or the next one, or "day done" ──
-function nowBlock(dateStr, items, hourFloat) {
+// ── dayState: the ONE function behind both the Today hero and the field's
+// state color (planner-v2.9 polish round) — "single source of truth" so a
+// hero that says "3 left" and a field that has already gone green can never
+// happen at once. Five phases:
+//   'now'   — inside a timed block: {item, minutesLeft}
+//   'next'  — before one: {item, minutesUntil}
+//   'done'  — after the last timed block (or an all-daily day) and every
+//             loggable item has SOME status — done/partial/missed all count
+//             as "answered", same as the bot's unlogged_items check: a
+//             recorded miss is not "still open". {answered, total}
+//   'left'  — after the last timed block, something has no status yet:
+//             {left, names, answered, total, late} — `late` is hourFloat>=18,
+//             carried here (not left to the caller) so the field color and
+//             the hero copy can never read the clock two different ways.
+//   'empty' — nothing loggable exists for the date at all (an away day with
+//             every daily paused, say): {left:0, total:0}
+function dayState(items, hourFloat) {
   const timed = (items || []).filter(it => it.kind === 'timed' && it.start != null && it.end != null);
   const current = timed.find(it => hourFloat >= it.start && hourFloat < it.end);
-  if (current) return { state: 'now', item: current,
+  if (current) return { phase: 'now', item: current,
     minutesLeft: Math.max(0, Math.round((current.end - hourFloat) * 60)) };
   const next = timed.filter(it => it.start > hourFloat).sort((a, b) => a.start - b.start)[0];
-  if (next) return { state: 'next', item: next,
+  if (next) return { phase: 'next', item: next,
     minutesUntil: Math.max(0, Math.round((next.start - hourFloat) * 60)) };
-  const left = (items || []).filter(it => !it.status).length;
-  return { state: 'after', item: null, left };
+  const all = items || [];
+  const total = all.length;
+  if (!total) return { phase: 'empty', left: 0, total: 0 };
+  const unlogged = all.filter(it => it.status == null);
+  const left = unlogged.length;
+  if (!left) return { phase: 'done', left: 0, total, answered: total };
+  return { phase: 'left', left, total, answered: total - left,
+    names: unlogged.map(it => it.name), late: hourFloat >= 18 };
+}
+
+// The field's body class (css/m.css body.day/.done/.late), derived from the
+// SAME dayState the hero reads — 'now'/'next'/an on-time 'left' all read as
+// "in progress" (violet); 'done' is green; only a LATE 'left' goes amber.
+function fieldClassFor(state) {
+  if (state.phase === 'done') return 'done';
+  if (state.phase === 'left' && state.late) return 'late';
+  return 'day';
+}
+
+// ── nowBlock: thin back-compat wrapper over dayState (kept for the
+// top-compact bar, which only ever wants "what's running/next") ──
+function nowBlock(dateStr, items, hourFloat) {
+  const ds = dayState(items, hourFloat);
+  if (ds.phase === 'now') return { state: 'now', item: ds.item, minutesLeft: ds.minutesLeft };
+  if (ds.phase === 'next') return { state: 'next', item: ds.item, minutesUntil: ds.minutesUntil };
+  return { state: 'after', item: null, left: ds.left };
 }
 
 // ── subjectCards: one card per PACED subject, in SUBJECT_ORDER ──
