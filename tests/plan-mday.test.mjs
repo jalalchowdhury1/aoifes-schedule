@@ -207,6 +207,25 @@ test('widgetModel: done counts items whose status is "done"', () => {
   assert.equal(w.total, 4);
 });
 
+test('widgetModel: a day with only ONE timed block never fabricates a time for the no-slot daily that lands in "rest"', () => {
+  // 2026-08-30 (Sunday) in the real fixture has exactly one timed block
+  // (Ruhama) — items[1] is a no-slot daily (Singapore), which has no
+  // `start`. Regression: this used to render "12:00 Singapore" (fmtHM(0)
+  // filling in for the missing start), inventing a time slot that does not
+  // exist. Caught verifying the live deploy against this exact real date.
+  const w = widgetModel('2026-08-30', events, plan, 8);
+  assert.doesNotMatch(w.rest, /^\d/, 'no leading digit — a daily gets no fabricated h:mm prefix');
+  assert.equal(w.rest, 'Singapore · then LoE');
+});
+
+test('widgetModel: a day with NO timed blocks at all never fabricates a time for "first" either', () => {
+  const allAway = sanitizePlan({ ...rawPlan,
+    periods: [{ id: 'pAway', start: '2026-08-30', end: '2026-08-30', type: 'travel', label: 'Trip' }] });
+  const w = widgetModel('2026-08-30', events, allAway, 8);
+  assert.doesNotMatch(w.first, /^\d/);
+  assert.equal(w.first, 'Singapore');   // only the reduced-travel daily survives
+});
+
 // ── fmtHM ─────────────────────────────────────────────────────
 test('fmtHM: h:mm, no am/pm suffix', () => {
   assert.equal(fmtHM(10), '10:00');

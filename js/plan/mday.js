@@ -247,18 +247,25 @@ const shortName = n => String(n || '').split('—')[0].trim() || String(n || '')
 const WIDGET_NICK = { singapore: 'Singapore', loe: 'LoE' };
 const widgetName = it => WIDGET_NICK[it.activityId] || shortName(it.name);
 
+// A daily (no-slot) item has no `start` — only a TIMED item earns the h:mm
+// prefix. Widget-model callers hit this for real: a day with 0 or 1 timed
+// blocks still has no-slot dailies in items[0]/items[1], and prefixing one
+// with a fabricated "12:00" (h=0 -> fmtHM(0)) would invent a time slot that
+// does not exist (caught 2026-08-31 verifying the live deploy against a real
+// Sunday with only one timed block).
+const widgetLabel = it => (it.kind === 'timed' ? `${fmtHM(it.start)} ${widgetName(it)}` : widgetName(it));
+
 export function widgetModel(dateStr, events, plan, hourFloat) {
   const items = dayItems(dateStr, events, plan);
   const header = dayHeader(dateStr, plan);
   const idx = dayIdx(dateStr);
   const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const dayLabel = `Today · ${DAYS_SHORT[idx]}`;
-  const first = items[0] ? `${fmtHM(items[0].start ?? 0)} ${widgetName(items[0])}`.trim() : '';
+  const first = items[0] ? widgetLabel(items[0]) : '';
   let rest = '';
   if (items[1]) {
     const restNames = items.slice(2).map(widgetName);
-    rest = `${fmtHM(items[1].start ?? 0)} ${widgetName(items[1])}` +
-      (restNames.length ? ` · then ${restNames.join(' + ')}` : '');
+    rest = widgetLabel(items[1]) + (restNames.length ? ` · then ${restNames.join(' + ')}` : '');
   }
   const done = items.filter(it => it.status === 'done').length;
   const mama = header.mama ? `Mama: ${header.mama} day` : '';
