@@ -80,6 +80,15 @@ via MutationObserver.
   activities[{id,type,status,cls,onGrid,slots,rhythm,travel,goal,target,note,chain[
   {id,name,pattern:'simple'|'tb-wb',firstUnit,lastUnit,lessons,tests,done,titles}]}],
   overrides[{date,action,...}], log[{date,activityId|eventId,status,...}]}
+- `rhythm.sessionsPerDay` (optional, default 1): sessions a teaching day
+  covers. Singapore Math = 2 (textbook + workbook are done the SAME day, one
+  lesson/day). weekCapacity multiplies its base by it; garbage values read as
+  1. Added 2026-08-30 after the walk projected May 2027 by silently assuming
+  one session a day; with it the book projects ~Dec 27 2026. Baseline
+  re-frozen the same day as-of 2026-08-28 (the real start, `done`=0) at this
+  pace — THAT is the target; extra lessons on a day move the live date up and
+  read as "ahead", the pace itself never changes. Mirrored in
+  aoife-school-bot/lib/compose.py `week_capacity` (parity tests both sides).
 - Overrides may carry `{id, name, src}` written by the Telegram bot
   (aoife-school-bot); an override's id doubles as the eventId in log entries.
   `logTimed` refuses ownerless writes; `statusOf` requires a non-null key.

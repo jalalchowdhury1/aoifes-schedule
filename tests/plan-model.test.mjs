@@ -286,6 +286,21 @@ test('weekCapacity: rhythms × away days', () => {
   assert.equal(weekCapacity(SM, '2026-08-17', undefined, CYC), 7);
 });
 
+test('weekCapacity: rhythm.sessionsPerDay multiplies the base (Singapore = 1 lesson/day = 2 sessions)', () => {
+  const SM2 = { ...SM, rhythm: { kind: 'daily', sessionsPerDay: 2 } };
+  assert.equal(weekCapacity(SM2, '2026-08-17', [], CYC), 14);             // 7 days × 2
+  assert.equal(weekCapacity(SM2, '2027-01-04', JAN_TRIP, CYC), 7);        // reduced ×0.5 still applies
+  const off = [{ id: 'p9', start: '2026-08-17', end: '2026-08-19', type: 'off' }];
+  assert.equal(weekCapacity(SM2, '2026-08-17', off, CYC), 8);             // 4 days × 2
+  // Garbage values read as 1 — never 0, never NaN.
+  for (const bad of [0, -3, 'x', null, NaN, Infinity])
+    assert.equal(weekCapacity({ ...SM, rhythm: { kind: 'daily', sessionsPerDay: bad } }, '2026-08-17', [], CYC), 7, String(bad));
+  // The finish moves up by ~half: 134 sessions at 14/wk ≈ 10 wks vs ≈ 20 wks at 7/wk.
+  const slow = projectFinish(SM, '2026-08-31', { periods: [], parentCycle: CYC });
+  const fast = projectFinish(SM2, '2026-08-31', { periods: [], parentCycle: CYC });
+  assert.equal(slow.weeks, 20); assert.equal(fast.weeks, 10);
+});
+
 test('weekCapacity: a 3-day trip inside a home week scales the cycle base by 4/7', () => {
   const trip = [{ id: 'p9', start: '2026-08-26', end: '2026-08-28', type: 'travel' }];
   const cap = weekCapacity(LOE, '2026-08-24', trip, CYC);                 // home week, LoE pauses

@@ -435,7 +435,16 @@ export function weekCapacity(act, weekStart, periods, cycle) {
   else if (r.kind === 'weekly') base = r.perWeek || 1;
   else if (r.kind === 'cycle') base = isOnWeek(cycle, weekStart) ? (r.perOnWeek ?? 1) : (r.perOffWeek ?? 2.5);
   if (!base) return 0;
-  return base * effectiveDaysInWeek(act, weekStart, periods) / 7;
+  // Sessions per teaching day (default 1). Singapore Math is a tb-wb chain
+  // where ONE lesson = TWO sessions (textbook + workbook) and the family does
+  // both halves the same day, so its rhythm carries `sessionsPerDay: 2` —
+  // without it the walk silently assumed textbook one day, workbook the next
+  // and projected the finish ~4 months late (2026-08-30 user report). A
+  // non-positive/non-finite value reads as 1, never 0 (a typo must not make a
+  // subject unprojectable). Mirrored in aoife-school-bot/lib/compose.py.
+  const perDay = Number(r.sessionsPerDay);
+  const mult = Number.isFinite(perDay) && perDay > 0 ? perDay : 1;
+  return base * mult * effectiveDaysInWeek(act, weekStart, periods) / 7;
 }
 
 // Walk weeks forward until remaining sessions are covered. null = can't project.
