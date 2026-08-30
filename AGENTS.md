@@ -597,7 +597,7 @@ the parts worth keeping.
   (tests/plan-widget.test.mjs pins bundle hygiene + build determinism +
   the exact `widgetModel` strings the layout consumes). Edit the sources —
   `js/plan/mday.js` above all — and rebuild.
-- **Loader** (paste into a new Scriptable script named "Aoife", then add a
+- **Loader** (paste into a new Scriptable script named "Aoife's Schedule", then add a
   medium Scriptable widget to the home screen pointed at it):
   ```js
   (async () => {
