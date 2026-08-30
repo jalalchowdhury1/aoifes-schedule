@@ -4,7 +4,7 @@
 // (js/plan/state.js) — never a direct log/KV write, same rule as the rest
 // of the planner.
 import { esc, fmt } from './model.js';
-import { store, initState, fetchRemote } from './state.js';
+import { store, initState, fetchRemote, catLabel } from './state.js';
 import {
   initPlan, syncPlan, plan, onPlanChange, togglePaced, logTimed,
 } from './plan/state.js';
@@ -17,6 +17,14 @@ import { yesterdayHtml } from './plan/today.js';
 import { syncedAt } from './sync.js';
 
 const $ = id => document.getElementById(id);
+
+// Same name resolution today.js's timedFor uses (evLabel: name || the
+// catLabels-aware category rename) — dayItems/buildTimed default to the
+// plain CATS label when no resolver is given, which would silently ignore a
+// family rename (e.g. catLabels.barakot = "Mama Classes") that the desktop
+// Today view honors. Passed to every dayItems() call below so /m never
+// disagrees with the desktop about what a renamed category is called.
+const nameForEvent = ev => ev.name || catLabel(ev.cat);
 
 // ── view-local state (never persisted, except the last tab) ─
 const TK = 'aoife_mtab';
@@ -79,11 +87,13 @@ function renderAll() {
 function applyFieldState() {
   if (!plan.data) return;
   const today = todayStr();
-  const items = dayItems(today, store.events, plan.data);
-  const loggable = items.filter(it => it.kind === 'timed' || it.note || it.status !== undefined || true);
-  const allDone = loggable.length > 0 && loggable.every(it => it.status === 'done');
+  const items = dayItems(today, store.events, plan.data, nameForEvent);
+  // dayItems() only ever returns things the family is meant to log (timed
+  // blocks + visible no-slot dailies), so every item here already IS
+  // "loggable" — no further filter needed.
+  const allDone = items.length > 0 && items.every(it => it.status === 'done');
   const hourFloat = new Date().getHours() + new Date().getMinutes() / 60;
-  const late = !allDone && hourFloat >= 18 && loggable.some(it => it.status === undefined);
+  const late = !allDone && hourFloat >= 18 && items.some(it => it.status === undefined);
   document.body.className = allDone ? 'done' : late ? 'late' : 'day';
 }
 
@@ -110,7 +120,7 @@ function wireCompactBar() {
       $('top-compact').hidden = !out;
       if (out && plan.data) {
         const today = todayStr();
-        const items = dayItems(today, store.events, plan.data);
+        const items = dayItems(today, store.events, plan.data, nameForEvent);
         const done = items.filter(it => it.status === 'done').length;
         const nb = nowBlock(today, items, new Date().getHours() + new Date().getMinutes() / 60);
         $('top-frac').textContent = `${done}/${items.length} done`;
@@ -189,7 +199,7 @@ function renderToday() {
     h += `<div class="glass away-banner">${status.type === 'off' ? '⏸' : '✈'} ${esc(header.away.label)} · day ${status.dayN} of ${status.total}</div>`;
   }
 
-  const items = dayItems(today, store.events, plan.data);
+  const items = dayItems(today, store.events, plan.data, nameForEvent);
   const hourFloat = new Date().getHours() + new Date().getMinutes() / 60;
   const nb = nowBlock(today, items, hourFloat);
 
@@ -370,7 +380,7 @@ function renderWeek() {
   if (status.away) {
     body = `<div class="glass away-banner">${status.type === 'off' ? '⏸' : '✈'} ${esc((status.label || '').replace(/[✈⏸]/g, '').trim() || (status.type === 'off' ? 'Off' : 'Time away'))} · day ${status.dayN} of ${status.total}</div>`;
   } else {
-    const items = dayItems(state.weekDate, store.events, plan.data);
+    const items = dayItems(state.weekDate, store.events, plan.data, nameForEvent);
     if (!items.length) body = `<div class="glass dim">Nothing scheduled.</div>`;
     else body = `<div class="glass">${items.map(it => `<div class="item">
       <span class="t mono">${it.kind === 'timed' ? esc(fmt(it.start)) : '—'}</span>
@@ -499,9 +509,20 @@ function consequenceSentence(dd) {
   return `She's <b>${gap} lesson${gap === 1 ? '' : 's'} ${dir}</b> the plan. Every extra lesson pulls the finish 1 day ${verb}; ${more} more and the card reads <b>${arrow} ${weeksNow + 1} wk ${ahead ? 'ahead' : 'behind'}</b>.`;
 }
 
+// Only a status:'done' row is something togglePaced can actually undo — it
+// finds-and-removes exactly that shape (js/plan/state.js). A 'missed' marker
+// (the bot's ✗ skip button writes one for a no-slot daily too) is a DIFFERENT
+// kind of row: feeding its date to togglePaced would find no 'done' entry
+// there and fall into the ELSE branch, silently LOGGING A NEW SESSION instead
+// of removing anything. So "last logged session" here means the same thing
+// togglePaced means by it: the latest 'done' row, never a missed marker.
+export function lastDoneEntry(act) {
+  return [...plan.data.log].reverse().find(e =>
+    e && e.activityId === act.id && e.status === 'done' && !e.timed && !e.eventId);
+}
+
 function oopsRowHtml(act) {
-  const last = [...plan.data.log].reverse().find(e =>
-    e && e.activityId === act.id && !e.timed && !e.eventId);
+  const last = lastDoneEntry(act);
   if (!last) return '';
   const label = last.label || (last.curriculum ? sessionLabelFor(act, last) : 'the last logged session');
   return `<div class="oops-row" data-oops="${esc(act.id)}" data-oops-armed="0">
@@ -524,7 +545,7 @@ function wireSheetInteractive(body, act) {
       btn.textContent = 'Tap again to remove it';
       return;
     }
-    const last = [...plan.data.log].reverse().find(e => e && e.activityId === act.id && !e.timed && !e.eventId);
+    const last = lastDoneEntry(act);
     if (last) togglePaced(act.id, last.date);
     closeSheet();
     renderAll();

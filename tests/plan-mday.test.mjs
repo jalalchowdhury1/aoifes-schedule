@@ -51,6 +51,16 @@ test('dayItems: Mon Aug 31 — 4 items, timed first (Quran, Ruhama) then no-slot
   assert.equal(loe.status, undefined);
 });
 
+test('dayItems: an optional nameForEvent resolver overrides the default (catLabels renames, js/m.js + the widget)', () => {
+  // Regression: dayItems used to call buildTimed with no resolver at all, so
+  // any caller other than today.js's own timedFor (which passes evLabel)
+  // silently lost catLabels renames — /m and the widget would show the plain
+  // CATS default label even when the family renamed the category.
+  const items = dayItems(MON, events, plan, ev => `RENAMED ${ev.cat}`);
+  const quran = items.find(it => it.eventId != null && it.start === 10);
+  assert.equal(quran.name, 'RENAMED quran');
+});
+
 test('dayItems: away day — timed blocks vanish, dailies still filtered by dailyVisible', () => {
   const away = sanitizePlan({ ...rawPlan,
     periods: [{ id: 'pX', start: MON, end: MON, type: 'travel', label: 'Trip' }] });
@@ -197,6 +207,12 @@ test('widgetModel: Mon Aug 31 — the exact strings the widget renders', () => {
   assert.equal(w.done, 0);
   assert.equal(w.total, 4);
   assert.equal(w.mama, 'Mama: work day');
+});
+
+test('widgetModel: an optional nameForEvent resolver renames the timed strings ("first"/"rest") the widget draws', () => {
+  const w = widgetModel(MON, events, plan, 8, () => 'Renamed');
+  assert.equal(w.first, '10:00 Renamed');
+  assert.equal(w.rest, '11:00 Renamed · then Singapore + LoE');
 });
 
 test('widgetModel: done counts items whose status is "done"', () => {

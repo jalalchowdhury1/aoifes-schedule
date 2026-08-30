@@ -6,7 +6,7 @@
 // Everything numeric/text comes from mday.js's widgetModel/sanitizePlan/
 // todayStr — this file only fetches the two blobs and draws.
 /* global Request, ListWidget, FileManager, Script, Color, Font, LinearGradient, config */
-/* global sanitizePlan, todayStr, widgetModel */
+/* global sanitizePlan, todayStr, widgetModel, CATS */
 
 const APP_BASE = 'https://aoifes-schedule.vercel.app';
 
@@ -77,7 +77,13 @@ async function makeWidget() {
   const dateStr = todayStr();
   const hourFloat = localHourFloat(now);
   const events = Array.isArray(data.schedule?.events) ? data.schedule.events : [];
-  const m = widgetModel(dateStr, events, plan, hourFloat);
+  // Same catLabels-aware name resolution the app's own evLabel (js/state.js)
+  // uses, so a renamed category (e.g. catLabels.barakot = "Mama Classes")
+  // reads the same on the widget as it does on the desktop and /m — CATS
+  // comes from js/model.js, bundled ahead of this file by build-widget.mjs.
+  const catLabels = data.schedule?.catLabels || {};
+  const nameForEvent = ev => ev.name || catLabels[ev.cat] || CATS[ev.cat]?.label || 'Event';
+  const m = widgetModel(dateStr, events, plan, hourFloat, nameForEvent);
 
   const cols = w.addStack();
   cols.spacing = 14;

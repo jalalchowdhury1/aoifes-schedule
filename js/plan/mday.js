@@ -137,9 +137,13 @@ function noteForDaily(cur) {
 }
 
 // ── dayItems: the whole day's list, timed first then no-slot dailies ──
-export function dayItems(dateStr, events, plan) {
+// `nameForEvent` (see buildTimed) is optional and passed straight through —
+// a caller with catLabels renames (js/m.js, the widget) can get the SAME
+// renamed names the desktop Today view shows; without it the plain
+// CATS-default label is used, same as before this parameter existed.
+export function dayItems(dateStr, events, plan, nameForEvent) {
   const status = dayStatus(plan?.periods, dateStr);
-  const timed = status.away ? [] : buildTimed(dateStr, events, plan)
+  const timed = status.away ? [] : buildTimed(dateStr, events, plan, nameForEvent)
     .map(it => ({ ...it, status: statusOfTimed(plan, dateStr, it) }));
   const dailies = (plan?.activities || []).filter(a =>
     a && a.status === 'active' && a.type === 'paced' && !a.onGrid && dailyVisible(a, status));
@@ -255,8 +259,8 @@ const widgetName = it => WIDGET_NICK[it.activityId] || shortName(it.name);
 // Sunday with only one timed block).
 const widgetLabel = it => (it.kind === 'timed' ? `${fmtHM(it.start)} ${widgetName(it)}` : widgetName(it));
 
-export function widgetModel(dateStr, events, plan, hourFloat) {
-  const items = dayItems(dateStr, events, plan);
+export function widgetModel(dateStr, events, plan, hourFloat, nameForEvent) {
+  const items = dayItems(dateStr, events, plan, nameForEvent);
   const header = dayHeader(dateStr, plan);
   const idx = dayIdx(dateStr);
   const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
