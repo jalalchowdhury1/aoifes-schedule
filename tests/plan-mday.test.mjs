@@ -280,16 +280,12 @@ test('widgetNext: Mon Aug 31 12:00 — now Ruhama until 1:00, rest drops Ruhama 
   assert.equal(r.total, 5);
 });
 
-test('widgetNext: Mon Aug 31 17:30 — done (every timed block is over), rest is just the unlogged dailies', () => {
-  const r = widgetNext(MON, events, plan, new Date(2026, 7, 31, 17, 30));
-  assert.equal(r.mode, 'done');
-  assert.equal(r.name, null);
-  assert.equal(r.at, null);
-  assert.equal(r.atLabel, null);
-  assert.deepEqual(r.rest, ['Singapore', 'LoE']);
-  assert.equal(r.doneCount, 0);
-  assert.equal(r.total, 5);
-});
+// NOTE: "Mon Aug 31 17:30 -> mode 'done'" is no longer the real widgetNext
+// contract — the 2026-09-01 look-ahead addition means 17:30 (every timed
+// block over) now finds Tuesday's Ruhama instead; see the "today is done,
+// look ahead lands on Tue Sep 1's Ruhama" test in the look-ahead section
+// below, which covers this exact moment. The raw pre-look-ahead 'done'/
+// 'none' shape is still covered by the 14-day-cap-exceeded test there.
 
 test('widgetNext: Sun Aug 30 08:00 — next Ruhama at 11:00 even though it\'s already logged "missed" (time-only anchor, not status-filtered); rest is empty because both dailies are already logged for that date', () => {
   // Real fixture log for 2026-08-30: e1009 (Ruhama) logged 'missed', loe
@@ -308,6 +304,60 @@ test('widgetNext: Sun Aug 30 08:00 — next Ruhama at 11:00 even though it\'s al
   assert.deepEqual(r.rest, []);
   assert.equal(r.doneCount, 3);
   assert.equal(r.total, 3);
+});
+
+// ── widgetNext look-ahead (2026-09-01 addition): once today's own timed
+// blocks are done (or there were none), walk forward up to 14 days for the
+// next scheduled class — still mode 'next', now dated later — instead of
+// flatly reporting 'done'/'none' for the rest of the day. ──────
+test('widgetNext: Mon Aug 31 17:30 — today is done, look ahead lands on Tue Sep 1\'s Ruhama (11:00), rest is Tuesday\'s remaining schedule (the "Science trial" bot override + Miss Hala + the dailies)', () => {
+  const r = widgetNext(MON, events, plan, new Date(2026, 7, 31, 17, 30));
+  assert.equal(r.mode, 'next');
+  assert.equal(r.name, 'Ruhama');
+  assert.equal(r.atLabel, 'Tue 11:00');
+  assert.equal(r.at, '2026-09-01T11:00:00');
+  assert.deepEqual(r.rest, ['12:00 Science trial', '2:00 Miss Hala', 'Singapore', 'LoE']);
+  // doneCount/total still describe TODAY (Mon), not the future day being previewed.
+  assert.equal(r.doneCount, 0);
+  assert.equal(r.total, 5);
+});
+
+test('widgetNext: Sun Aug 30 20:00 — no more classes today (past Ruhama, already logged), look ahead lands on tomorrow (Mon) Quran 10:00', () => {
+  const r = widgetNext(TODAY, events, plan, new Date(2026, 7, 30, 20, 0));
+  assert.equal(r.mode, 'next');
+  assert.equal(r.name, 'Quran');
+  assert.equal(r.atLabel, 'Mon 10:00');            // weekday format, pinned (not "Tomorrow 10:00")
+  assert.equal(r.at, '2026-08-31T10:00:00');
+  assert.deepEqual(r.rest, ['11:00 Ruhama', '4:00 Jiu Jitsu', 'Singapore', 'LoE']);
+});
+
+test('widgetNext: a date inside the Jan/Feb trip period walks straight through it — a visible reduced-travel daily never counts as "found", only a TIMED block does — landing on the first class after the trip ends', () => {
+  // Real fixture period p1: 2027-01-04..2027-02-07 (travel). 2027-01-25 is a
+  // Monday INSIDE the trip, so today's own timed=[] (away). Singapore
+  // (travel.mode 'reduced') stays VISIBLE as a daily on every trip day —
+  // dayItems('2027-01-26', ...) proves that below — but the look-ahead loop
+  // only accepts `kind === 'timed'`, so it must walk past every trip day
+  // (including that visible daily) and land on 2027-02-08 (Monday, the day
+  // after the trip ends), exactly 14 days out — the loop's own cap boundary.
+  const insideTrip = dayItems('2027-01-26', events, plan);
+  assert.deepEqual(insideTrip.map(it => it.kind), ['daily']);
+  assert.equal(insideTrip[0].activityId, 'singapore');
+
+  const r = widgetNext('2027-01-25', events, plan, new Date(2027, 0, 25, 8, 0));
+  assert.equal(r.mode, 'next');
+  assert.equal(r.name, 'Quran');
+  assert.equal(r.atLabel, 'Mon 10:00');
+  assert.equal(r.at, '2027-02-08T10:00:00');
+  assert.deepEqual(r.rest, ['11:00 Ruhama', '4:00 Jiu Jitsu', 'Singapore', 'LoE']);
+});
+
+test('widgetNext: nothing found within the 14-day cap falls back to the plain \'done\'/\'none\' rendering', () => {
+  const emptyPlan = sanitizePlan({ version: 1, activities: [], overrides: [], log: [], periods: [] });
+  const r = widgetNext(MON, [], emptyPlan, new Date(2026, 7, 31, 17, 30));
+  assert.equal(r.mode, 'none');
+  assert.equal(r.name, null);
+  assert.equal(r.at, null);
+  assert.deepEqual(r.rest, []);
 });
 
 // ── fmtHM ─────────────────────────────────────────────────────

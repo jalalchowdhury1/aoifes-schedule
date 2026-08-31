@@ -11,8 +11,12 @@
 // The big number is a live-ticking Scriptable date view (`addDate` +
 // `applyRelativeStyle`/`applyTimerStyle`) so it counts down on its own,
 // second by second, with NO widget refresh needed in between.
+// 2026-09-01 addition: once today's own timed blocks are done (or there
+// were none), widgetNext looks AHEAD for the next scheduled class — still
+// mode 'next', just dated later — so the caption needs to say which day
+// that is ("NEXT · TOMORROW" / "NEXT · TUE") instead of "NEXT CLASS".
 /* global Request, ListWidget, FileManager, Script, Color, Font, LinearGradient, config */
-/* global sanitizePlan, todayStr, widgetNext, CATS */
+/* global sanitizePlan, todayStr, widgetNext, daysBetween, CATS */
 
 const APP_BASE = 'https://aoifes-schedule.vercel.app';
 
@@ -24,9 +28,18 @@ const WCOL = {
 
 // Top-left tiny caption per widgetNext's mode — 'now' deliberately keeps
 // "until" lowercase (the approved copy is "NOW · until 1:00", not shouted).
-function captionFor(m) {
-  if (m.mode === 'next') return 'NEXT CLASS';
+// For a look-ahead 'next' (today's own timed blocks are done/none, so the
+// countdown targets a later date), widgetNext's `atLabel` is already
+// "Weekday h:mm" (see mday.js) — its first token IS the weekday, so no
+// second date computation is needed beyond how many days out it is.
+function captionFor(m, dateStr) {
   if (m.mode === 'now') return `NOW · until ${m.atLabel}`;
+  if (m.mode === 'next') {
+    const ahead = m.at ? daysBetween(dateStr, m.at.slice(0, 10)) : 0;
+    if (ahead <= 0) return 'NEXT CLASS';
+    if (ahead === 1) return 'NEXT · TOMORROW';
+    return `NEXT · ${m.atLabel.split(' ')[0].toUpperCase()}`;
+  }
   return 'TODAY';                                    // 'done' and 'none' both read as a plain day caption
 }
 
@@ -96,7 +109,7 @@ async function makeWidget() {
   const nameForEvent = ev => ev.name || catLabels[ev.cat] || CATS[ev.cat]?.label || 'Event';
   const m = widgetNext(dateStr, events, plan, now, nameForEvent);
 
-  const cap = w.addText(captionFor(m));
+  const cap = w.addText(captionFor(m, dateStr));
   cap.font = Font.boldSystemFont(9);
   cap.textColor = WCOL.faint;
   w.addSpacer(8);

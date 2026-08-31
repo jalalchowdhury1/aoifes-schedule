@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 2b75a39f32 */
+ * build f42a903407 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -759,6 +759,7 @@ const SUBJECT_COLOR_NEUTRAL = '#9aa0b4';
 const colorFor = id => SUBJECT_COLORS[id] || SUBJECT_COLOR_NEUTRAL;
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const catLabelDefault = cat => CATS[cat]?.label || 'Event';
 
 // A chain name like "3A Ch 1 · Numbers to 10,000" — the part the family
@@ -976,7 +977,6 @@ const awayLabelFor = status => {
 
 function dayHeader(dateStr, plan) {
   const idx = dayIdx(dateStr);
-  const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const d = s2d(dateStr);
   const dateLabel = `${DAYS_SHORT[idx]} ${MON[d.getMonth()]} ${d.getDate()}`;
   const hasCycle = (plan?.activities || []).some(a => a && a.status === 'active' && a.rhythm?.kind === 'cycle');
@@ -1114,7 +1114,6 @@ function widgetModel(dateStr, events, plan, hourFloat, nameForEvent) {
   const items = dayItems(dateStr, events, plan, nameForEvent);
   const header = dayHeader(dateStr, plan);
   const idx = dayIdx(dateStr);
-  const DAYS_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const dayLabel = `Today · ${DAYS_SHORT[idx]}`;
   const first = items[0] ? widgetLabel(items[0]) : '';
   let rest = '';
@@ -1159,6 +1158,36 @@ function isoLocal(dateStr, hourFloat) {
 //            doneCount/total, not encoded in the mode.
 //   'none' — no timed blocks at all today (including an away day, where
 //            dayItems/buildTimed already empty out `timed`).
+const LOOKAHEAD_CAP = 14;
+
+// Walk forward from the day AFTER `dateStr`, up to LOOKAHEAD_CAP days, for the
+// first date carrying at least one TIMED item — used once today's own timed
+// blocks are done/none (2026-09-01 addition: "even after all done for today,
+// show the next class with the countdown"). Reuses `dayItems` per candidate
+// date so away days, skip overrides and one-off adds all apply exactly as
+// they would if that date were "today" — a trip period (buildTimed emptied
+// by dayItems' own away check) is walked straight through with NOTHING
+// leaking from it, including a 'reduced'-travel daily that's still VISIBLE
+// on those days: this only ever looks at `kind === 'timed'`, so a daily
+// alone never counts as "found". `rest` is that day's remaining timed
+// blocks then its no-slot dailies, unfiltered by logged status — nothing
+// is logged on a date that hasn't happened yet. Returns null (never a
+// partial/misleading result) if nothing turns up within the cap, so the
+// caller falls back to the plain 'done'/'none' rendering.
+function lookAheadNext(dateStr, events, plan, nameForEvent) {
+  for (let n = 1; n <= LOOKAHEAD_CAP; n++) {
+    const d = addDays(dateStr, n);
+    const items = dayItems(d, events, plan, nameForEvent);
+    const futureTimed = items.filter(it => it.kind === 'timed').sort((a, b) => a.start - b.start);
+    if (!futureTimed.length) continue;
+    const [next, ...later] = futureTimed;
+    const rest = [...later.map(widgetLabel), ...items.filter(it => it.kind === 'daily').map(widgetName)];
+    return { mode: 'next', name: widgetName(next), at: isoLocal(d, next.start),
+      atLabel: `${DAYS_SHORT[dayIdx(d)]} ${fmtHM(next.start)}`, rest };
+  }
+  return null;
+}
+
 function widgetNext(dateStr, events, plan, now, nameForEvent) {
   const hourFloat = now.getHours() + now.getMinutes() / 60;
   const status = dayStatus(plan?.periods, dateStr);
@@ -1188,6 +1217,8 @@ function widgetNext(dateStr, events, plan, now, nameForEvent) {
       : { mode: 'next', name: widgetName(anchor), at: isoLocal(dateStr, anchor.start),
           atLabel: fmtHM(anchor.start), rest, doneCount, total };
   }
+  const ahead = lookAheadNext(dateStr, events, plan, nameForEvent);
+  if (ahead) return { ...ahead, doneCount, total };
   return { mode: timed.length ? 'done' : 'none', name: null, at: null, atLabel: null,
     rest: unloggedDailies, doneCount, total };
 }
@@ -1206,8 +1237,12 @@ function widgetNext(dateStr, events, plan, now, nameForEvent) {
 // The big number is a live-ticking Scriptable date view (`addDate` +
 // `applyRelativeStyle`/`applyTimerStyle`) so it counts down on its own,
 // second by second, with NO widget refresh needed in between.
+// 2026-09-01 addition: once today's own timed blocks are done (or there
+// were none), widgetNext looks AHEAD for the next scheduled class — still
+// mode 'next', just dated later — so the caption needs to say which day
+// that is ("NEXT · TOMORROW" / "NEXT · TUE") instead of "NEXT CLASS".
 /* global Request, ListWidget, FileManager, Script, Color, Font, LinearGradient, config */
-/* global sanitizePlan, todayStr, widgetNext, CATS */
+/* global sanitizePlan, todayStr, widgetNext, daysBetween, CATS */
 
 const APP_BASE = 'https://aoifes-schedule.vercel.app';
 
@@ -1219,9 +1254,18 @@ const WCOL = {
 
 // Top-left tiny caption per widgetNext's mode — 'now' deliberately keeps
 // "until" lowercase (the approved copy is "NOW · until 1:00", not shouted).
-function captionFor(m) {
-  if (m.mode === 'next') return 'NEXT CLASS';
+// For a look-ahead 'next' (today's own timed blocks are done/none, so the
+// countdown targets a later date), widgetNext's `atLabel` is already
+// "Weekday h:mm" (see mday.js) — its first token IS the weekday, so no
+// second date computation is needed beyond how many days out it is.
+function captionFor(m, dateStr) {
   if (m.mode === 'now') return `NOW · until ${m.atLabel}`;
+  if (m.mode === 'next') {
+    const ahead = m.at ? daysBetween(dateStr, m.at.slice(0, 10)) : 0;
+    if (ahead <= 0) return 'NEXT CLASS';
+    if (ahead === 1) return 'NEXT · TOMORROW';
+    return `NEXT · ${m.atLabel.split(' ')[0].toUpperCase()}`;
+  }
   return 'TODAY';                                    // 'done' and 'none' both read as a plain day caption
 }
 
@@ -1291,7 +1335,7 @@ async function makeWidget() {
   const nameForEvent = ev => ev.name || catLabels[ev.cat] || CATS[ev.cat]?.label || 'Event';
   const m = widgetNext(dateStr, events, plan, now, nameForEvent);
 
-  const cap = w.addText(captionFor(m));
+  const cap = w.addText(captionFor(m, dateStr));
   cap.font = Font.boldSystemFont(9);
   cap.textColor = WCOL.faint;
   w.addSpacer(8);
