@@ -270,9 +270,25 @@ export function actualFinishes(act, log) {
 // note (planner-v2.8) so a whole-book "ahead/behind" line can never disagree
 // with its own per-chapter breakdown — one rule, two renderings. null when
 // either date is missing (no baseline set yet, or an unprojectable row).
+// The plan gap in SIGNED DAYS, with one convention for the whole app:
+// POSITIVE = AHEAD of plan (the live projection lands EARLIER than the frozen
+// baseline), negative = behind, null when either date is missing.
+//
+// This exists because it kept being got backwards. `daysBetween(a, b)` is
+// `b - a`, so `daysBetween(finish, baseline)` is "how many days EARLIER than
+// planned" — positive is good. Two /m surfaces each rolled their own copy of
+// that comparison and BOTH read the sign as "+ = later = behind" (see the
+// wrong comments they carried), so the phone told the family "▲ 7 lessons
+// ahead" on a subject that was 7 days BEHIND its own frozen plan — the exact
+// number a parent would use to decide whether to push harder. Caught
+// 2026-08-31 reviewing /m at 390px before handing it to a second user.
+// Anything comparing a projection to a baseline calls THIS, never daysBetween.
+export const planGapDays = (finishDate, baselineDate) =>
+  (finishDate && baselineDate) ? daysBetween(finishDate, baselineDate) : null;
+
 export function planDeltaChip(finishDate, baselineDate) {
   if (!finishDate || !baselineDate) return null;
-  const dd = daysBetween(finishDate, baselineDate);        // + = ahead of plan
+  const dd = planGapDays(finishDate, baselineDate);        // + = ahead of plan
   const weeks = Math.round(Math.abs(dd) / 7);
   if (Math.abs(dd) <= 7) return { state: 'on', weeks: 0 };
   return { state: dd > 0 ? 'ahead' : 'behind', weeks };

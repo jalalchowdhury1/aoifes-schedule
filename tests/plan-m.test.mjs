@@ -31,7 +31,8 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry } = await import('../js/m.js');
+const { lastDoneEntry, consequenceSentence } = await import('../js/m.js');
+const { planGapDays, planDeltaChip } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
 
@@ -75,4 +76,57 @@ test('lastDoneEntry: the found row is exactly what togglePaced(act.id, date) can
   const last = lastDoneEntry(ACT);
   const togglePacedMatch = e => e.activityId === ACT.id && e.date === last.date && e.status === 'done' && !e.eventId;
   assert.ok(plan.data.log.some(togglePacedMatch), 'togglePaced must be able to find and remove this exact row');
+});
+
+// ── ahead / behind direction (2026-08-31) ───────────────────
+// THE BUG: `daysBetween(a, b)` is `b - a`, so daysBetween(finish, baseline)
+// is "days EARLIER than planned" and POSITIVE means AHEAD. Both /m surfaces
+// that compare a projection to a frozen baseline rolled their own copy of
+// that subtraction and both read the sign backwards, so a subject 7 days
+// BEHIND its own plan told the family "▲ 7 lessons ahead" — on the live site,
+// on the number a parent uses to decide whether to push harder. Both now go
+// through the named `planGapDays`, and these tests pin the direction from the
+// dates themselves so a future edit cannot silently flip it.
+const PLAN_DATE = '2026-12-27';
+const LATER = '2027-01-03';        // projection lands AFTER the plan -> behind
+const EARLIER = '2026-12-20';      // projection lands BEFORE the plan -> ahead
+
+test('planGapDays: finishing EARLIER than the plan is positive (ahead)', () => {
+  assert.equal(planGapDays(EARLIER, PLAN_DATE), 7);
+  assert.equal(planGapDays(LATER, PLAN_DATE), -7);
+  assert.equal(planGapDays(PLAN_DATE, PLAN_DATE), 0);
+  assert.equal(planGapDays(null, PLAN_DATE), null);
+  assert.equal(planGapDays(LATER, null), null);
+});
+
+test('planGapDays agrees with planDeltaChip, the convention it was cloned from', () => {
+  assert.equal(planDeltaChip('2026-11-01', PLAN_DATE).state, 'ahead');
+  assert.ok(planGapDays('2026-11-01', PLAN_DATE) > 0);
+  assert.equal(planDeltaChip('2027-03-01', PLAN_DATE).state, 'behind');
+  assert.ok(planGapDays('2027-03-01', PLAN_DATE) < 0);
+});
+
+test('consequenceSentence: a LATER projection reads behind, never ahead', () => {
+  const txt = consequenceSentence(planGapDays(LATER, PLAN_DATE));
+  assert.match(txt, /7 lessons behind/);
+  assert.equal(/ahead/.test(txt), false, 'the live wording that was wrong');
+});
+
+test('consequenceSentence: behind recovers, it does not compound', () => {
+  // Extra lessons ALWAYS pull the finish earlier, so when she is behind they
+  // close the gap. The old sentence said "7 more and the card reads 2 wk
+  // behind", which is the opposite of what another 7 lessons would do.
+  const txt = consequenceSentence(planGapDays(LATER, PLAN_DATE));
+  assert.match(txt, /7 more<\/b> puts her back on the plan/);
+});
+
+test('consequenceSentence: an EARLIER projection reads ahead and compounds', () => {
+  const txt = consequenceSentence(planGapDays(EARLIER, PLAN_DATE));
+  assert.match(txt, /7 lessons ahead of/);
+  assert.match(txt, /▲ 2 wk ahead/);            // 7 days ahead + 7 more = 2 wks
+});
+
+test('consequenceSentence: dead on the plan, and a missing baseline, both say so safely', () => {
+  assert.equal(consequenceSentence(0), "She's exactly on the plan right now.");
+  assert.equal(consequenceSentence(null), "She's exactly on the plan right now.");
 });

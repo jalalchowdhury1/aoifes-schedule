@@ -647,6 +647,30 @@ the parts worth keeping.
     TODAY (an earlier day's half says so and points at Subjects → Oops) and
     takes today's halves ABOVE it with it, because a session only comes off
     the top of the chain.
+- **Ahead/behind has ONE sign convention: `planGapDays` (js/plan/model.js).**
+  POSITIVE = ahead of plan (the live projection lands EARLIER than the frozen
+  baseline). `daysBetween(a, b)` is `b - a`, which makes
+  `daysBetween(finish, baseline)` read "days earlier than planned" — and that
+  is not obvious, so two `/m` surfaces (the Singapore card's foot chip and the
+  Subjects sheet's consequence sentence) each rolled their own copy of the
+  subtraction and BOTH read the sign backwards. The live phone told the family
+  "▲ 7 lessons ahead" for a subject 7 days BEHIND its own plan. Fixed
+  2026-08-31; `planDeltaChip` (which was always right) now reads through the
+  same helper, and tests/plan-m.test.mjs pins the direction from real dates so
+  it cannot flip back. Never hand-roll a projection-vs-baseline comparison.
+  - The consequence sentence's second clause was wrong in the same place for a
+    different reason: it assumed more lessons push you FURTHER in whichever
+    direction you already are. They don't. Extra lessons always pull the
+    finish earlier, so ahead COMPOUNDS ("7 more and the card reads ▲ 2 wk
+    ahead") while behind RECOVERS ("7 more puts her back on the plan").
+- **The top bar names the visible tab.** `#top-title` is set from
+  `state.tab`; only Today gets the date + "Mama: work" caption beside it. It
+  used to be the literal word "Today" in the markup, so Week/Subjects/Year all
+  sat under a header naming a tab they were not on.
+- **Range separator is the en dash** (`11am–1pm`, `Aug 31 – Sep 6`,
+  `Lessons 101–105`), app-wide, desktop and `/m`, pinned by
+  tests/plan-year.test.mjs. It is correct typography for a range; do not
+  "fix" it to a hyphen in one place and split the convention.
 - **The widget is GENERATED — never edit `m/widget.js` by hand.**
   `node scripts/build-widget.mjs` concatenates `js/model.js` + `js/plan/
   model.js` + `js/plan/mday.js` + `scripts/widget-ui.js` inside one async

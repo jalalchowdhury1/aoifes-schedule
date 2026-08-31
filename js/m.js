@@ -11,7 +11,7 @@ import {
 } from './plan/state.js';
 import {
   todayStr, addDays, mondayOf, dayStatus, currentCur, nextSession,
-  chainTimeline, planDeltaChip, actTotal, daysBetween, dayIdx, isWorkDay,
+  chainTimeline, planDeltaChip, planGapDays, actTotal, daysBetween, dayIdx, isWorkDay,
   actualFinishes,
 } from './plan/model.js';
 import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt,
@@ -100,8 +100,17 @@ function applyFieldState() {
 }
 
 // ── top bar (normal <-> compact via IntersectionObserver) ────
+// The bar's title used to be the literal word "Today" in the markup, so Week,
+// Subjects and Year all sat under a header naming a tab they were not on
+// (caught reviewing at 390px, 2026-08-31). It now names the visible tab, and
+// only Today earns the date + Mama caption beside it.
+const TAB_TITLE = { today: 'Today', week: 'Week', subjects: 'Subjects', year: 'Year' };
 function renderTopBar() {
-  if (!plan.data || state.tab !== 'today') { $('top-normal').hidden = false; $('top-compact').hidden = true; return; }
+  $('top-title').textContent = TAB_TITLE[state.tab] || 'Today';
+  if (!plan.data || state.tab !== 'today') {
+    $('top-date').textContent = '';
+    $('top-normal').hidden = false; $('top-compact').hidden = true; return;
+  }
   const today = todayStr();
   const h = dayHeader(today, plan.data);
   const mamaTxt = h.mama ? ` · Mama: ${h.mama}` : '';
@@ -369,11 +378,13 @@ function tbWbFootHtml(act, today, card) {
   const curRow = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
   const base = act.baseline?.rows;
   const baseDate = curRow && base ? base[curRow.key] : null;
-  if (curRow?.finish && baseDate) {
-    const dd = daysBetween(curRow.finish, baseDate);         // + = later (behind), - = earlier (ahead)
-    const gap = Math.round(Math.abs(dd));
-    if (gap) chip = `<span class="cap ${dd < 0 ? 'grn' : 'amb'}">${dd < 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd < 0 ? 'ahead' : 'behind'}</span>`;
-  }
+  // planGapDays: POSITIVE = ahead (the projection lands earlier than the
+  // frozen plan). This line used to compute the same subtraction by hand with
+  // the sign read backwards, so a subject 7 days BEHIND its plan advertised
+  // "▲ 7 lessons ahead" (fixed 2026-08-31 — see planGapDays' own comment).
+  const dd = planGapDays(curRow?.finish, baseDate);
+  const gap = dd == null ? 0 : Math.round(Math.abs(dd));
+  if (gap) chip = `<span class="cap ${dd > 0 ? 'grn' : 'amb'}">${dd > 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd > 0 ? 'ahead' : 'behind'}</span>`;
   return `<div class="smfoot"><span class="chline">${esc(card.currentLabel || '')} · ${card.doneSessions} of ${card.totalSessions} sessions</span>${chip}</div>`;
 }
 
@@ -810,7 +821,7 @@ function openSubjectSheet(id) {
       <div class="glass"><div class="lab">Plan</div><div class="v">${baseDate ? fmtDateShort(baseDate) : '—'}</div><div class="dim" style="font-size:11px">${act.baseline ? `frozen ${fmtDateShort(act.baseline.setOn)}` : 'not set'}</div></div>
       <div class="glass"><div class="lab">Now</div><div class="v${delta && delta.state !== 'behind' ? ' grn' : ''}">${nowDate ? fmtDateShort(nowDate) : '—'}</div><div class="dim" style="font-size:11px">${deltaCaption(delta)}</div></div>
     </div>`;
-    if (baseDate && nowDate) h += `<p class="conseq">${consequenceSentence(daysBetween(nowDate, baseDate))}</p>`;
+    if (baseDate && nowDate) h += `<p class="conseq">${consequenceSentence(planGapDays(nowDate, baseDate))}</p>`;
   }
 
   h += oopsRowHtml(act);
@@ -836,17 +847,23 @@ function deltaCaption(delta) {
   return delta.state === 'ahead' ? `${n} wk${n === 1 ? '' : 's'} ahead` : `${n} wk${n === 1 ? '' : 's'} behind`;
 }
 
-// dd = daysBetween(nowDate, baseDate): + when now is LATER than baseline (behind), see planDeltaChip's own sign convention (mirrored here so this sentence and the chip above it never disagree).
-function consequenceSentence(dd) {
-  const gap = Math.round(Math.abs(dd));
+// The one-line consequence under the Plan/Now tiles. `dd` is planGapDays:
+// POSITIVE = AHEAD (the projection lands earlier than the frozen plan). Two
+// bugs lived here until 2026-08-31: the sign was read backwards (so "behind"
+// printed as "ahead"), and the second clause assumed more lessons push you
+// FURTHER in whichever direction you already are. They don't — extra lessons
+// always pull the finish earlier, so when she is behind they close the gap.
+// The two directions therefore end differently: ahead compounds, behind
+// recovers.
+export function consequenceSentence(dd) {
+  const gap = dd == null ? 0 : Math.round(Math.abs(dd));
   if (!gap) return "She's exactly on the plan right now.";
-  const ahead = dd < 0;
-  const dir = ahead ? 'ahead of' : 'behind';
-  const verb = ahead ? 'earlier' : 'later';
-  const arrow = ahead ? '▲' : '▼';
-  const weeksNow = Math.floor(gap / 7);
-  const more = gap % 7 === 0 ? 7 : 7 - (gap % 7);
-  return `She's <b>${gap} lesson${gap === 1 ? '' : 's'} ${dir}</b> the plan. Every extra lesson pulls the finish 1 day ${verb}; ${more} more and the card reads <b>${arrow} ${weeksNow + 1} wk ${ahead ? 'ahead' : 'behind'}</b>.`;
+  if (dd > 0) {
+    const weeksNow = Math.floor(gap / 7);
+    const more = gap % 7 === 0 ? 7 : 7 - (gap % 7);
+    return `She's <b>${gap} lesson${gap === 1 ? '' : 's'} ahead of</b> the plan. Every extra lesson pulls the finish 1 day earlier; ${more} more and the card reads <b>▲ ${weeksNow + 1} wk ahead</b>.`;
+  }
+  return `She's <b>${gap} lesson${gap === 1 ? '' : 's'} behind</b> the plan. Every extra lesson pulls the finish 1 day earlier, so <b>${gap} more</b> puts her back on the plan.`;
 }
 
 // Only a status:'done' row is something togglePaced can actually undo — it

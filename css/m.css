@@ -271,7 +271,10 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .two { display: flex; gap: 10px; margin-bottom: 12px; }
 .two .glass { flex: 1; margin: 0; }
 .two .lab { font-size: 10px; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; }
-.two .v { font-size: 22px; font-weight: 700; margin-top: 2px; }
+/* 20px, not 22: at 390px the widest real date ("Dec 27, 2026") wrapped to two
+   lines in the Plan tile while the Now tile stayed on one, so the two numbers
+   the sheet exists to compare sat at different heights. */
+.two .v { font-size: 20px; font-weight: 700; margin-top: 2px; }
 .two .v.grn { color: var(--grn); }
 .conseq { font-size: 13px; line-height: 1.45; color: var(--dim); margin-bottom: 12px; }
 .conseq b { color: var(--ink); }
