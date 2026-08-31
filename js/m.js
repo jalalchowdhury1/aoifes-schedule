@@ -352,17 +352,19 @@ function itemRowHtml(it, dateStr) {
   return row;
 }
 
-// Item F (polish round 2): a small pace line under the buttons —
-// "L6 · 11 of 22 sessions in 3A Ch 1 · ▲ 2 lessons ahead". The session count
-// is the chapter's own raw done/total (NOT subjectCards' lesson-fraction
-// numbers, which would read "11 of 22" as "5.5 of 11"); the ahead/behind
-// figure is in LESSONS, not weeks, via the exact plan-vs-now day gap the
-// Subjects sheet's own consequence sentence uses (chainTimeline + the frozen
-// baseline) — 1 extra lesson pulls the finish 1 day earlier. The leading
-// label comes from the card model, so a chapter that has reached its trailing
-// review reads "Test 1 ·", never a fabricated lesson number.
-function tbWbPaceLine(act, today, card) {
-  let aheadTxt = '';
+// The card's foot: pace on the left ("L7 · 12 of 22 sessions"), the plan
+// delta on the right as the SAME capsule the This-week card uses, so the two
+// cards read as one family. The session count is the chapter's own raw
+// done/total (NOT subjectCards' lesson-fraction numbers, which would read
+// "12 of 22" as "6 of 11"); the ahead/behind figure is in LESSONS, not weeks,
+// via the exact plan-vs-now day gap the Subjects sheet's own consequence
+// sentence uses (chainTimeline + the frozen baseline) — 1 extra lesson pulls
+// the finish 1 day earlier. The leading label comes from the card model, so a
+// chapter that has reached its trailing review reads "Test 1 ·", never a
+// fabricated lesson number. The chapter name is NOT repeated here; it is the
+// card's own header.
+function tbWbFootHtml(act, today, card) {
+  let chip = '';
   const rows = chainTimeline(act, today, plan.data);
   const curRow = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
   const base = act.baseline?.rows;
@@ -370,42 +372,47 @@ function tbWbPaceLine(act, today, card) {
   if (curRow?.finish && baseDate) {
     const dd = daysBetween(curRow.finish, baseDate);         // + = later (behind), - = earlier (ahead)
     const gap = Math.round(Math.abs(dd));
-    if (gap) aheadTxt = ` · ${dd < 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd < 0 ? 'ahead' : 'behind'}`;
+    if (gap) chip = `<span class="cap ${dd < 0 ? 'grn' : 'amb'}">${dd < 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd < 0 ? 'ahead' : 'behind'}</span>`;
   }
-  return `<div class="chline">${esc(card.currentLabel || '')} · ${card.doneSessions} of ${card.totalSessions} sessions in ${esc(card.chapter)}${aheadTxt}</div>`;
+  return `<div class="smfoot"><span class="chline">${esc(card.currentLabel || '')} · ${card.doneSessions} of ${card.totalSessions} sessions</span>${chip}</div>`;
 }
 
-// One half of one lesson. The class is the whole message: `on` = logged
-// (green, same as every ✓ check on the page), `next` = the one to tap now
-// (violet ring), `wait` = its turn hasn't come. Everything the tap handler
-// needs rides on the element, so the handler never re-derives the card.
+// One half of one lesson, as a segment of its lesson's capsule. The class is
+// the whole message: `on` = logged (the page's green), `next` = tap this one
+// (violet), `wait` = its turn hasn't come. Everything the tap handler needs
+// rides on the element, so the handler never re-derives the card.
 function halfBtnHtml(actId, curId, x) {
   const cls = x.done ? ' on' : x.next ? ' next' : ' wait';
-  return `<button type="button" class="btn${cls}" data-tbwb="${esc(actId)}" data-cur="${esc(curId)}"
+  return `<button type="button" class="seg${cls}" data-tbwb="${esc(actId)}" data-cur="${esc(curId)}"
     data-session="${x.session}" data-done="${x.done ? 1 : 0}" data-next="${x.next ? 1 : 0}"
     data-undoable="${x.undoable ? 1 : 0}" data-on="${esc(x.loggedOn || '')}"
     data-full="${esc(x.fullLabel)}" data-needs="${esc(x.needs || '')}"
     aria-pressed="${x.done}">${x.done ? '✓ ' : ''}${esc(x.label)}</button>`;
 }
 
+function lessonRowHtml(actId, curId, label, items) {
+  const done = items.every(x => x.done);
+  return `<div class="lrow${done ? ' done' : ''}"><span class="dlab">${esc(label)}</span>
+    <div class="segs" role="group" aria-label="${esc(label)}">${
+      items.map(x => halfBtnHtml(actId, curId, x)).join('')}</div></div>`;
+}
+
 // The Singapore-style lesson card, rendered straight off mday.js's tbWbCard.
-// One row per lesson in play today (the halves are INDEPENDENT ticks now —
-// see that function's header for the bug this replaced), a "Review" row once
-// a chapter reaches its trailing test, and the next lesson behind an explicit
-// ➕ so a second lesson the same day is a deliberate tap, never an accident.
+// One row per lesson in play today (the halves are INDEPENDENT ticks — see
+// that function's header for the bug this replaced), a "Review" row once a
+// chapter reaches its trailing test, and the next lesson behind an explicit
+// "Add lesson N" ghost so a second lesson the same day is a deliberate tap.
 function tbWbCardHtml(act, cur, today) {
   const card = tbWbCard(act, cur, plan.data.log, today, state.extraOpen === act.id);
   if (!card) return '';
-  let h = `<div class="glass"><div class="tiny">${esc(act.name)} · ${esc(card.chapter)}</div>`;
+  let h = `<div class="glass"><div class="smhd tiny"><span>${esc(act.name)}</span><span>${esc(card.chapter)}</span></div>`;
   for (const row of card.lessons)
-    h += `<div class="dual"><span class="dlab">Lesson ${row.lesson}</span>${
-      row.halves.map(x => halfBtnHtml(act.id, card.curId, x)).join('')}</div>`;
+    h += lessonRowHtml(act.id, card.curId, `Lesson ${row.lesson}`, row.halves);
   if (card.tests.length)
-    h += `<div class="dual"><span class="dlab">Review</span>${
-      card.tests.map(x => halfBtnHtml(act.id, card.curId, x)).join('')}</div>`;
+    h += lessonRowHtml(act.id, card.curId, 'Review', card.tests);
   if (card.addLesson)
-    h += `<div class="dual"><button type="button" class="btn q" data-extra="${esc(act.id)}">➕ Add lesson ${card.addLesson}</button></div>`;
-  h += tbWbPaceLine(act, today, card);
+    h += `<button type="button" class="addles" data-extra="${esc(act.id)}">+ Add lesson ${card.addLesson}</button>`;
+  h += tbWbFootHtml(act, today, card);
   h += `</div>`;
   return h;
 }

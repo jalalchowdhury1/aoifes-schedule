@@ -616,13 +616,29 @@ the parts worth keeping.
     half/test item is `{session, label, fullLabel, done, loggedOn, undoable,
     next, needs}` — its OWN session index and its own state, so a button says
     what it is rather than what's next. js/m.js only renders it.
-  - **What shows**: one `.dual` row per lesson touched today, plus the
+  - **What shows**: one `.lrow` per lesson touched today, plus the
     in-progress lesson; a "Review" row once a chapter reaches its trailing
     `tests` (was fabricating "Lesson 11" for a 10-lesson chapter); the next
-    lesson gated behind "➕ Add lesson N" (transient `state.extraOpen`, not
-    persisted) so a second lesson the same day is a deliberate tap. Button
-    class IS the state: `on` = logged (the same green as every ✓ check),
-    `next` = tap this one (violet ring), `wait` = its turn hasn't come.
+    lesson gated behind a quiet dashed "+ Add lesson N" (`.addles`, transient
+    `state.extraOpen`, not persisted) so a second lesson the same day is a
+    deliberate tap; a `.smfoot` with the pace left and the plan delta right
+    as the same `.cap` capsule the This-week card uses.
+  - **Visual language (restyled 2026-08-31, second phone report: "now it just
+    looks like HUGE buttons").** A lesson's two halves are ONE segmented
+    capsule (`.segs` > two `.seg`), not two loose full-width pills — the
+    user's own confirmed taste is Apple-style segmented controls over loose
+    pills. Weight follows meaning: `.seg.on` = logged, a QUIET green tint
+    (the solid green stays reserved for the 44px round `.chk`), `.seg.next` =
+    the one to tap (violet), `.seg.wait` = its turn hasn't come (dimmed).
+    `.lrow.done .segs` turns its border green so a finished lesson reads as
+    one closed thing. Deliberately NOT added, both against house taste: a
+    coloured status dot per row (decorative dots are a tell) and a filled
+    progress track (the Subjects tab already owns chapter progress). Verified
+    at the 390px design viewport before shipping — the probe harness is a
+    throwaway `m/_probe.html` (seeds localStorage, stubs fetch, drives real
+    clicks by button text) rendered inside a 390px iframe from `m/_shot.html`,
+    because headless Chrome's `--window-size` does NOT set the layout
+    viewport here and screenshots come back as a crop of an ~800px page.
   - **Writes** go through the new `logSession` / `unlogSessionsFrom`
     (js/plan/state.js), NOT togglePaced — see the write-path rule above.
     Order is still the chain's: `done` is a COUNT, so tapping Workbook over

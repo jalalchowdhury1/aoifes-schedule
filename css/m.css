@@ -149,22 +149,49 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .status-pick button.clear { color: var(--dim); flex: .7; }
 
 /* ── Singapore-style lesson card ── */
-/* One .dual per lesson: a small fixed label, then that lesson's two halves as
-   INDEPENDENT ticks. The violet `pri` fill used to mark whichever half was
-   NEXT, which on a real phone read as "this one is selected" — the state a
-   button shows now is its OWN: green `on` = logged (same green as every ✓
-   check on the page), violet-ringed `next` = tap this one, dimmed `wait` =
-   its turn hasn't come. */
+/* One row per lesson: a small label, then that lesson's two halves as ONE
+   segmented capsule rather than two loose pills. The halves used to be
+   full-width SOLID green slabs, which shouted louder than anything else on
+   the page for work that was already finished ("now it just looks like HUGE
+   buttons", 2026-08-31). Weight follows meaning now: a logged half is a
+   quiet green tint, the half to tap next carries the violet, a half whose
+   turn hasn't come is dimmed out. The capsule's own border goes green when
+   both halves are in, so a finished lesson reads as one closed thing. */
+.smhd { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.lrow { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.dlab { flex: none; width: 62px; font-size: 12px; color: var(--dim); }
+.segs { flex: 1; min-width: 0; display: flex; border: 1px solid var(--edge);
+  border-radius: 999px; overflow: hidden; transition: border-color .25s; }
+.lrow.done .segs { border-color: rgba(61, 220, 151, .38); }
+.seg { flex: 1; min-width: 0; min-height: 44px; padding: 0 4px;
+  border: 0; border-left: 1px solid var(--edge); background: none;
+  color: var(--dim); font-size: 13px; font-weight: 600; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background-color .2s, color .2s; }
+.seg:first-child { border-left: 0; }
+.seg:active { background-color: rgba(255, 255, 255, .12); }
+.seg.on { background: rgba(61, 220, 151, .15); color: var(--grn); }
+.seg.next { background: rgba(139, 124, 246, .2); color: var(--vio-ink); }
+.seg.wait { color: var(--faint); opacity: .5; }
+/* Adding a second lesson is optional, so it stays a quiet ghost instead of a
+   third slab competing with the halves above it. */
+.addles { display: block; margin: 12px auto 0; min-height: 40px; padding: 0 18px;
+  border-radius: 999px; border: 1px dashed var(--edge); background: none;
+  color: var(--dim); font-size: 13px; font-weight: 600; transition: transform .15s; }
+.addles:active { transform: scale(.96); }
+/* Pace on the left, the plan delta as the same capsule the This-week card
+   uses on the right, so the two cards read as one family. */
+.smfoot { display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 12px; }
+.smfoot .chline { margin: 0; min-width: 0; }
+.smfoot .cap { margin: 0; flex: none; }
+
+/* Kept for any card still using the plain full-width pill pair. */
 .dual { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
-.dlab { flex: none; width: 68px; font-size: 12px; color: var(--dim); }
 .btn { flex: 1; padding: 12px 0; border-radius: 999px; font-size: 13px; font-weight: 600;
   text-align: center; border: 1px solid var(--edge); background: rgba(255, 255, 255, .07);
   color: var(--ink); min-height: 44px; transition: transform .15s; }
 .btn:active { transform: scale(.96); }
-.btn.on { background: var(--grn); border-color: var(--grn); color: #08261a; font-weight: 700; }
-.btn.next { border-color: rgba(139, 124, 246, .55); background: rgba(139, 124, 246, .15);
-  color: var(--vio-ink); }
-.btn.wait { opacity: .45; }
 .btn.pri { background: var(--vio); border-color: var(--vio); color: #fff; }
 .btn.q { color: var(--dim); flex: .6; }
 
