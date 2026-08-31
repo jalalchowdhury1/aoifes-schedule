@@ -186,3 +186,80 @@ test('api/plan-save.js uses the canonical model implementation', () => {
   assert.match(src, /mergePlanWrites\(stored, incoming\)/);
   assert.equal(/function mergePlanWrites/.test(src), false, 'no inlined copy to drift');
 });
+
+// ── multi-session days (2026-08-31) ─────────────────────────
+// A tb-wb lesson is TWO log rows on one date, and a double-lesson day is
+// four. Keyed on `date|owner` alone, every row after the first collapsed into
+// the first — so a phone that logged the textbook half while the bot logged
+// the workbook half kept ONE of them and the chapter counter went one session
+// short. Session rows are therefore identified by WHICH session they are;
+// markers and timed rows keep the old one-per-day identity, so the bot's ✗
+// marker still does not resurrect itself over a tab's real session row.
+const sm = (done = 10) => ({
+  id: 'singapore', type: 'paced', name: 'Singapore Math', status: 'active',
+  chain: [{ id: 'dm3-c1', pattern: 'tb-wb', lessons: 11, tests: 0, done }],
+});
+const sess = (session, date = D) => ({ date, activityId: 'singapore',
+  status: 'done', curriculum: 'dm3-c1', session });
+
+test('two DIFFERENT sessions on one day both survive, and both bump the chapter', () => {
+  const current = base({ activities: [sm(11)], log: [sess(10)] });     // the textbook half
+  const incoming = base({ activities: [sm(11)], log: [sess(11)],       // the workbook half
+    savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.deepEqual(out.log.map(e => e.session).sort((a, b) => a - b), [10, 11]);
+  assert.equal(out.activities[0].chain[0].done, 12, 'the carried row replays its own bump');
+});
+
+test('the SAME session written twice is still one row (no double count)', () => {
+  const current = base({ activities: [sm(11)], log: [sess(10)] });
+  const incoming = base({ activities: [sm(11)], log: [sess(10)],
+    savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.equal(out.log.length, 1);
+  assert.equal(out.activities[0].chain[0].done, 11, 'no phantom extra session');
+});
+
+test('four sessions (a double-lesson day) survive a merge intact', () => {
+  const current = base({ activities: [sm(14)], log: [sess(10), sess(11), sess(12), sess(13)] });
+  const incoming = base({ activities: [sm(10)], log: [], savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.deepEqual(out.log.map(e => e.session), [10, 11, 12, 13]);
+  assert.equal(out.activities[0].chain[0].done, 14);
+});
+
+test('a bot ✗ marker does NOT resurrect over a tab\'s real session row', () => {
+  const current = base({ activities: [sm(10)],
+    log: [{ date: D, activityId: 'singapore', status: 'missed' }] });
+  const incoming = base({ activities: [sm(11)], log: [sess(10)],
+    savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.equal(out.log.length, 1, 'the marker stays dropped, exactly as before');
+  assert.equal(out.log[0].status, 'done');
+  assert.equal(out.activities[0].chain[0].done, 11);
+});
+
+test('real work is never dropped in favour of an incoming marker', () => {
+  // The inverse race: the tab is saving a ✗ marker while KV already holds the
+  // day's logged sessions. The merge's own rule — a resurrected tick is
+  // visible and re-fixable, a silently deleted session is neither — says the
+  // sessions come back; dailyStatus then shows the marker and "Clear ✗
+  // marker" resolves it in place.
+  const current = base({ activities: [sm(12)], log: [sess(10), sess(11)] });
+  const incoming = base({ activities: [sm(10)],
+    log: [{ date: D, activityId: 'singapore', status: 'missed' }],
+    savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.equal(out.log.length, 3);
+  assert.equal(out.activities[0].chain[0].done, 12);
+});

@@ -148,12 +148,23 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 /* Clear is a lower-emphasis, undo-ish action — same treatment as .btn.q. */
 .status-pick button.clear { color: var(--dim); flex: .7; }
 
-/* ── Singapore-style dual card ── */
-.dual { display: flex; gap: 8px; margin-top: 10px; }
+/* ── Singapore-style lesson card ── */
+/* One .dual per lesson: a small fixed label, then that lesson's two halves as
+   INDEPENDENT ticks. The violet `pri` fill used to mark whichever half was
+   NEXT, which on a real phone read as "this one is selected" — the state a
+   button shows now is its OWN: green `on` = logged (same green as every ✓
+   check on the page), violet-ringed `next` = tap this one, dimmed `wait` =
+   its turn hasn't come. */
+.dual { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+.dlab { flex: none; width: 68px; font-size: 12px; color: var(--dim); }
 .btn { flex: 1; padding: 12px 0; border-radius: 999px; font-size: 13px; font-weight: 600;
   text-align: center; border: 1px solid var(--edge); background: rgba(255, 255, 255, .07);
   color: var(--ink); min-height: 44px; transition: transform .15s; }
 .btn:active { transform: scale(.96); }
+.btn.on { background: var(--grn); border-color: var(--grn); color: #08261a; font-weight: 700; }
+.btn.next { border-color: rgba(139, 124, 246, .55); background: rgba(139, 124, 246, .15);
+  color: var(--vio-ink); }
+.btn.wait { opacity: .45; }
 .btn.pri { background: var(--vio); border-color: var(--vio); color: #fff; }
 .btn.q { color: var(--dim); flex: .6; }
 

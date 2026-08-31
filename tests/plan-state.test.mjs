@@ -308,3 +308,126 @@ test('setBaseline freezes unfinished row dates; complete rows excluded; overwrit
   assert.equal(S.setBaseline('nope'), undefined);             // unknown id: no throw
   assert.equal(plan.data.savedAt, before);                    // and no commit/save
 });
+
+// ── logSession / unlogSessionsFrom (multi-session days) ──────
+// The phone's Singapore card used to drive BOTH its "✓ Textbook" and
+// "✓ Workbook" buttons through togglePaced, which is a TOGGLE keyed on
+// (activity, date): the workbook tap found the textbook tap's row and
+// REMOVED it, so a lesson could never be more than half logged and a second
+// lesson the same day was impossible (reported from a real phone screen,
+// 2026-08-31). These two paths are the append / append-inverse pair the card
+// writes through instead — same row shape the Telegram bot's
+// `_apply_log_progress` writes, one log row per session.
+const SM = () => {
+  initPlan();
+  const sm = plan.data.activities.find(a => a.id === 'singapore');
+  sm.status = 'active';
+  sm.chain = [
+    { id: 'dm3-c1', name: '3A Ch 1 · Numbers to 10,000', pattern: 'tb-wb', lessons: 11, tests: 0, done: 10 },
+    { id: 'dm3-c2', name: '3A Ch 2 · Addition and Subtraction', pattern: 'tb-wb', lessons: 8, tests: 1, done: 0 },
+  ];
+  return sm;
+};
+const c1 = () => curOf(plan.data, 'singapore', 'dm3-c1');
+const c2 = () => curOf(plan.data, 'singapore', 'dm3-c2');
+const smRows = (date = D) => plan.data.log.filter(e =>
+  e.activityId === 'singapore' && e.date === date && e.status === 'done');
+
+test('logSession: two taps the same day are TWO sessions, never a toggle', () => {
+  SM();
+  const { logSession } = S;
+  logSession('singapore', D);
+  logSession('singapore', D);
+  assert.equal(c1().done, 12);                                  // L6 textbook + workbook
+  assert.deepEqual(smRows().map(e => e.session), [10, 11]);
+  assert.deepEqual(smRows().map(e => e.curriculum), ['dm3-c1', 'dm3-c1']);
+});
+
+test('logSession: rolls into the next chapter when the current one runs out', () => {
+  SM();
+  const { logSession } = S;
+  c1().done = 21;                                  // one session left in Ch 1
+  logSession('singapore', D);
+  logSession('singapore', D);
+  assert.equal(c1().done, 22);
+  assert.equal(c2().done, 1);
+  assert.deepEqual(smRows().map(e => e.curriculum), ['dm3-c1', 'dm3-c2']);
+});
+
+test('logSession: an exhausted chain writes nothing at all', () => {
+  SM();
+  const { logSession } = S;
+  c1().done = 22; c2().done = 17;
+  const before = snap(plan.data);
+  assert.equal(logSession('singapore', D), null);
+  assert.deepEqual(snap(plan.data), before);
+});
+
+test('unlogSessionsFrom: log then unlog is the identity', () => {
+  SM();
+  const { logSession, unlogSessionsFrom } = S;
+  const before = snap(plan.data);
+  logSession('singapore', D);
+  logSession('singapore', D);
+  const removed = unlogSessionsFrom('singapore', 'dm3-c1', 10, D);
+  assert.equal(removed.length, 2);
+  assert.deepEqual(removed.map(e => e.session), [10, 11]);      // teaching order, replayable
+  assert.deepEqual(snap(plan.data), before);
+});
+
+test('unlogSessionsFrom: takes the halves ABOVE it too — a session only comes off the top', () => {
+  SM();
+  const { logSession, unlogSessionsFrom } = S;
+  logSession('singapore', D);                                   // L6 textbook
+  logSession('singapore', D);                                   // L6 workbook
+  logSession('singapore', D);                                   // L7 textbook
+  const removed = unlogSessionsFrom('singapore', 'dm3-c1', 11, D);
+  assert.deepEqual(removed.map(e => e.session), [11, 12]);
+  assert.equal(c1().done, 11);                                  // L6 textbook survives
+  assert.deepEqual(smRows().map(e => e.session), [10]);
+});
+
+test('unlogSessionsFrom: never touches another DAY, however recent', () => {
+  SM();
+  const { logSession, unlogSessionsFrom } = S;
+  logSession('singapore', '2026-08-31');                        // yesterday: L6 textbook
+  logSession('singapore', D);                                   // today: L6 workbook
+  const removed = unlogSessionsFrom('singapore', 'dm3-c1', 11, D);
+  assert.deepEqual(removed.map(e => e.session), [11]);
+  assert.equal(c1().done, 11);
+  assert.equal(smRows('2026-08-31').length, 1);                 // yesterday intact
+});
+
+test('unlogSessionsFrom: crosses a chapter boundary upward, rolling BOTH counters back', () => {
+  SM();
+  const { logSession, unlogSessionsFrom } = S;
+  c1().done = 21;
+  logSession('singapore', D);                                   // finishes Ch 1
+  logSession('singapore', D);                                   // Ch 2, session 0
+  const removed = unlogSessionsFrom('singapore', 'dm3-c1', 21, D);
+  assert.equal(removed.length, 2);
+  assert.equal(c1().done, 21);
+  assert.equal(c2().done, 0);
+});
+
+test('unlogSessionsFrom: an unknown chapter id is refused, not guessed', () => {
+  SM();
+  const { logSession, unlogSessionsFrom } = S;
+  logSession('singapore', D);
+  const before = snap(plan.data);
+  assert.deepEqual(unlogSessionsFrom('singapore', 'nope', 0, D), []);
+  assert.deepEqual(snap(plan.data), before);
+});
+
+test('unlogSessionsFrom: leaves a ✗ marker and a timed row for that day alone', () => {
+  SM();
+  const { logSession, unlogSessionsFrom } = S;
+  logSession('singapore', D);
+  plan.data.log.push({ date: D, activityId: 'singapore', status: 'missed' });
+  plan.data.log.push({ date: D, activityId: 'singapore', status: 'done', timed: true });
+  unlogSessionsFrom('singapore', 'dm3-c1', 10, D);
+  const left = plan.data.log.filter(e => e.date === D && e.activityId === 'singapore');
+  assert.equal(left.length, 2);
+  assert.ok(left.some(e => e.status === 'missed'));
+  assert.ok(left.some(e => e.timed));
+});

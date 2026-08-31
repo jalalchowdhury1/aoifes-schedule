@@ -7,13 +7,15 @@ import { esc, fmt } from './model.js';
 import { store, initState, fetchRemote, catLabel } from './state.js';
 import {
   initPlan, syncPlan, plan, onPlanChange, togglePaced, logTimed, logDailyStatus,
+  logSession, unlogSessionsFrom,
 } from './plan/state.js';
 import {
   todayStr, addDays, mondayOf, dayStatus, currentCur, nextSession,
   chainTimeline, planDeltaChip, actTotal, daysBetween, dayIdx, isWorkDay,
   actualFinishes,
 } from './plan/model.js';
-import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt } from './plan/mday.js';
+import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt,
+         tbWbCard } from './plan/mday.js';
 import { syncedAt } from './sync.js';
 
 const $ = id => document.getElementById(id);
@@ -32,7 +34,7 @@ const state = {
   tab: 'today',
   weekStart: null,           // Monday of the visible week (Week tab); lazily set to this week
   weekDate: todayStr(),      // the selected day within that week
-  singaporeExtra: false,     // ➕ revealed for the current daily's NEXT lesson
+  extraOpen: null,           // activity id whose ➕ revealed the NEXT lesson's halves
   statusPickKey: null,       // which row's long-press status menu is open
   toastTimer: null,
   toastUndo: null,
@@ -243,7 +245,7 @@ function renderToday() {
     const act = plan.data.activities.find(a => a.id === it.activityId);
     const cur = act ? currentCur(act) : null;
     if (!cur || cur.pattern !== 'tb-wb') continue;
-    h += tbWbCardHtml(act, cur, it, today);
+    h += tbWbCardHtml(act, cur, today);
   }
 
   h += thisWeekCardHtml(today);
@@ -350,20 +352,16 @@ function itemRowHtml(it, dateStr) {
   return row;
 }
 
-// "3A Ch 1 · Numbers to 10,000" -> "3A Ch 1" (mday.js's own shortChainName
-// idiom, kept local here — one line, not worth a shared export for it).
-const shortChainName = c => String(c?.name || '').split('·')[0].trim();
-
 // Item F (polish round 2): a small pace line under the buttons —
-// "L6 · 2 of 22 sessions in 3A Ch 1 · ▲ 2 lessons ahead". The session count
-// is the chain's own raw done/lessons*2 (NOT subjectCards' lesson-fraction
-// numbers, which would read "2 of 22" as "1 of 11"); the ahead/behind figure
-// is in LESSONS, not weeks, via the exact plan-vs-now day gap the Subjects
-// sheet's own consequence sentence uses (chainTimeline + the frozen
-// baseline) — 1 extra lesson pulls the finish 1 day earlier.
-function tbWbPaceLine(act, cur, today) {
-  const sessDone = Math.min(Math.max(0, cur.done || 0), (cur.lessons || 0) * 2);
-  const sessTotal = (cur.lessons || 0) * 2;
+// "L6 · 11 of 22 sessions in 3A Ch 1 · ▲ 2 lessons ahead". The session count
+// is the chapter's own raw done/total (NOT subjectCards' lesson-fraction
+// numbers, which would read "11 of 22" as "5.5 of 11"); the ahead/behind
+// figure is in LESSONS, not weeks, via the exact plan-vs-now day gap the
+// Subjects sheet's own consequence sentence uses (chainTimeline + the frozen
+// baseline) — 1 extra lesson pulls the finish 1 day earlier. The leading
+// label comes from the card model, so a chapter that has reached its trailing
+// review reads "Test 1 ·", never a fabricated lesson number.
+function tbWbPaceLine(act, today, card) {
   let aheadTxt = '';
   const rows = chainTimeline(act, today, plan.data);
   const curRow = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
@@ -374,24 +372,40 @@ function tbWbPaceLine(act, cur, today) {
     const gap = Math.round(Math.abs(dd));
     if (gap) aheadTxt = ` · ${dd < 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd < 0 ? 'ahead' : 'behind'}`;
   }
-  return `<div class="chline">L${Math.floor((cur.done || 0) / 2) + 1} · ${sessDone} of ${sessTotal} sessions in ${esc(shortChainName(cur))}${aheadTxt}</div>`;
+  return `<div class="chline">${esc(card.currentLabel || '')} · ${card.doneSessions} of ${card.totalSessions} sessions in ${esc(card.chapter)}${aheadTxt}</div>`;
 }
 
-function tbWbCardHtml(act, cur, item, today) {
-  const lessonNum = Math.floor((cur.done || 0) / 2) + 1;
-  const doneToday = item.status === 'done';
-  let h = `<div class="glass"><div class="tiny">${esc(act.name)} · lesson ${lessonNum}</div>`;
-  if (doneToday && !state.singaporeExtra) {
-    h += `<div class="dual"><button type="button" class="btn q" data-extra="${esc(act.id)}">➕ Add another lesson</button></div>`;
-  } else {
-    const ns = nextSession(cur);
-    const nextIsWorkbook = ns && /workbook/.test(ns.label);
-    h += `<div class="dual">
-      <button type="button" class="btn${nextIsWorkbook ? '' : ' pri'}" data-tbwb="${esc(act.id)}">✓ Textbook</button>
-      <button type="button" class="btn${nextIsWorkbook ? ' pri' : ''}" data-tbwb="${esc(act.id)}">✓ Workbook</button>
-    </div>`;
-  }
-  h += tbWbPaceLine(act, cur, today);
+// One half of one lesson. The class is the whole message: `on` = logged
+// (green, same as every ✓ check on the page), `next` = the one to tap now
+// (violet ring), `wait` = its turn hasn't come. Everything the tap handler
+// needs rides on the element, so the handler never re-derives the card.
+function halfBtnHtml(actId, curId, x) {
+  const cls = x.done ? ' on' : x.next ? ' next' : ' wait';
+  return `<button type="button" class="btn${cls}" data-tbwb="${esc(actId)}" data-cur="${esc(curId)}"
+    data-session="${x.session}" data-done="${x.done ? 1 : 0}" data-next="${x.next ? 1 : 0}"
+    data-undoable="${x.undoable ? 1 : 0}" data-on="${esc(x.loggedOn || '')}"
+    data-full="${esc(x.fullLabel)}" data-needs="${esc(x.needs || '')}"
+    aria-pressed="${x.done}">${x.done ? '✓ ' : ''}${esc(x.label)}</button>`;
+}
+
+// The Singapore-style lesson card, rendered straight off mday.js's tbWbCard.
+// One row per lesson in play today (the halves are INDEPENDENT ticks now —
+// see that function's header for the bug this replaced), a "Review" row once
+// a chapter reaches its trailing test, and the next lesson behind an explicit
+// ➕ so a second lesson the same day is a deliberate tap, never an accident.
+function tbWbCardHtml(act, cur, today) {
+  const card = tbWbCard(act, cur, plan.data.log, today, state.extraOpen === act.id);
+  if (!card) return '';
+  let h = `<div class="glass"><div class="tiny">${esc(act.name)} · ${esc(card.chapter)}</div>`;
+  for (const row of card.lessons)
+    h += `<div class="dual"><span class="dlab">Lesson ${row.lesson}</span>${
+      row.halves.map(x => halfBtnHtml(act.id, card.curId, x)).join('')}</div>`;
+  if (card.tests.length)
+    h += `<div class="dual"><span class="dlab">Review</span>${
+      card.tests.map(x => halfBtnHtml(act.id, card.curId, x)).join('')}</div>`;
+  if (card.addLesson)
+    h += `<div class="dual"><button type="button" class="btn q" data-extra="${esc(act.id)}">➕ Add lesson ${card.addLesson}</button></div>`;
+  h += tbWbPaceLine(act, today, card);
   h += `</div>`;
   return h;
 }
@@ -567,17 +581,42 @@ function wireTodayEvents(el, items, today) {
     }
     renderAll();
   }));
+  // One half of one lesson. Three outcomes, and the button already carries
+  // everything needed to pick between them:
+  //   * not logged and NEXT   -> append this session (logSession, never a toggle)
+  //   * not logged, not next  -> refused by name ("Tap ✓ Textbook first"): `done`
+  //     is a count, so logging the workbook half over an unlogged textbook half
+  //     would have to fabricate the textbook half
+  //   * logged today          -> untick it, taking today's halves ABOVE it with
+  //     it (a session only ever comes off the top of the chain)
+  //   * logged an earlier day -> left alone; that day's row is the Subjects
+  //     sheet's "Oops" job, not this card's
   el.querySelectorAll('[data-tbwb]').forEach(b => b.addEventListener('click', () => {
-    const act = plan.data.activities.find(a => a.id === b.dataset.tbwb);
-    const cur = act ? currentCur(act) : null;
-    const label = cur ? nextSession(cur)?.label : '';
-    togglePaced(b.dataset.tbwb);
-    state.singaporeExtra = false;
-    showToast(`Logged ${esc(label || 'session')} ✓`, () => togglePaced(b.dataset.tbwb));
+    const actId = b.dataset.tbwb, curId = b.dataset.cur;
+    const session = Number(b.dataset.session);
+    const full = b.dataset.full || 'session';
+    if (b.dataset.done !== '1') {
+      if (b.dataset.next !== '1') {
+        showToast(`Tap ✓ ${esc(b.dataset.needs || 'the half before it')} first`);
+        return;
+      }
+      logSession(actId, today);
+      state.extraOpen = null;
+      showToast(`Logged ${esc(full)} ✓`, () => unlogSessionsFrom(actId, curId, session, today));
+    } else if (b.dataset.undoable !== '1') {
+      const on = b.dataset.on ? fmtDateShort(b.dataset.on) : 'an earlier day';
+      showToast(`${esc(full)} was logged ${esc(on)} — undo it in Subjects`);
+      return;
+    } else {
+      const removed = unlogSessionsFrom(actId, curId, session, today);
+      state.extraOpen = null;
+      showToast(removed.length > 1 ? `Cleared ${removed.length} sessions` : `Cleared ${esc(full)}`,
+        () => { for (let i = 0; i < removed.length; i++) logSession(actId, today); });
+    }
     renderAll();
   }));
   el.querySelectorAll('[data-extra]').forEach(b => b.addEventListener('click', () => {
-    state.singaporeExtra = true;
+    state.extraOpen = b.dataset.extra;
     renderToday();
   }));
 }

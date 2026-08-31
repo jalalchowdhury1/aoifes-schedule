@@ -149,6 +149,73 @@ export function togglePaced(actId, date = todayStr()) {
   commit();
 }
 
+// ── Multi-session days: the tb-wb halves and extra lessons ──
+// `togglePaced` above is a TOGGLE keyed on (activity, date) — the second call
+// of a day FINDS THE FIRST ONE'S ROW AND REMOVES IT. That is exactly right for
+// a one-check-a-day daily, and exactly wrong for a Singapore-style tb-wb
+// lesson, where the textbook and workbook halves are two SEPARATE sessions on
+// the same date (and a double-lesson day is four). Reported from a real phone
+// screen 2026-08-31: tapping "✓ Textbook" then "✓ Workbook" left the day EMPTY,
+// because both buttons called togglePaced and the second tap undid the first.
+//
+// These two are the append / append-inverse pair the phone's dual card writes
+// through instead. Row shape is byte-identical to what togglePaced and the
+// Telegram bot's `_apply_log_progress` write — ONE LOG ROW = ONE SESSION, the
+// ecosystem-wide invariant (site actualFinishes, the merge's bump-replay and
+// every tally rely on it; never a `count` field on one row).
+
+// Append ONE session to whatever the activity's chain says is next. Never
+// removes anything: call it twice and two sessions are logged.
+export function logSession(actId, date = todayStr()) {
+  const act = getActivity(actId);
+  if (!act) return null;
+  const cur = currentCur(act);
+  if (!cur) return null;                    // chain exhausted: nothing to advance
+  const entry = { date, activityId: actId, status: 'done',
+                  curriculum: cur.id, session: cur.done || 0 };
+  plan.data.log.push(entry);
+  cur.done = (cur.done || 0) + 1;
+  commit();
+  return entry;
+}
+
+// Remove the session rows written ON `date` that sit at or after
+// (curId, fromSession) in TEACHING order, and roll each chain's `done` back by
+// exactly the rows removed. Two rules make this safe:
+//   * only rows dated `date` are ever touched — a half logged on an earlier day
+//     belongs to that day (the Subjects sheet's "Oops" row is where a past
+//     session gets taken back), so unticking today can never rewrite history;
+//   * everything ABOVE the tapped session goes with it, because `done` is a
+//     COUNT, not a set: removing the textbook half of a lesson while its
+//     workbook half stayed logged would leave a gap the counter cannot hold.
+// Returns the removed rows in teaching order so the caller's Undo can replay
+// them through logSession, or [] when nothing matched (no commit, no re-render).
+export function unlogSessionsFrom(actId, curId, fromSession, date = todayStr()) {
+  const act = getActivity(actId);
+  if (!act) return [];
+  const chain = act.chain || [];
+  const rank = id => chain.findIndex(c => c && c.id === id);
+  const fromRank = rank(curId);
+  if (fromRank < 0) return [];              // unknown chapter: never guess a range
+  const removed = [];
+  for (let i = plan.data.log.length - 1; i >= 0; i--) {
+    const e = plan.data.log[i];
+    if (!e || e.date !== date || e.activityId !== actId || e.status !== 'done') continue;
+    if (e.timed || e.eventId || !e.curriculum || typeof e.session !== 'number') continue;
+    const r = rank(e.curriculum);
+    if (r < 0 || r < fromRank || (r === fromRank && e.session < fromSession)) continue;
+    removed.push(e);
+    plan.data.log.splice(i, 1);
+  }
+  if (!removed.length) return [];
+  for (const e of removed) {
+    const cur = chain.find(c => c && c.id === e.curriculum);
+    if (cur) cur.done = Math.max(0, (cur.done || 0) - 1);
+  }
+  commit();
+  return removed.reverse();                 // walked backwards: hand them back in order
+}
+
 // Log a timed block (template event or planner slot) for a date: done|partial|missed.
 // Tapping the same status again clears it.
 export function logTimed(eventId, activityId, status, date = todayStr()) {

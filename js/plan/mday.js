@@ -14,7 +14,7 @@
 // amber in-between state instead of collapsing it into "nothing logged yet".
 import { CATS } from '../model.js';
 import {
-  dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls,
+  dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls, sessionsCount,
   actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip,
   dailyStreak, mondayOf, addDays, compareSubjects, s2d, sessionLabel,
 } from './model.js';
@@ -127,6 +127,80 @@ export function dailyStatus(act, log, dateStr) {
   const latestLesson = Math.floor(latest / 2);
   const count = sessionsToday.filter(s => Math.floor(s / 2) === latestLesson).length;
   return count >= 2 ? 'done' : 'half';
+}
+
+// ── tbWbCard: the phone's Singapore-style lesson card, as a pure model ──
+// The card used to be two buttons that BOTH meant "advance to whatever is
+// next", with the violet highlight marking which one that happened to be. On
+// a real phone (2026-08-31) that reads as "Textbook is selected", so the next
+// tap on Workbook looks like a second choice — and was in fact an UNDO, since
+// both buttons called togglePaced and togglePaced is a per-day toggle. Two
+// things were missing and both live here now:
+//   * every half is its OWN session index, with its own done/next/undoable
+//     state, so a button says WHAT IT IS rather than what comes next;
+//   * more than one lesson a day is expressible — every lesson touched today
+//     keeps a row, and the next one is offered behind an explicit ➕ so it is
+//     a deliberate tap and never an accident.
+// Ordering is still the chain's: `done` is a COUNT, so a workbook half cannot
+// be logged over an unlogged textbook half without fabricating it. A half
+// whose turn has not come carries `needs` (the label that must be tapped
+// first) and the page refuses the write with that name in the toast.
+// Pure — js/m.js renders it, tests/plan-mday.test.mjs pins it.
+export const HALF_LABELS = ['Textbook', 'Workbook'];
+
+// What ONE session's button says: inside the paired region a lesson's two
+// halves are just 'Textbook'/'Workbook' (the lesson number lives on the row),
+// past it a trailing chapter review rides on sessionLabel's own 'Test n'.
+export function halfLabel(cur, session) {
+  const paired = Math.max(0, (cur?.lessons || 0) * 2);
+  return session < paired ? HALF_LABELS[session % 2] : sessionLabel(cur, session);
+}
+
+export function tbWbCard(act, cur, log, dateStr, extraOpen = false) {
+  if (!act || !cur || cur.pattern !== 'tb-wb') return null;
+  const total = sessionsCount(cur);
+  if (!total) return null;                    // counts still pending: nothing to tap
+  const paired = Math.max(0, (cur.lessons || 0) * 2);
+  const done = Math.min(Math.max(0, cur.done || 0), total);
+  const rows = (Array.isArray(log) ? log : []).filter(e =>
+    e && e.activityId === act.id && e.status === 'done' && !e.timed && !e.eventId &&
+    e.curriculum && typeof e.session === 'number');
+  // "Did anything at all get logged today?" spans EVERY chapter, not just the
+  // open one: a day that finished 3A Ch 1 and rolled into Ch 2 has nothing
+  // logged against Ch 2 yet, and must still gate its first lesson behind ➕
+  // instead of laying a fresh pair of buttons under the family's thumb.
+  const anyToday = rows.some(e => e.date === dateStr);
+  // A `done` counter bumped without log rows (a Claude session's bulk set)
+  // leaves loggedOn null — the half reads ticked and simply is not undoable
+  // here, which is honest: there is no row on this date to take back.
+  const dateOf = s => rows.find(e => e.curriculum === cur.id && e.session === s)?.date || null;
+  const item = s => {
+    const on = dateOf(s);
+    return { session: s, label: halfLabel(cur, s), fullLabel: sessionLabel(cur, s),
+      done: s < done, loggedOn: on, undoable: !!on && on === dateStr, next: s === done,
+      needs: s > done ? halfLabel(cur, done) : null };
+  };
+  const base = { chapter: shortChainName(cur), curId: cur.id,
+    doneSessions: done, totalSessions: total };
+
+  if (done >= paired) {                       // trailing chapter review(s), self-contained
+    const tests = [];
+    for (let s = paired; s < total; s++) tests.push(item(s));
+    return { ...base, lessons: [], tests, addLesson: null,
+      currentLabel: done < total ? sessionLabel(cur, done) : null };
+  }
+
+  const current = Math.floor(done / 2) + 1;   // first lesson with a half still owed
+  const inProgress = done % 2 === 1;          // textbook logged, workbook outstanding
+  const lessonsToday = [...new Set(rows
+    .filter(e => e.date === dateStr && e.curriculum === cur.id && e.session < paired)
+    .map(e => Math.floor(e.session / 2) + 1))];
+  const showCurrent = inProgress || !anyToday || !!extraOpen;
+  const nums = [...new Set([...lessonsToday, ...(showCurrent ? [current] : [])])]
+    .sort((a, b) => a - b);
+  return { ...base, tests: [], currentLabel: `L${current}`,
+    lessons: nums.map(n => ({ lesson: n, halves: [item((n - 1) * 2), item((n - 1) * 2 + 1)] })),
+    addLesson: showCurrent ? null : current };
 }
 
 function noteForDaily(cur) {

@@ -389,9 +389,17 @@ export function mergePlanWrites(current, incoming) {
   const ovKey = o => (o && o.id != null && o.id !== ''
     ? `id:${o.id}`
     : `fp:${o?.date}|${o?.action}|${o?.start}|${o?.end}|${o?.name}`);
-  // One status per thing per day is the log's own invariant (logTimed replaces
-  // in place), so (date, owner) is the row's identity.
+  // One STATUS per thing per day is the log's own invariant (logTimed replaces
+  // in place), so (date, owner) is a marker's or a timed row's identity.
   const logKey = e => `${e?.date}|${e?.eventId || e?.activityId || ''}`;
+  // A SESSION row is different: a tb-wb lesson is two rows on one date
+  // (textbook + workbook) and a double-lesson day is four, so which session it
+  // is has to be part of its identity. Keyed on (date, owner) alone, every row
+  // after the first collapsed into the first — a phone logging the textbook
+  // half while the bot logged the workbook half kept one of them and left the
+  // chapter counter a session short (2026-08-31).
+  const sessKey = e => (e && e.curriculum && typeof e.session === 'number'
+    ? `${logKey(e)}|${e.curriculum}#${e.session}` : null);
 
   const inOv = Array.isArray(incoming.overrides) ? incoming.overrides : [];
   const curOv = Array.isArray(current.overrides) ? current.overrides : [];
@@ -400,8 +408,16 @@ export function mergePlanWrites(current, incoming) {
 
   const haveOv = new Set(inOv.map(ovKey));
   const haveLog = new Set(inLog.map(logKey));
+  const haveSess = new Set(inLog.map(sessKey).filter(Boolean));
   const addOv = curOv.filter(o => !haveOv.has(ovKey(o)));
-  const addLog = curLog.filter(e => !haveLog.has(logKey(e)));
+  // A session row is carried when THAT session is missing from the incoming
+  // blob; a marker or timed row is still carried only when the incoming blob
+  // has nothing at all for that owner/day — so an incoming session row keeps
+  // suppressing a stale ✗ marker exactly the way it did before.
+  const addLog = curLog.filter(e => {
+    const sk = sessKey(e);
+    return sk ? !haveSess.has(sk) : !haveLog.has(logKey(e));
+  });
   if (!addOv.length && !addLog.length) return incoming;    // nothing to carry over
 
   const out = { ...incoming, overrides: [...inOv, ...addOv], log: [...inLog, ...addLog] };

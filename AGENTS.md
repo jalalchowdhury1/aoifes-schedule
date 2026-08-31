@@ -227,10 +227,19 @@ a stale snapshot can erase another writer's entry (measured pre-merge windows:
   `mergePlanWrites`
   (pure, canonical in js/plan/model.js, imported by the endpoint) — unions into
   the incoming blob any of current's overrides rows (key: id, else
-  date|action|start|end|name fingerprint) and log rows (key: date +
-  eventId||activityId) that the incoming snapshot is missing, and bumps the
-  matching curriculum `done` counter for unioned log rows so the denormalized
-  count stays consistent with the log.
+  date|action|start|end|name fingerprint) and log rows that the incoming
+  snapshot is missing, and bumps the matching curriculum `done` counter for
+  unioned log rows so the denormalized count stays consistent with the log.
+- **Log row identity is two-tier (2026-08-31).** A marker or timed row keeps
+  `date|eventId||activityId` — one STATUS per thing per day is the log's own
+  invariant. A SESSION row (has `curriculum` + a numeric `session`) adds
+  `|curriculum#session`, because a tb-wb lesson is two rows on one date and a
+  double-lesson day is four; keyed on `date|owner` alone every row after the
+  first collapsed into the first, so a phone logging the textbook half while
+  the bot logged the workbook half kept one of them and left the chapter
+  counter a session short. An incoming session row still contributes the
+  plain `date|owner` key too, so it keeps suppressing a stale ✗ marker
+  exactly as before.
 - **Protected: appends** (the realistic collision — two ✓s, a bot add + a tab
   tap). **Not protected: concurrent deletions** — an un-tap racing another
   writer may be resurrected by the union. Accepted trade-off: a resurrected
@@ -559,11 +568,19 @@ the parts worth keeping.
     a timed block is its own row keyed off its own status. Feeds both the
     Today "Yesterday" line and a tapped past day on Week.
 - **Write-path rule.** `/m` never writes to the log or KV directly — every
-  mutation goes through `togglePaced`/`logTimed`/`logDailyStatus`
-  (js/plan/state.js), the exact same functions the desktop Subjects/Today
-  views and the Telegram bot use (`logDailyStatus` is the one exception
-  that is NEW, not shared with the desktop — see the long-press bullet
-  below). A tap shows a toast ("Logged L6 textbook ✓ · Undo"); Undo is two
+  mutation goes through `togglePaced`/`logTimed`/`logDailyStatus`/
+  `logSession`/`unlogSessionsFrom` (js/plan/state.js), the exact same
+  functions the desktop Subjects/Today views and the Telegram bot use
+  (`logDailyStatus` is the one exception that is NEW, not shared with the
+  desktop — see the long-press bullet below). `logSession` /
+  `unlogSessionsFrom` (2026-08-31) are the append / append-inverse pair for
+  MULTI-SESSION days: togglePaced is a toggle keyed on (activity, date), so
+  a second call the same day undoes the first — right for a one-check daily,
+  wrong for a tb-wb lesson (two sessions) or a double-lesson day (four).
+  Row shape is unchanged — ONE LOG ROW = ONE SESSION, the same invariant the
+  bot's `_apply_log_progress` keeps; never a `count` field on one row. The
+  DESKTOP Today view's `.drow` still calls togglePaced only, so it remains
+  one session a day — the phone is the multi-lesson surface. A tap shows a toast ("Logged L6 textbook ✓ · Undo"); Undo is two
   taps (tap → "Really undo?" for 3s → tap again → the exact inverse call).
 - **Long-press status menu (polish round 2).** Every row's ONLY status
   control is the round check — the old lone "…" button (which made one row
@@ -581,16 +598,39 @@ the parts worth keeping.
   `{date, activityId, status}`, no `curriculum`/`session`/`timed`/
   `eventId` — and is idempotent/toggling like togglePaced/logTimed
   (tests/plan-state.test.mjs).
-- **The Singapore-style dual card** (any active daily whose current chain
+- **The Singapore-style lesson card** (any active daily whose current chain
   entry is `tb-wb`, not hardcoded to one id): the row's own check in "The
-  day" list is NOT a toggle (status-only). Both "✓ Textbook" and "✓
-  Workbook" buttons call the SAME `togglePaced(actId)` — there is no way to
-  address textbook vs workbook independently, the model only supports
-  "advance to whatever's next" — the primary/dim styling just reflects which
-  one `nextSession` says is next. Once today's pair is logged, the pair
-  hides behind a "➕ Add another lesson" prompt (transient UI state, not
-  persisted) so a second lesson the same day is a deliberate extra tap, not
-  an accident.
+  day" list is NOT a toggle (status-only) — this card is what advances it.
+  Rebuilt 2026-08-31 after a real phone report ("I press Textbook, half
+  fills — then I press Workbook and the whole thing is gone again").
+  - **The bug it replaced.** Both buttons carried the same `data-tbwb` and
+    called the same `togglePaced(actId)`, and togglePaced is a TOGGLE keyed
+    on (activity, date): the Workbook tap found the Textbook tap's row and
+    removed it. The violet `pri` fill marked whichever half `nextSession`
+    said was NEXT, which reads on a phone as "this one is selected". Same
+    root cause made "➕ Add another lesson" an undo button, so more than one
+    session a day was impossible from `/m` at all.
+  - **The model is pure**: `tbWbCard(act, cur, log, dateStr, extraOpen)` in
+    js/plan/mday.js → `{chapter, curId, lessons:[{lesson, halves:[…]}],
+    tests:[…], addLesson, currentLabel, doneSessions, totalSessions}`. Each
+    half/test item is `{session, label, fullLabel, done, loggedOn, undoable,
+    next, needs}` — its OWN session index and its own state, so a button says
+    what it is rather than what's next. js/m.js only renders it.
+  - **What shows**: one `.dual` row per lesson touched today, plus the
+    in-progress lesson; a "Review" row once a chapter reaches its trailing
+    `tests` (was fabricating "Lesson 11" for a 10-lesson chapter); the next
+    lesson gated behind "➕ Add lesson N" (transient `state.extraOpen`, not
+    persisted) so a second lesson the same day is a deliberate tap. Button
+    class IS the state: `on` = logged (the same green as every ✓ check),
+    `next` = tap this one (violet ring), `wait` = its turn hasn't come.
+  - **Writes** go through the new `logSession` / `unlogSessionsFrom`
+    (js/plan/state.js), NOT togglePaced — see the write-path rule above.
+    Order is still the chain's: `done` is a COUNT, so tapping Workbook over
+    an unlogged Textbook half is refused by name ("Tap ✓ Textbook first")
+    rather than fabricating the half. Unticking only ever removes rows dated
+    TODAY (an earlier day's half says so and points at Subjects → Oops) and
+    takes today's halves ABOVE it with it, because a session only comes off
+    the top of the chain.
 - **The widget is GENERATED — never edit `m/widget.js` by hand.**
   `node scripts/build-widget.mjs` concatenates `js/model.js` + `js/plan/
   model.js` + `js/plan/mday.js` + `scripts/widget-ui.js` inside one async

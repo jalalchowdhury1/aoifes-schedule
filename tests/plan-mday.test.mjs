@@ -13,7 +13,7 @@ import { sanitizePlan } from '../js/plan/model.js';
 import {
   dayItems, dayHeader, nowBlock, subjectCards, widgetModel, widgetNext, fmtHM,
   dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
-  EMOJI_MAP, EMOJI_FALLBACK, dayState, fieldClassFor, receipt,
+  EMOJI_MAP, EMOJI_FALLBACK, dayState, fieldClassFor, receipt, tbWbCard,
 } from '../js/plan/mday.js';
 
 const events = JSON.parse(readFileSync(new URL('./fixtures/plan-mday-schedule.json', import.meta.url), 'utf8')).events;
@@ -567,4 +567,120 @@ test('statusOfTimed: requires a non-null key (no cross-match on keyless rows)', 
   assert.equal(statusOfTimed(withLog, MON, quran), 'missed');
   const ruhama = items.find(it => it.eventId === 'e1007');
   assert.equal(statusOfTimed(withLog, MON, ruhama), undefined);
+});
+
+// ── tbWbCard: the phone's Singapore lesson card, as a pure model ──
+// The card used to be two buttons that BOTH meant "advance whatever's next",
+// with the violet highlight showing which one that was. On a real phone
+// (2026-08-31) that read as "textbook is selected", so the next tap on
+// Workbook looked like a second choice and was in fact an undo. The model
+// below gives every half its OWN session index and its own done/next/undoable
+// state, so a button says what it is rather than what's next.
+const smAct = (chain, log = []) => ({
+  act: { id: 'singapore', name: 'Singapore Math', type: 'paced', status: 'active', chain },
+  log,
+});
+const CH1 = done => ({ id: 'dm3-c1', name: '3A Ch 1 · Numbers to 10,000',
+  pattern: 'tb-wb', lessons: 11, tests: 0, done });
+const CARD_DAY = '2026-08-31';
+const cardFor = (done, log = [], extra = false) => {
+  const chain = [CH1(done)];
+  const { act } = smAct(chain, log);
+  return tbWbCard(act, chain[0], log, CARD_DAY, extra);
+};
+const row = (session, date = CARD_DAY) => ({ date, activityId: 'singapore',
+  status: 'done', curriculum: 'dm3-c1', session });
+
+test('tbWbCard: a fresh day offers the current lesson with BOTH halves open', () => {
+  const c = cardFor(10);
+  assert.equal(c.chapter, '3A Ch 1');
+  assert.equal(c.lessons.length, 1);
+  assert.equal(c.lessons[0].lesson, 6);
+  assert.deepEqual(c.lessons[0].halves.map(h => h.label), ['Textbook', 'Workbook']);
+  assert.deepEqual(c.lessons[0].halves.map(h => h.done), [false, false]);
+  assert.deepEqual(c.lessons[0].halves.map(h => h.next), [true, false]);
+  assert.equal(c.lessons[0].halves[1].needs, 'Textbook');       // workbook waits its turn
+  assert.equal(c.addLesson, null);
+});
+
+test('tbWbCard: after the textbook tap the WORKBOOK is next — the textbook stays ticked', () => {
+  const c = cardFor(11, [row(10)]);
+  const [tb, wb] = c.lessons[0].halves;
+  assert.equal(c.lessons[0].lesson, 6);
+  assert.deepEqual([tb.done, wb.done], [true, false]);
+  assert.deepEqual([tb.next, wb.next], [false, true]);
+  assert.equal(tb.undoable, true);                              // logged today
+  assert.equal(c.addLesson, null);
+});
+
+test('tbWbCard: both halves ticked -> the lesson stays on screen, the NEXT one is gated behind ➕', () => {
+  const c = cardFor(12, [row(10), row(11)]);
+  assert.equal(c.lessons.length, 1);
+  assert.equal(c.lessons[0].lesson, 6);
+  assert.deepEqual(c.lessons[0].halves.map(h => h.done), [true, true]);
+  assert.equal(c.addLesson, 7);
+});
+
+test('tbWbCard: ➕ opens lesson 7 while lesson 6 keeps its ✓✓ — two lessons in one day', () => {
+  const c = cardFor(12, [row(10), row(11)], true);
+  assert.deepEqual(c.lessons.map(l => l.lesson), [6, 7]);
+  assert.deepEqual(c.lessons[1].halves.map(h => h.done), [false, false]);
+  assert.equal(c.lessons[1].halves[0].next, true);
+  assert.equal(c.addLesson, null);
+});
+
+test('tbWbCard: a second lesson half-logged stays open without ➕ being re-tapped', () => {
+  const c = cardFor(13, [row(10), row(11), row(12)]);
+  assert.deepEqual(c.lessons.map(l => l.lesson), [6, 7]);
+  assert.deepEqual(c.lessons[1].halves.map(h => h.done), [true, false]);
+});
+
+test('tbWbCard: a half logged on an EARLIER day shows ticked but is not undoable here', () => {
+  const c = cardFor(11, [row(10, '2026-08-30')]);
+  const [tb, wb] = c.lessons[0].halves;
+  assert.equal(tb.done, true);
+  assert.equal(tb.loggedOn, '2026-08-30');
+  assert.equal(tb.undoable, false);
+  assert.equal(wb.next, true);                                  // today finishes the pair
+});
+
+test('tbWbCard: nothing logged today for THIS chapter but a lesson finished in the last one -> still gated', () => {
+  const chain = [{ ...CH1(22) }, { id: 'dm3-c2', name: '3A Ch 2 · Addition',
+    pattern: 'tb-wb', lessons: 8, tests: 1, done: 0 }];
+  const log = [row(20), row(21)];                               // finished Ch 1 today
+  const c = tbWbCard({ id: 'singapore', chain }, chain[1], log, CARD_DAY);
+  assert.equal(c.chapter, '3A Ch 2');
+  assert.equal(c.lessons.length, 0);
+  assert.equal(c.addLesson, 1);
+});
+
+test('tbWbCard: past the paired region it is a REVIEW button, never a fabricated lesson 11', () => {
+  const chain = [{ id: 'dm3-c4', name: '3A Ch 4 · Multiplication', pattern: 'tb-wb',
+    lessons: 10, tests: 1, done: 20 }];
+  const c = tbWbCard({ id: 'singapore', chain }, chain[0], [], CARD_DAY);
+  assert.deepEqual(c.lessons, []);
+  assert.equal(c.tests.length, 1);
+  assert.equal(c.tests[0].label, 'Test 1');
+  assert.equal(c.tests[0].next, true);
+  assert.equal(c.currentLabel, 'Test 1');
+  assert.equal(c.totalSessions, 21);
+});
+
+test('tbWbCard: the pace line reads the CURRENT lesson and the chapter\'s real session total', () => {
+  const c = cardFor(11, [row(10)]);
+  assert.equal(c.currentLabel, 'L6');
+  assert.equal(c.doneSessions, 11);
+  assert.equal(c.totalSessions, 22);
+});
+
+test('tbWbCard: a count-pending chapter (no lessons loaded yet) renders nothing', () => {
+  const chain = [{ id: 'dm3', name: 'Dimensions Math G3', pattern: 'tb-wb',
+    lessons: 0, tests: 0, done: 0 }];
+  assert.equal(tbWbCard({ id: 'singapore', chain }, chain[0], [], CARD_DAY), null);
+});
+
+test('tbWbCard: full labels are sessionLabel\'s own strings, so a toast names the lesson', () => {
+  const c = cardFor(12, [row(10), row(11)], true);
+  assert.equal(c.lessons[1].halves[0].fullLabel, 'Lesson 7 · textbook');
+  assert.equal(c.lessons[1].halves[1].fullLabel, 'Lesson 7 · workbook');
 });
