@@ -684,3 +684,22 @@ test('tbWbCard: full labels are sessionLabel\'s own strings, so a toast names th
   assert.equal(c.lessons[1].halves[0].fullLabel, 'Lesson 7 · textbook');
   assert.equal(c.lessons[1].halves[1].fullLabel, 'Lesson 7 · workbook');
 });
+
+test('subjectCards: carries the PACE gap, not just the date-derived week delta', () => {
+  const p = sanitizePlan({
+    version: 2, periods: [],
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    activities: [{ id: 'singapore', name: 'Singapore Math', type: 'paced', status: 'active',
+      rhythm: { kind: 'daily', sessionsPerDay: 2 }, travel: { mode: 'reduced', factor: 0.5 },
+      baseline: { setOn: '2026-08-28', rows: { 'dm3-c1': '2026-12-27' } },
+      chain: [{ id: 'dm3-c1', pattern: 'tb-wb', lessons: 11, tests: 0, done: 12 }] }],
+    overrides: [],
+    log: [...Array(2).fill('2026-08-28'), ...Array(4).fill('2026-08-29'),
+          ...Array(4).fill('2026-08-30'), ...Array(2).fill('2026-08-31')]
+      .map(date => ({ date, activityId: 'singapore', status: 'done', curriculum: 'dm3-c1', session: 0 })),
+  });
+  const card = subjectCards(p, '2026-08-31').find(c => c.id === 'singapore');
+  assert.equal(card.pace.lessons, 2, '12 sessions logged against 8 the plan expected');
+  assert.equal(card.pace.done, 12);
+  assert.equal(card.pace.expected, 8);
+});

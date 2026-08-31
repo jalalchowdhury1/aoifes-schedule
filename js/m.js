@@ -11,7 +11,7 @@ import {
 } from './plan/state.js';
 import {
   todayStr, addDays, mondayOf, dayStatus, currentCur, nextSession,
-  chainTimeline, planDeltaChip, planGapDays, actTotal, daysBetween, dayIdx, isWorkDay,
+  chainTimeline, planDeltaChip, paceGapLessons, actTotal, daysBetween, dayIdx, isWorkDay,
   actualFinishes,
 } from './plan/model.js';
 import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt,
@@ -361,6 +361,18 @@ function itemRowHtml(it, dateStr) {
   return row;
 }
 
+// The ahead/behind capsule, rendered identically on the Today lesson card,
+// the This-week card and the Subjects cards, always from the PACE gap and
+// never from a difference of two projected dates (see paceGap in
+// js/plan/model.js for the day this distinction cost).
+export function paceChipHtml(pace) {
+  if (!pace) return '';
+  const n = Math.round(pace.lessons);
+  if (!n) return `<span class="cap grn">on plan</span>`;
+  const a = Math.abs(n);
+  return `<span class="cap ${n > 0 ? 'grn' : 'amb'}">${n > 0 ? '▲' : '▼'} ${a} lesson${a === 1 ? '' : 's'} ${n > 0 ? 'ahead' : 'behind'}</span>`;
+}
+
 // The card's foot: pace on the left ("L7 · 12 of 22 sessions"), the plan
 // delta on the right as the SAME capsule the This-week card uses, so the two
 // cards read as one family. The session count is the chapter's own raw
@@ -373,18 +385,17 @@ function itemRowHtml(it, dateStr) {
 // fabricated lesson number. The chapter name is NOT repeated here; it is the
 // card's own header.
 function tbWbFootHtml(act, today, card) {
-  let chip = '';
-  const rows = chainTimeline(act, today, plan.data);
-  const curRow = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
-  const base = act.baseline?.rows;
-  const baseDate = curRow && base ? base[curRow.key] : null;
-  // planGapDays: POSITIVE = ahead (the projection lands earlier than the
-  // frozen plan). This line used to compute the same subtraction by hand with
-  // the sign read backwards, so a subject 7 days BEHIND its plan advertised
-  // "▲ 7 lessons ahead" (fixed 2026-08-31 — see planGapDays' own comment).
-  const dd = planGapDays(curRow?.finish, baseDate);
-  const gap = dd == null ? 0 : Math.round(Math.abs(dd));
-  if (gap) chip = `<span class="cap ${dd > 0 ? 'grn' : 'amb'}">${dd > 0 ? '▲' : '▼'} ${gap} lesson${gap === 1 ? '' : 's'} ${dd > 0 ? 'ahead' : 'behind'}</span>`;
+  // AHEAD/BEHIND IS PACE, NOT DATES. This used to difference the live
+  // projected finish against the frozen baseline date, and both of those walk
+  // in whole weeks anchored on a Monday — so it read "7 lessons behind" for a
+  // child who was 2 lessons AHEAD, purely because the baseline was frozen on a
+  // Friday and the walk ran on a Monday. paceGapLessons counts the sessions
+  // she actually logged against the sessions that same plan's pace expected
+  // over the same days (js/plan/model.js).
+  const g = paceGapLessons(act, plan.data, today);
+  // A lone "on plan" capsule adds nothing beside the sessions count, so the
+  // card's foot shows the chip only when there is a gap to report.
+  const chip = g && Math.round(g.lessons) ? paceChipHtml(g) : '';
   return `<div class="smfoot"><span class="chline">${esc(card.currentLabel || '')} · ${card.doneSessions} of ${card.totalSessions} sessions</span>${chip}</div>`;
 }
 
@@ -434,11 +445,7 @@ function thisWeekCardHtml(today) {
   if (!cards.length) return '';
   const lines = cards.map(c => {
     const chips = [];
-    if (c.delta) chips.push(c.delta.state === 'on'
-      ? `<span class="cap grn">on plan</span>`
-      : c.delta.state === 'ahead'
-        ? `<span class="cap grn">▲ ${c.delta.weeks} wk${c.delta.weeks > 1 ? 's' : ''} ahead</span>`
-        : `<span class="cap amb">▼ ${c.delta.weeks} wk${c.delta.weeks > 1 ? 's' : ''} behind</span>`);
+    if (c.pace) chips.push(paceChipHtml(c.pace));
     if (c.streak >= 2) chips.push(`<span class="cap">${c.streak}-day streak</span>`);
     return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
       <div><b style="font-size:14px">${esc(c.name)}</b> — <span class="dim" style="font-size:13px">${c.sessionsThisWeek} session${c.sessionsThisWeek === 1 ? '' : 's'}</span></div>
@@ -781,9 +788,7 @@ function cardHtml(c) {
     : '';
   const caps = [];
   if (c.status === 'active') {
-    if (c.delta) caps.push(c.delta.state === 'on' ? `<span class="cap grn">on plan</span>`
-      : c.delta.state === 'ahead' ? `<span class="cap grn">▲ ${c.delta.weeks} wk${c.delta.weeks > 1 ? 's' : ''} ahead</span>`
-      : `<span class="cap amb">▼ ${c.delta.weeks} wk${c.delta.weeks > 1 ? 's' : ''} behind</span>`);
+    if (c.pace) caps.push(paceChipHtml(c.pace));
     if (c.streak >= 2) caps.push(`<span class="cap">${c.streak}-day streak</span>`);
     if (c.nextLabel) caps.push(`<span class="cap vio">next: ${esc(c.nextLabel)}</span>`);
   }
@@ -816,12 +821,16 @@ function openSubjectSheet(id) {
     const base = act.baseline?.rows;
     const baseDate = curRow && base ? base[curRow.key] : null;
     const nowDate = curRow ? curRow.finish : null;
-    const delta = planDeltaChip(nowDate, baseDate);
+    // The tile captions and the sentence below both read the PACE gap, never
+    // the difference between these two dates — see tbWbFootHtml's comment and
+    // paceGap in js/plan/model.js for why differencing them lies.
+    const g = paceGapLessons(act, plan.data, today);
+    const n = g ? Math.round(g.lessons) : 0;
     h += `<div class="two">
       <div class="glass"><div class="lab">Plan</div><div class="v">${baseDate ? fmtDateShort(baseDate) : '—'}</div><div class="dim" style="font-size:11px">${act.baseline ? `frozen ${fmtDateShort(act.baseline.setOn)}` : 'not set'}</div></div>
-      <div class="glass"><div class="lab">Now</div><div class="v${delta && delta.state !== 'behind' ? ' grn' : ''}">${nowDate ? fmtDateShort(nowDate) : '—'}</div><div class="dim" style="font-size:11px">${deltaCaption(delta)}</div></div>
+      <div class="glass"><div class="lab">Now</div><div class="v${n >= 0 ? ' grn' : ''}">${nowDate ? fmtDateShort(nowDate) : '—'}</div><div class="dim" style="font-size:11px">${esc(paceCaption(g))}</div></div>
     </div>`;
-    if (baseDate && nowDate) h += `<p class="conseq">${consequenceSentence(planGapDays(nowDate, baseDate))}</p>`;
+    h += `<p class="conseq">${paceSentence(g, nowDate, baseDate)}</p>`;
   }
 
   h += oopsRowHtml(act);
@@ -840,30 +849,37 @@ function subtitleFor(act) {
   return `${spd}${hasTbWb ? ' · textbook + workbook' : ''}${travel}`;
 }
 
-function deltaCaption(delta) {
-  if (!delta) return 'no baseline yet';
-  if (delta.state === 'on') return 'on plan';
-  const n = Math.abs(delta.weeks);
-  return delta.state === 'ahead' ? `${n} wk${n === 1 ? '' : 's'} ahead` : `${n} wk${n === 1 ? '' : 's'} behind`;
+// The caption under the Now tile, and the sentence under both tiles. Both
+// answer "is she keeping up?", which is a question about PACE — sessions
+// logged against sessions the plan's pace expected — and never about the gap
+// between two projected finish dates. Those dates are walked in whole weeks
+// from `mondayOf(today)`, so two snapshots taken on different weekdays differ
+// by 7 days for no reason; differencing them is what told the family "7
+// lessons behind" on the day their child was 2 lessons ahead (2026-08-31).
+export function paceCaption(gap) {
+  if (!gap) return 'no plan frozen yet';
+  const n = Math.round(gap.lessons);
+  if (!n) return 'on plan';
+  return `${Math.abs(n)} lesson${Math.abs(n) === 1 ? '' : 's'} ${n > 0 ? 'ahead' : 'behind'}`;
 }
 
-// The one-line consequence under the Plan/Now tiles. `dd` is planGapDays:
-// POSITIVE = AHEAD (the projection lands earlier than the frozen plan). Two
-// bugs lived here until 2026-08-31: the sign was read backwards (so "behind"
-// printed as "ahead"), and the second clause assumed more lessons push you
-// FURTHER in whichever direction you already are. They don't — extra lessons
-// always pull the finish earlier, so when she is behind they close the gap.
-// The two directions therefore end differently: ahead compounds, behind
-// recovers.
-export function consequenceSentence(dd) {
-  const gap = dd == null ? 0 : Math.round(Math.abs(dd));
-  if (!gap) return "She's exactly on the plan right now.";
-  if (dd > 0) {
-    const weeksNow = Math.floor(gap / 7);
-    const more = gap % 7 === 0 ? 7 : 7 - (gap % 7);
-    return `She's <b>${gap} lesson${gap === 1 ? '' : 's'} ahead of</b> the plan. Every extra lesson pulls the finish 1 day earlier; ${more} more and the card reads <b>▲ ${weeksNow + 1} wk ahead</b>.`;
-  }
-  return `She's <b>${gap} lesson${gap === 1 ? '' : 's'} behind</b> the plan. Every extra lesson pulls the finish 1 day earlier, so <b>${gap} more</b> puts her back on the plan.`;
+export function paceSentence(gap, nowDate, baseDate) {
+  if (!gap) return 'No plan frozen for this subject yet, so there is nothing to be ahead or behind of.';
+  const n = Math.round(gap.lessons);
+  const evidence = `<b>${gap.done}</b> session${gap.done === 1 ? '' : 's'} logged since ${esc(fmtDateShort(gap.since))}, where the plan's own pace expected <b>${Math.round(gap.expected)}</b>`;
+  let out = !n
+    ? `She's <b>right on the plan</b>: ${evidence}.`
+    : n > 0
+      ? `She's <b>${n} lesson${n === 1 ? '' : 's'} ahead</b> of the plan: ${evidence}.`
+      : `She's <b>${-n} lesson${n === -1 ? '' : 's'} behind</b> the plan: ${evidence}.`;
+  // Only explain the dates when they actually point the other way, which
+  // happens because a finish date lands on the END of a week and therefore
+  // moves in 7-day steps. Silence the rest of the time.
+  const datesLater = nowDate && baseDate && nowDate > baseDate;
+  const datesEarlier = nowDate && baseDate && nowDate < baseDate;
+  if ((n >= 0 && datesLater) || (n < 0 && datesEarlier))
+    out += ` The finish dates above land on the end of a week, so they jump 7 days at a time and can point the other way.`;
+  return out;
 }
 
 // Only a status:'done' row is something togglePaced can actually undo — it

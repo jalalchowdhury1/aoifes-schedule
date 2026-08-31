@@ -31,8 +31,8 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry, consequenceSentence } = await import('../js/m.js');
-const { planGapDays, planDeltaChip } = await import('../js/plan/model.js');
+const { lastDoneEntry, paceCaption, paceSentence } = await import('../js/m.js');
+const { planGapDays, planDeltaChip, paceGap, paceGapLessons, expectedSessions } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
 
@@ -106,27 +106,98 @@ test('planGapDays agrees with planDeltaChip, the convention it was cloned from',
   assert.ok(planGapDays('2027-03-01', PLAN_DATE) < 0);
 });
 
-test('consequenceSentence: a LATER projection reads behind, never ahead', () => {
-  const txt = consequenceSentence(planGapDays(LATER, PLAN_DATE));
-  assert.match(txt, /7 lessons behind/);
-  assert.equal(/ahead/.test(txt), false, 'the live wording that was wrong');
+// ── ahead/behind is PACE, not a difference of two projected dates ──
+// THE REAL BUG (2026-08-31, user caught it): both /m surfaces derived
+// "N lessons ahead/behind" by differencing the live projected finish against
+// the frozen baseline date. projectFinish/chainTimeline walk in WHOLE WEEKS
+// anchored on mondayOf(fromDate) and return the SUNDAY of the finishing week,
+// so the number carried up to 7 days of pure quantisation.
+//
+// Live numbers that exposed it: baseline frozen Fri 2026-08-28 (anchor Monday
+// Aug 24, 251 sessions, 17.93 weeks charged as 18) -> Dec 27. Three days later
+// the walk ran on Mon 2026-08-31 (anchor Monday Aug 31, 239 sessions, 17.07
+// weeks ALSO charged as 18) -> Jan 3. The date moved a WEEK LATER while she
+// logged 12 sessions in 4 days against a planned 8. The phone said "7 lessons
+// behind" for a child 2 lessons AHEAD.
+const SM_ACT = {
+  id: 'singapore', type: 'paced', status: 'active',
+  rhythm: { kind: 'daily', sessionsPerDay: 2 }, travel: { mode: 'reduced', factor: 0.5 },
+  baseline: { setOn: '2026-08-28', rows: { 'dm3-c1': '2026-12-27' } },
+  chain: [{ id: 'dm3-c1', pattern: 'tb-wb', lessons: 11, tests: 0, done: 12 }],
+};
+const sessionRow = (date) => ({ date, activityId: 'singapore', status: 'done',
+  curriculum: 'dm3-c1', session: 0 });
+// The real shape of her first four days: 2, 4, 4, 2.
+const SM_PLAN = { periods: [], parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11' },
+  activities: [SM_ACT],
+  log: [...Array(2).fill('2026-08-28'), ...Array(4).fill('2026-08-29'),
+        ...Array(4).fill('2026-08-30'), ...Array(2).fill('2026-08-31')].map(sessionRow) };
+
+test('expectedSessions: a 2-a-day plan expects 8 across four inclusive days', () => {
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', SM_PLAN), 8);
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-28', SM_PLAN), 2);
+  assert.equal(expectedSessions(SM_ACT, '2026-08-31', '2026-08-28', SM_PLAN), 0);  // reversed
+  assert.equal(expectedSessions(SM_ACT, 'nonsense', '2026-08-31', SM_PLAN), 0);
 });
 
-test('consequenceSentence: behind recovers, it does not compound', () => {
-  // Extra lessons ALWAYS pull the finish earlier, so when she is behind they
-  // close the gap. The old sentence said "7 more and the card reads 2 wk
-  // behind", which is the opposite of what another 7 lessons would do.
-  const txt = consequenceSentence(planGapDays(LATER, PLAN_DATE));
-  assert.match(txt, /7 more<\/b> puts her back on the plan/);
+test('expectedSessions: a trip at half speed lowers what the plan expects', () => {
+  const away = { ...SM_PLAN, periods: [{ id: 'p1', start: '2026-08-28', end: '2026-08-31', type: 'travel' }] };
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', away), 4);   // 0.5 factor
+  const off = { ...SM_PLAN, periods: [{ id: 'p1', start: '2026-08-28', end: '2026-08-31', type: 'off' }] };
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', off), 0);
 });
 
-test('consequenceSentence: an EARLIER projection reads ahead and compounds', () => {
-  const txt = consequenceSentence(planGapDays(EARLIER, PLAN_DATE));
-  assert.match(txt, /7 lessons ahead of/);
-  assert.match(txt, /▲ 2 wk ahead/);            // 7 days ahead + 7 more = 2 wks
+test('paceGap: the live case reads 2 lessons AHEAD, not 7 behind', () => {
+  const g = paceGapLessons(SM_ACT, SM_PLAN, '2026-08-31');
+  assert.equal(g.done, 12);
+  assert.equal(g.expected, 8);
+  assert.equal(g.sessions, 4);
+  assert.equal(g.lessons, 2);            // a tb-wb lesson is two sessions
+  assert.equal(g.since, '2026-08-28');
 });
 
-test('consequenceSentence: dead on the plan, and a missing baseline, both say so safely', () => {
-  assert.equal(consequenceSentence(0), "She's exactly on the plan right now.");
-  assert.equal(consequenceSentence(null), "She's exactly on the plan right now.");
+test('paceGap: rows logged BEFORE the freeze are not credited to it', () => {
+  const withOlder = { ...SM_PLAN, log: [sessionRow('2026-08-20'), sessionRow('2026-08-27'), ...SM_PLAN.log] };
+  assert.equal(paceGap(SM_ACT, withOlder, '2026-08-31').done, 12);
+});
+
+test('paceGap: markers and timed rows are not sessions', () => {
+  const noisy = { ...SM_PLAN, log: [...SM_PLAN.log,
+    { date: '2026-08-30', activityId: 'singapore', status: 'missed' },
+    { date: '2026-08-30', activityId: 'singapore', status: 'done', timed: true },
+    { date: '2026-08-30', activityId: 'singapore', status: 'done' }] };   // no curriculum
+  assert.equal(paceGap(SM_ACT, noisy, '2026-08-31').done, 12);
+});
+
+test('paceGap: no baseline, or one frozen in the future, measures nothing', () => {
+  assert.equal(paceGap({ ...SM_ACT, baseline: undefined }, SM_PLAN, '2026-08-31'), null);
+  assert.equal(paceGap(SM_ACT, SM_PLAN, '2026-08-27'), null);            // today before the freeze
+});
+
+test('paceSentence: says AHEAD and shows its working on the live numbers', () => {
+  const g = paceGapLessons(SM_ACT, SM_PLAN, '2026-08-31');
+  const txt = paceSentence(g, '2027-01-03', '2026-12-27');
+  assert.match(txt, /2 lessons ahead/);
+  assert.match(txt, /12<\/b> sessions logged since Aug 28, 2026/);
+  assert.match(txt, /expected <b>8<\/b>/);
+  assert.equal(/behind/.test(txt), false, 'the live wording that was wrong');
+});
+
+test('paceSentence: explains the dates ONLY when they point the other way', () => {
+  const g = paceGapLessons(SM_ACT, SM_PLAN, '2026-08-31');
+  // Ahead, yet the projected finish is later than the plan: the 7-day step.
+  assert.match(paceSentence(g, '2027-01-03', '2026-12-27'), /jump 7 days at a time/);
+  // Ahead and the dates agree: no explanation needed.
+  assert.equal(/jump 7 days/.test(paceSentence(g, '2026-12-20', '2026-12-27')), false);
+});
+
+test('paceCaption: the Now tile says the same thing, shorter', () => {
+  assert.equal(paceCaption(paceGapLessons(SM_ACT, SM_PLAN, '2026-08-31')), '2 lessons ahead');
+  assert.equal(paceCaption(null), 'no plan frozen yet');
+  const onPlan = { ...SM_PLAN, log: SM_PLAN.log.slice(0, 8) };
+  assert.equal(paceCaption(paceGapLessons(SM_ACT, onPlan, '2026-08-31')), 'on plan');
+});
+
+test('paceSentence: with no baseline it says so instead of claiming zero', () => {
+  assert.match(paceSentence(null), /No plan frozen for this subject yet/);
 });

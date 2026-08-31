@@ -15,7 +15,7 @@
 import { CATS } from '../model.js';
 import {
   dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls, sessionsCount,
-  actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip,
+  actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip, paceGapLessons,
   dailyStreak, mondayOf, addDays, compareSubjects, s2d, sessionLabel,
 } from './model.js';
 
@@ -424,6 +424,11 @@ export function subjectCards(plan, dateStr) {
     return {
       id: a.id, name: a.name || a.id, color: colorFor(a.id), status: a.status,
       lessonsDone: lt.done, lessonsTotal: lt.total, pct, finish, delta,
+      // `delta` is week-level and derived from two projected DATES, which the
+      // walk quantises to whole weeks — fine as a coarse chip, useless as a
+      // precise claim. `pace` is the honest one: sessions logged against
+      // sessions this subject's own plan expected (paceGap in model.js).
+      pace: paceGapLessons(a, plan, dateStr),
       streak: dailyStreak(plan?.log, a.id, plan?.periods, dateStr),
       chapterLabel, chapterDone, chapterSessions,
       nextLabel: ns ? ns.label : null, isTbWb, sessionsThisWeek,

@@ -647,22 +647,40 @@ the parts worth keeping.
     TODAY (an earlier day's half says so and points at Subjects → Oops) and
     takes today's halves ABOVE it with it, because a session only comes off
     the top of the chain.
-- **Ahead/behind has ONE sign convention: `planGapDays` (js/plan/model.js).**
-  POSITIVE = ahead of plan (the live projection lands EARLIER than the frozen
-  baseline). `daysBetween(a, b)` is `b - a`, which makes
-  `daysBetween(finish, baseline)` read "days earlier than planned" — and that
-  is not obvious, so two `/m` surfaces (the Singapore card's foot chip and the
-  Subjects sheet's consequence sentence) each rolled their own copy of the
-  subtraction and BOTH read the sign backwards. The live phone told the family
-  "▲ 7 lessons ahead" for a subject 7 days BEHIND its own plan. Fixed
-  2026-08-31; `planDeltaChip` (which was always right) now reads through the
-  same helper, and tests/plan-m.test.mjs pins the direction from real dates so
-  it cannot flip back. Never hand-roll a projection-vs-baseline comparison.
-  - The consequence sentence's second clause was wrong in the same place for a
-    different reason: it assumed more lessons push you FURTHER in whichever
-    direction you already are. They don't. Extra lessons always pull the
-    finish earlier, so ahead COMPOUNDS ("7 more and the card reads ▲ 2 wk
-    ahead") while behind RECOVERS ("7 more puts her back on the plan").
+- **AHEAD/BEHIND IS PACE, NEVER A DIFFERENCE OF TWO PROJECTED DATES.**
+  `projectFinish`/`chainTimeline` walk in WHOLE WEEKS anchored on
+  `mondayOf(fromDate)` and return the SUNDAY of the finishing week, so any
+  projected date carries up to 7 days of pure quantisation AND the walk credits
+  the entire current week including days already gone. Differencing a live
+  projection against a baseline frozen on a different weekday therefore moves
+  in 7-day steps for no reason at all.
+  - **What it cost (2026-08-31).** Singapore's baseline was frozen Fri
+    2026-08-28: anchor Monday Aug 24, 251 sessions, 17.93 weeks charged as 18
+    → Dec 27. Three days later the walk ran on Mon 2026-08-31: anchor Monday
+    Aug 31, 239 sessions, 17.07 weeks ALSO charged as 18 → Jan 3. The finish
+    moved a week LATER while she logged 12 sessions in 4 days against a planned
+    8. Both /m surfaces reported "7 lessons behind" for a child who was **2
+    lessons ahead**. The user caught it: "she's done more textbooks and
+    workbooks already so there's no way she can be behind."
+  - **The measure now**: `paceGap`/`paceGapLessons` (js/plan/model.js) count
+    the curriculum-bearing `done` rows logged since `baseline.setOn` against
+    `expectedSessions` over the same days — day-precise, no anchors, no
+    rounding. A `daily` rhythm prices each day with `dayWeight` (so a trip day
+    is worth its own travel factor, not a week average); weekly/cycle rhythms
+    still spread their week's capacity evenly, since they are not pinned to a
+    weekday. All three /m surfaces (Today lesson card, This-week card, Subjects
+    cards + sheet) render the SAME `paceChipHtml`, and the sheet's sentence
+    shows its working ("12 sessions logged since Aug 28, where the plan's own
+    pace expected 8") plus a line explaining the 7-day date steps, but ONLY
+    when the dates point the other way.
+  - `planDeltaChip`/`planGapDays` still exist and are still correct (+ = ahead)
+    — they are the coarse, ±7-day-tolerant week chip the Year rows use to
+    compare a chapter's own plan and now. Do not use them for a precise claim.
+  - **Still open**: the walk itself should be day-precise and should not credit
+    the elapsed part of the current week. That is a `projectFinish`/
+    `chainTimeline` change, so it needs a matching change in
+    aoife-school-bot/lib/compose.py (whose parity tests pin exact dates) and a
+    re-freeze of every baseline. Not done.
 - **The top bar names the visible tab.** `#top-title` is set from
   `state.tab`; only Today gets the date + "Mama: work" caption beside it. It
   used to be the literal word "Today" in the markup, so Week/Subjects/Year all

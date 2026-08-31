@@ -66,18 +66,28 @@ export const awayDaysInWeek = (periods, weekStart) => {
   return n;
 };
 
-// School-days-worth of this week for one activity: a plain day is 1, an `off`
-// day is 0, a travel day is worth whatever the activity's travel mode says.
-export function effectiveDaysInWeek(act, weekStart, periods) {
+// What ONE calendar day is worth to this activity: a plain day is 1, an `off`
+// day 0, a travel day whatever the activity's travel mode says. This is the
+// per-day half of effectiveDaysInWeek, pulled out (2026-08-31) so
+// expectedSessions can price a single day without smearing a whole week's
+// average across it — over a 4-day span that all falls inside a trip, the
+// week-average said the plan expected 6.6 sessions where the trip's own half
+// speed expects 4.
+export function dayWeight(act, dateStr, periods) {
+  const away = dayAway(periods, dateStr);
+  if (!away) return 1;
+  if (away.type === 'off') return 0;                          // everything pauses
   const t = act?.travel || { mode: 'pause' };
+  if (t.mode === 'continue') return 1;
+  if (t.mode === 'reduced') return (t.factor ?? 0.5);
+  return 0;                                                   // pause
+}
+
+// School-days-worth of this week for one activity. Unchanged behaviour — the
+// loop body is now dayWeight, so the bot's port of this stays valid.
+export function effectiveDaysInWeek(act, weekStart, periods) {
   let n = 0;
-  for (let i = 0; i < 7; i++) {
-    const away = dayAway(periods, addDays(weekStart, i));
-    if (!away) { n += 1; continue; }
-    if (away.type === 'off') continue;                        // everything pauses
-    if (t.mode === 'continue') n += 1;
-    else if (t.mode === 'reduced') n += (t.factor ?? 0.5);
-  }
+  for (let i = 0; i < 7; i++) n += dayWeight(act, addDays(weekStart, i), periods);
   return n;
 }
 
@@ -270,6 +280,80 @@ export function actualFinishes(act, log) {
 // note (planner-v2.8) so a whole-book "ahead/behind" line can never disagree
 // with its own per-chapter breakdown — one rule, two renderings. null when
 // either date is missing (no baseline set yet, or an unprojectable row).
+// ── Pace vs plan: the HONEST ahead/behind ───────────────────
+// "Is she keeping up?" must NOT be answered by differencing two projected
+// finish dates. `projectFinish`/`chainTimeline` walk in WHOLE WEEKS anchored
+// on `mondayOf(fromDate)` and return the SUNDAY of the finishing week, so a
+// projection carries up to 7 days of pure quantisation, and a baseline frozen
+// on one weekday compared against a walk run on another moves in 7-day steps
+// for no reason at all.
+//
+// That is not theoretical. Live on 2026-08-31: Singapore's baseline was frozen
+// Fri 2026-08-28 (anchor Monday Aug 24, 251 sessions, 17.93 weeks charged as
+// 18) giving Dec 27. Three days later the walk ran on Mon Aug 31 (anchor
+// Monday Aug 31, 239 sessions, 17.07 weeks ALSO charged as 18) giving Jan 3.
+// The finish date moved a week LATER while she did 12 sessions in 4 days
+// against a planned 8 — the phone said "7 lessons behind" for a child who was
+// 2 lessons AHEAD. The user caught it: "she's done more textbooks and
+// workbooks already so there's no way she can be behind."
+//
+// So measure the thing itself: sessions actually logged since the baseline was
+// frozen, against sessions that baseline's own pace expected over the same
+// days. Day-precise, no anchors, no rounding.
+
+// Sessions this activity's planned pace delivers across [fromDate, toDate]
+// INCLUSIVE, charged a day at a time (weekCapacity already prices away-days
+// and the parent cycle, so a day is worth its week's capacity / 7). Bounded by
+// WALK_CAP weeks like every other walk in this file.
+export function expectedSessions(act, fromDate, toDate, plan) {
+  if (!isISO(fromDate) || !isISO(toDate) || fromDate > toDate) return 0;
+  const r = act?.rhythm || {};
+  const perDay = Number(r.sessionsPerDay);
+  const mult = Number.isFinite(perDay) && perDay > 0 ? perDay : 1;
+  let n = 0, d = fromDate;
+  for (let i = 0; i < WALK_CAP * 7 && d <= toDate; i++) {
+    // A DAILY rhythm is pinned to actual days, so an away day is priced on the
+    // day itself. A weekly/cycle rhythm is not tied to any particular weekday,
+    // so its week's capacity is spread evenly across that week instead.
+    n += r.kind === 'daily'
+      ? mult * dayWeight(act, d, plan?.periods)
+      : weekCapacity(act, mondayOf(d), plan?.periods, plan?.parentCycle) / 7;
+    d = addDays(d, 1);
+  }
+  return n;
+}
+
+// How far ahead of (+) or behind (-) its own frozen plan an activity really
+// is, in SESSIONS, plus the two numbers it came from so a view can show its
+// working. null when there is no baseline to measure against (nothing frozen
+// yet, or a baseline dated in the future), which every caller renders as "no
+// plan yet" rather than as zero.
+//
+// Only curriculum-bearing `done` rows count: a bare ✗/◐ marker is not work,
+// and a `done` bump written with no curriculum advanced no chain.
+export function paceGap(act, plan, today) {
+  const setOn = act?.baseline?.setOn;
+  if (!act || !isISO(setOn) || !isISO(today) || setOn > today) return null;
+  const log = Array.isArray(plan?.log) ? plan.log : [];
+  const done = log.filter(e => e && e.activityId === act.id && e.status === 'done' &&
+    !e.timed && !e.eventId && e.curriculum && e.date >= setOn && e.date <= today).length;
+  // The freeze day counts as a WHOLE expected day even though the freeze
+  // happened partway through it: over-stating what the plan wanted biases the
+  // answer toward "less ahead", the safe direction for a progress claim.
+  const expected = expectedSessions(act, setOn, today, plan);
+  return { sessions: done - expected, done, expected, since: setOn };
+}
+
+// The same gap in LESSONS, the unit the family speaks in: a tb-wb chapter
+// spends TWO sessions per lesson, every other pattern one.
+export function paceGapLessons(act, plan, today) {
+  const gap = paceGap(act, plan, today);
+  if (!gap) return null;
+  const cur = currentCur(act);
+  const per = cur?.pattern === 'tb-wb' ? 2 : 1;
+  return { ...gap, lessons: gap.sessions / per, perLesson: per };
+}
+
 // The plan gap in SIGNED DAYS, with one convention for the whole app:
 // POSITIVE = AHEAD of plan (the live projection lands EARLIER than the frozen
 // baseline), negative = behind, null when either date is missing.
