@@ -113,7 +113,7 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .item .n { flex: 1; min-width: 0; }
 .item .n b { display: block; font-size: 15px; font-weight: 600; }
 .item .n span { display: block; font-size: 12px; color: var(--dim); margin-top: 1px; }
-.item .ractions { display: flex; align-items: center; gap: 6px; flex: none; }
+.item .ractions { display: flex; align-items: center; gap: 0; flex: none; margin-right: -10px; }
 
 .chk { width: 44px; height: 44px; border-radius: 999px; border: 1.5px solid rgba(255, 255, 255, .28);
   flex: none; display: grid; place-items: center; font-size: 16px; color: var(--faint);
@@ -125,14 +125,28 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .chk.st-partial { background: rgba(232, 180, 74, .18); border-color: var(--amb); color: var(--amb); }
 .chk.st-missed { background: rgba(240, 101, 90, .15); border-color: var(--red); color: var(--red); }
 /* Item D (polish round 2): the old "…" button is gone — every row's status
-   control is the round check; this faint chevron is the ONLY hint that a
-   long-press opens more (identical on every row, so no row looks singled
-   out the way Ruhama's lone "…" used to). */
-.hintdot { font-size: 10px; line-height: 1; opacity: .35; margin-left: 3px; align-self: center; flex: none; }
+   control is the round check. The chevron (polish round 3) is now a REAL
+   44×44 tappable/keyboard-focusable button (data-chev in js/m.js) that opens
+   the same menu a long-press does — it used to be a decorative `<i>` hint
+   only reachable by touch. The 44px box is reclaimed mostly from the glass
+   card's own right padding (negative margin on .ractions) rather than
+   eating into the name column. Glyph stays small/faint so it still reads as
+   a hint, not a second prominent control next to the check. */
+.hintdot { width: 44px; height: 44px; display: grid; place-items: center;
+  font-size: 11px; line-height: 1; opacity: .35; flex: none;
+  background: none; border: none; padding: 0; color: var(--faint); cursor: pointer;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+/* A set status is a hint that it CAN be changed — slightly more visible,
+   still subtle (item 4, chevron round). */
+.hintdot.has-status { opacity: .55; }
+.hintdot:active { opacity: .8; }
+.hintdot:focus-visible { outline: 2px solid var(--vio); outline-offset: -2px; border-radius: 10px; }
 .status-pick { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .status-pick button { flex: 1; padding: 9px 0; border-radius: 999px; font-size: 12px; font-weight: 600;
   border: 1px solid var(--edge); background: rgba(255, 255, 255, .07); color: var(--ink); min-width: 44px; min-height: 40px; }
 .status-pick button.sel { background: var(--vio); border-color: var(--vio); color: #fff; }
+/* Clear is a lower-emphasis, undo-ish action — same treatment as .btn.q. */
+.status-pick button.clear { color: var(--dim); flex: .7; }
 
 /* ── Singapore-style dual card ── */
 .dual { display: flex; gap: 8px; margin-top: 10px; }

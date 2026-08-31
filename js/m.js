@@ -48,6 +48,7 @@ function boot() {
   wireSheet();
   wirePTR();
   wireCompactBar();
+  wireOutsideClose();
   renderAll();               // instant open from localStorage — never a spinner
   Promise.all([fetchRemote(), syncPlan()]).then(renderAll).catch(() => {});
   onPlanChange(renderAll);
@@ -266,14 +267,19 @@ function yesterdayReceiptHtml(dateStr) {
   return `<div class="tmwrow">Yesterday: ${line}</div>`;
 }
 
-// Item D (polish round 2): the "…" button is gone. Every row's ONLY status
-// control is the round check; a long-press on it (wireLongPress, ≥450ms)
-// opens a tiny inline menu instead. A faint chevron at the far right of
-// EVERY row hints that more exists — identical everywhere, so no one row
-// (Ruhama's old "…") looks singled out. The tb-wb daily's check stays
-// status-only (the dual textbook/workbook card below is what actually
-// advances it), but it now ALSO answers a long-press with "✗ skipped", so
-// a whole no-show Singapore day can be marked without touching that card.
+// Item D (polish round 2) + chevron round (polish round 3): every row's
+// status control is the round check, PLUS a real 44×44 chevron button at
+// the far right (`.hintdot`, data-chev) — a long-press on the check
+// (wireLongPress, ≥450ms) OR a plain tap/keyboard-activate of the chevron
+// both open the SAME tiny inline capsule menu right under the row (one
+// piece of state, `state.statusPickKey`, so they can never disagree).
+// Desktop/mouse users never had a way to trigger the long-press, so the
+// chevron is what makes "change the selection" reachable without a touch
+// screen. The menu ALWAYS offers every status for the row's kind, plus an
+// explicit Clear/relabeled-clear item when something is already set — the
+// user should never be stuck unable to change or undo a selection, even
+// when `logDailyStatus`'s guard will refuse a write (the guard's own toast
+// explains why, rather than the option silently disappearing).
 function itemRowHtml(it, dateStr) {
   const st = it.status;
   const time = it.kind === 'timed' ? `${fmt(it.start)}` : '—';
@@ -292,31 +298,52 @@ function itemRowHtml(it, dateStr) {
   } else {
     check = `<button type="button" class="chk${checkCls}" data-daily="${esc(it.activityId)}" aria-pressed="${st === 'done'}" aria-label="Toggle ${esc(it.name)}">${checkGlyph}</button>`;
   }
+  const menuOpen = state.statusPickKey === it.key;
+  const chev = `<button type="button" class="hintdot${st ? ' has-status' : ''}" data-chev="${esc(it.key)}"
+    aria-label="Change status" aria-haspopup="true" aria-expanded="${menuOpen}">&#8964;</button>`;
   let row = `<div class="item" data-key="${esc(it.key)}">
     <span class="t mono">${it.kind === 'timed' ? esc(time) : '—'}</span>
     <span class="em" aria-hidden="true">${it.emoji}</span>
     <span class="n"><b>${esc(it.name)}</b>${it.note ? `<span>${esc(it.note)}</span>` : ''}</span>
-    <span class="ractions">${check}<i class="hintdot" aria-hidden="true">⌄</i></span>
+    <span class="ractions">${check}${chev}</span>
   </div>`;
-  if (state.statusPickKey === it.key) {
+  if (menuOpen) {
     if (it.kind === 'timed') {
+      // Every status is reachable from here (including switching straight
+      // from 'missed' to 'done'), plus an explicit Clear once anything is
+      // set — logTimed has no write-time guard, so Clear is only rendered
+      // when there's actually a status to remove (a blind call with no
+      // status would push a corrupt keyless-status row).
       row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
+        <button type="button" data-pickst="done" class="${st === 'done' ? 'sel' : ''}">✓ Done</button>
         <button type="button" data-pickst="partial" class="${st === 'partial' ? 'sel' : ''}">◐ Didn't finish</button>
         <button type="button" data-pickst="missed" class="${st === 'missed' ? 'sel' : ''}">✗ Missed</button>
+        ${st ? `<button type="button" data-clear="${esc(it.key)}" class="clear">Clear</button>` : ''}
       </div>`;
     } else if (isTbWbDaily) {
-      // 'half' (textbook alone logged) or 'done' (full lesson) both mean real
-      // work already exists today — offering ✗ there would just toast
-      // "Already logged today" (logDailyStatus's guard, review 2). Only
-      // "nothing yet" or an already-missed row (to un-mark it) get the
-      // button, matching the bot's own checkin_message, which drops the ✗
-      // button the moment ANY session is logged that day.
+      // The dual textbook/workbook card owns ✓ for this row — this menu
+      // only ever offers the marker (✗ Skipped / its relabeled clear). It's
+      // ALWAYS shown, even when real work (half/done) already exists today:
+      // logDailyStatus's own guard refuses that write and js/m.js shows its
+      // "Already logged today — clear the lesson first" toast, rather than
+      // hiding the option and leaving no way to discover why.
       row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
-        ${!st || st === 'missed' ? `<button type="button" data-tbwbmiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>` : ''}
+        <button type="button" data-tbwbmiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">${st === 'missed' ? 'Clear ✗ marker' : '✗ Skipped'}</button>
       </div>`;
     } else {
+      // Simple (non tb-wb) daily: done/skipped are always both offered —
+      // the guard+toast above handles the "real work already logged" case
+      // for ✗ Skipped. Clear (togglePaced) only makes sense once a 'done'
+      // row exists; a 'missed' marker already has its own relabeled clear.
+      // In the pre-guard collision case (a bot 'missed' marker AND a real
+      // 'done' row on the same day — dailyStatus's marker-priority read
+      // shows ✗), tapping "Clear ✗ marker" here removes just the marker,
+      // which flips the row straight to ✓ without touching the real
+      // session — exactly how the family resolves it in place.
       row += `<div class="status-pick" data-pick-for="${esc(it.key)}">
-        ${!st || st === 'missed' ? `<button type="button" data-dailymiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">✗ Skipped</button>` : ''}
+        <button type="button" data-dailydone="${esc(it.activityId)}" class="${st === 'done' ? 'sel' : ''}">✓ Done</button>
+        <button type="button" data-dailymiss="${esc(it.activityId)}" class="${st === 'missed' ? 'sel' : ''}">${st === 'missed' ? 'Clear ✗ marker' : '✗ Skipped'}</button>
+        ${st === 'done' ? `<button type="button" data-clear="${esc(it.key)}" class="clear">Clear</button>` : ''}
       </div>`;
     }
   }
@@ -425,6 +452,24 @@ function wireLongPress(btn, onTap, onLong) {
   btn.addEventListener('contextmenu', e => e.preventDefault());
 }
 
+// Any control that already manages state.statusPickKey itself (the check,
+// the chevron, or a menu button) — clicks on these are left to their own
+// handlers below, never treated as "outside". Wired once at boot: a click
+// anywhere else while a menu is open closes it (item 1: "tapping the
+// chevron again or outside closes it").
+const MENU_OWNED_SEL = '[data-check],[data-tbwbcheck],[data-daily],[data-chev],' +
+  '[data-pickst],[data-tbwbmiss],[data-dailymiss],[data-dailydone],[data-clear]';
+function wireOutsideClose() {
+  document.addEventListener('click', e => {
+    if (state.tab !== 'today' || !state.statusPickKey) return;
+    if (e.target.closest && e.target.closest(MENU_OWNED_SEL)) return;
+    state.statusPickKey = null;
+    renderToday();
+  });
+}
+
+const STATUS_GLYPH = { done: '✓', partial: '◐', missed: '✗' };
+
 function wireTodayEvents(el, items, today) {
   el.querySelectorAll('[data-check]').forEach(b => {
     const it = items.find(x => x.key === b.dataset.check);
@@ -442,27 +487,44 @@ function wireTodayEvents(el, items, today) {
     const it = items.find(x => x.key === b.dataset.tbwbcheck);
     if (!it) return;
     // Short tap does nothing — status-only row, the dual card below is what
-    // actually advances it. Long-press still opens "✗ Skipped".
+    // actually advances it. Long-press / chevron still open "✗ Skipped".
     wireLongPress(b, () => {},
       () => { state.statusPickKey = state.statusPickKey === it.key ? null : it.key; renderToday(); });
   });
+  // The chevron (data-chev): a real, keyboard-focusable button that opens the
+  // SAME menu the long-press opens — the only way a mouse/desktop user (no
+  // long-press) can ever reach it. Tapping it again on the same row closes
+  // the menu, same toggle as long-press.
+  el.querySelectorAll('[data-chev]').forEach(b => b.addEventListener('click', () => {
+    const key = b.dataset.chev;
+    state.statusPickKey = state.statusPickKey === key ? null : key;
+    renderToday();
+  }));
   el.querySelectorAll('[data-pickst]').forEach(b => b.addEventListener('click', () => {
     const wrap = b.closest('[data-pick-for]');
     const it = items.find(x => x.key === wrap.dataset.pickFor);
     if (!it) return;
     logTimed(it.eventId || null, it.activityId || null, b.dataset.pickst);
     state.statusPickKey = null;
-    showToast(`Logged ${esc(it.name)} ${b.dataset.pickst}`, () => logTimed(it.eventId || null, it.activityId || null, b.dataset.pickst));
+    showToast(`Logged ${esc(it.name)} ${STATUS_GLYPH[b.dataset.pickst] || b.dataset.pickst}`,
+      () => logTimed(it.eventId || null, it.activityId || null, b.dataset.pickst));
     renderAll();
   }));
+  // Shared by the tb-wb marker button and the simple-daily marker button —
+  // both write via logDailyStatus's toggle semantics, so the SAME click
+  // either sets ✗ or (tapped again / "Clear ✗ marker") clears it. Toast
+  // wording reflects which actually happened.
   el.querySelectorAll('[data-tbwbmiss],[data-dailymiss]').forEach(b => b.addEventListener('click', () => {
     const actId = b.dataset.tbwbmiss || b.dataset.dailymiss;
+    const it = items.find(x => x.activityId === actId && x.kind === 'daily');
+    const wasMissed = it?.status === 'missed';
     const ok = logDailyStatus(actId, 'missed', today);
     state.statusPickKey = null;
     // logDailyStatus returns false when real work is already logged today
     // (review 2 guard, mirrors the bot's guard_missed_tap) — nothing was
-    // written, so no toast claiming otherwise and no Undo to offer.
-    if (ok === false) showToast(`Already logged today`);
+    // written; the toast tells the family how to unblock it (Clear first).
+    if (ok === false) showToast(`Already logged today — clear the lesson first`);
+    else if (wasMissed) showToast(`Cleared ✗ marker`, () => logDailyStatus(actId, 'missed', today));
     else showToast(`Marked skipped`, () => logDailyStatus(actId, 'missed', today));
     renderAll();
   }));
@@ -471,11 +533,40 @@ function wireTodayEvents(el, items, today) {
     wireLongPress(b,
       () => {
         togglePaced(actId);
+        state.statusPickKey = null;
         showToast(`Logged ✓`, () => togglePaced(actId));
         renderAll();
       },
       () => { state.statusPickKey = state.statusPickKey === `act:${actId}` ? null : `act:${actId}`; renderToday(); });
   });
+  // The menu's own "✓ Done" item for a simple daily — same togglePaced call
+  // the row's own check makes on a short tap, reachable from the menu too so
+  // switching straight from ✗/Clear back to ✓ never needs two taps.
+  el.querySelectorAll('[data-dailydone]').forEach(b => b.addEventListener('click', () => {
+    const actId = b.dataset.dailydone;
+    togglePaced(actId);
+    state.statusPickKey = null;
+    showToast(`Logged ✓`, () => togglePaced(actId));
+    renderAll();
+  }));
+  // Explicit "Clear": timed rows clear via logTimed's own toggle (re-log the
+  // CURRENT status, which matches-and-removes it); a simple daily's done row
+  // clears via togglePaced. Only rendered once a status actually exists, so
+  // there is always something for it to remove.
+  el.querySelectorAll('[data-clear]').forEach(b => b.addEventListener('click', () => {
+    const it = items.find(x => x.key === b.dataset.clear);
+    if (!it || !it.status) return;
+    const name = it.name, kind = it.kind, prevStatus = it.status, actId = it.activityId, evId = it.eventId;
+    state.statusPickKey = null;
+    if (kind === 'timed') {
+      logTimed(evId || null, actId || null, prevStatus);
+      showToast(`Cleared ${esc(name)}`, () => logTimed(evId || null, actId || null, prevStatus));
+    } else {
+      togglePaced(actId);
+      showToast(`Cleared ${esc(name)}`, () => togglePaced(actId));
+    }
+    renderAll();
+  }));
   el.querySelectorAll('[data-tbwb]').forEach(b => b.addEventListener('click', () => {
     const act = plan.data.activities.find(a => a.id === b.dataset.tbwb);
     const cur = act ? currentCur(act) : null;
