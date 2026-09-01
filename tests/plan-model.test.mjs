@@ -995,3 +995,44 @@ test('chainTimeline: an activity with no rhythm (zero capacity forever) leaves u
   assert.ok(Date.now() - start < 1000, 'chainTimeline must not hang on zero capacity');
   assert.ok(rows.every(r => r.finish === null));
 });
+
+// ── Out-of-order sessions: `skipped` (spec 2026-09-01) ───────
+import { readFileSync } from 'node:fs';
+import {
+  nextIndex, isSessionDone, markSessionDone, unmarkSession, normalizeSkipped,
+} from '../js/plan/model.js';
+const parity = JSON.parse(readFileSync(new URL('./fixtures/skipped-parity.json', import.meta.url)));
+const tbwb = (done, skipped) => ({ pattern: 'tb-wb', lessons: 10, tests: 2, done, ...(skipped ? { skipped } : {}) });
+
+test('skipped parity fixture: nextIndex + isSessionDone', () => {
+  for (const c of parity) {
+    assert.equal(nextIndex(c.cur), c.next, c.name);
+    for (const s of c.doneSessions) assert.equal(isSessionDone(c.cur, s), true, `${c.name} done ${s}`);
+    for (const s of (c.cur.skipped || [])) assert.equal(isSessionDone(c.cur, s), false, `${c.name} owed ${s}`);
+  }
+});
+test('markSessionDone: jump ahead owes the gap, filling removes it, idempotent', () => {
+  const cur = tbwb(12);
+  markSessionDone(cur, 14); markSessionDone(cur, 15);
+  assert.deepEqual([cur.done, cur.skipped], [14, [12, 13]]);
+  assert.equal(nextSession(cur).label, 'Lesson 7 · textbook');
+  markSessionDone(cur, 14);                                   // already done: no-op
+  assert.deepEqual([cur.done, cur.skipped], [14, [12, 13]]);
+  markSessionDone(cur, 12); markSessionDone(cur, 13);
+  assert.equal(cur.done, 16); assert.equal('skipped' in cur, false);
+  assert.equal(nextIndex(cur), 16);
+});
+test('unmarkSession: top undo shrinks the mark, middle undo opens a hole, normalize prunes', () => {
+  const cur = tbwb(14, [12, 13]);
+  unmarkSession(cur, 15); assert.deepEqual([cur.done, cur.skipped], [13, [12, 13]]);
+  unmarkSession(cur, 14); assert.deepEqual([cur.done, cur.skipped ?? null], [12, null]);
+  const mid = tbwb(16);
+  unmarkSession(mid, 13); assert.deepEqual([mid.done, mid.skipped], [15, [13]]);
+  unmarkSession(mid, 13);                                     // not done: no-op
+  assert.deepEqual([mid.done, mid.skipped], [15, [13]]);
+});
+test('normalizeSkipped drops junk, dupes, out-of-range and the top', () => {
+  const cur = tbwb(3, [1, 1, 'x', -1, 99, 5]);               // hw would be 9; 5 is below, 99 out of range
+  normalizeSkipped(cur); assert.deepEqual(cur.skipped, [1, 5]);
+  const top = tbwb(2, [2, 3]); normalizeSkipped(top); assert.equal('skipped' in top, false);
+});

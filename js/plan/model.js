@@ -108,9 +108,46 @@ export function sessionLabel(cur, i) {              // i = 0-based session index
   return (cur.titles || {})[u] || `${cur.unitWord || 'Lesson'} ${u}`;
 }
 
+// ── Out-of-order sessions: `skipped` (spec 2026-09-01) ──────────────
+// `done` stays a COUNT. `skipped` = owed session indices below the high-water
+// mark hw = done + skipped.length. Absent/empty ⇒ exactly the old behaviour.
+// Ported byte-for-byte in aoife-school-bot/lib/compose.py — change both.
+const skippedOf = cur => (Array.isArray(cur?.skipped) ? cur.skipped : []);
+export const highWater = cur => (cur?.done || 0) + skippedOf(cur).length;
+export function normalizeSkipped(cur) {
+  if (!cur) return cur;
+  const n = sessionsCount(cur), done = cur.done || 0;
+  let s = [...new Set(skippedOf(cur).map(Number).filter(x => Number.isInteger(x) && x >= 0 && x < n))]
+    .sort((a, b) => a - b);
+  while (s.length && s[s.length - 1] === done + s.length - 1) s.pop();
+  if (s.length) cur.skipped = s; else delete cur.skipped;
+  return cur;
+}
+export const nextIndex = cur => {
+  const sk = skippedOf(cur), hw = highWater(cur);
+  const i = sk.length ? Math.min(...sk) : hw;
+  return i >= sessionsCount(cur) ? null : i;
+};
+export const isSessionDone = (cur, s) => s < highWater(cur) && !skippedOf(cur).includes(s);
+export function markSessionDone(cur, s) {
+  const sk = skippedOf(cur), hw = highWater(cur);
+  if (sk.includes(s)) { cur.skipped = sk.filter(x => x !== s); cur.done = (cur.done || 0) + 1; }
+  else if (s >= hw) {
+    const gap = []; for (let i = hw; i < s; i++) gap.push(i);
+    cur.skipped = [...sk, ...gap]; cur.done = (cur.done || 0) + 1;
+  }
+  return normalizeSkipped(cur);
+}
+export function unmarkSession(cur, s) {
+  if (!isSessionDone(cur, s)) return cur;
+  const hw = highWater(cur);
+  cur.done = Math.max(0, (cur.done || 0) - 1);
+  if (s < hw - 1) cur.skipped = [...skippedOf(cur), s];
+  return normalizeSkipped(cur);
+}
 export const nextSession = cur => {
-  const n = sessionsCount(cur), d = cur.done || 0;
-  return d >= n ? null : { index: d, label: sessionLabel(cur, d) };
+  const i = nextIndex(cur);
+  return i == null ? null : { index: i, label: sessionLabel(cur, i) };
 };
 
 // ── Category class tokens ───────────────────────────────────
@@ -439,7 +476,7 @@ export function sanitizePlan(raw) {
               // never set.
               if ('bandSize' in cc && !(Number.isInteger(cc.bandSize) && cc.bandSize > 0))
                 delete cc.bandSize;
-              return cc;
+              return normalizeSkipped(cc);
             })
           : [] };
       if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;

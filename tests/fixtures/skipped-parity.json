@@ -1,0 +1,8 @@
+[
+  {"name": "plain",        "cur": {"pattern":"tb-wb","lessons":10,"tests":2,"done":12},                    "next": 12, "doneSessions": [0,11]},
+  {"name": "owed",         "cur": {"pattern":"tb-wb","lessons":10,"tests":2,"done":14,"skipped":[12,13]},  "next": 12, "doneSessions": [14,15]},
+  {"name": "owed-filled",  "cur": {"pattern":"tb-wb","lessons":10,"tests":2,"done":16},                    "next": 16, "doneSessions": [12,15]},
+  {"name": "half-owed",    "cur": {"pattern":"tb-wb","lessons":10,"tests":2,"done":15,"skipped":[13]},     "next": 13, "doneSessions": [12,14]},
+  {"name": "finished",     "cur": {"pattern":"tb-wb","lessons":10,"tests":2,"done":22},                    "next": null, "doneSessions": [21]},
+  {"name": "simple-owed",  "cur": {"firstUnit":101,"lastUnit":120,"done":5,"skipped":[2]},                 "next": 2,  "doneSessions": [0,5]}
+]
