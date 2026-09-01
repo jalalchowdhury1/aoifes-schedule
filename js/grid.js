@@ -117,24 +117,49 @@ export function initGrid() {
     if (store.locked || !dragOK()) return;
     const evtEl = e.target.closest('.evt');
     if (!evtEl) return;
+    const ref = blockRef(evtEl.dataset);
+    if (!ref) return;                       // a one-off ghost, or nothing we own
     e.preventDefault();
-    const id = evtEl.dataset.id;
-    const ev = store.events.find(x => x.id === id);
-    if (!ev) return;
-    if (e.target.closest('.rh')) {
-      const col = grid.querySelector(`.ca[data-day="${ev.day}"]`);
-      ptr = { type: 'resize', id, colRect: col.getBoundingClientRect(), moved: false, startX: e.clientX, startY: e.clientY };
+    const base = { kind: ref.kind, ref, moved: false, startX: e.clientX, startY: e.clientY };
+    if (ref.kind === 'event') {
+      const ev = store.events.find(x => x.id === ref.id);
+      if (!ev) return;
+      base.id = ref.id;
+      base.sel = `[data-id="${ref.id}"]`;
+      if (e.target.closest('.rh')) {
+        const col = grid.querySelector(`.ca[data-day="${ev.day}"]`);
+        ptr = { ...base, type: 'resize', colRect: col.getBoundingClientRect() };
+      } else {
+        const rect = evtEl.getBoundingClientRect();
+        ptr = {
+          ...base, type: 'move',
+          offsetH: (e.clientY - rect.top) / PH,
+          duration: ev.end - ev.start,
+          // Column rects are snapshotted at drag start; scrolling mid-drag makes them
+          // stale (worst case: drop lands on the wrong day). Accepted for simplicity.
+          rects: colRects(grid),
+        };
+      }
     } else {
-      const rect = evtEl.getBoundingClientRect();
-      ptr = {
-        type: 'move', id,
-        offsetH: (e.clientY - rect.top) / PH,
-        duration: ev.end - ev.start,
-        moved: false, startX: e.clientX, startY: e.clientY,
-        // Column rects are snapshotted at drag start; scrolling mid-drag makes them
-        // stale (worst case: drop lands on the wrong day). Accepted for simplicity.
-        rects: colRects(grid),
-      };
+      // Planner slot: same math, different store. The preview patches the live
+      // slot object in place (as the template path patches store.events); the
+      // drop commits it through setSlot, a cancel restores `orig`.
+      const s = slotOf(ref);
+      if (!s) return;
+      base.orig = { day: s.day, start: s.start, end: s.end };
+      base.sel = `[data-slot="${ref.actId}:${ref.idx}"]`;
+      if (e.target.closest('.rh')) {
+        const col = grid.querySelector(`.ca[data-day="${s.day}"]`);
+        ptr = { ...base, type: 'resize', colRect: col.getBoundingClientRect() };
+      } else {
+        const rect = evtEl.getBoundingClientRect();
+        ptr = {
+          ...base, type: 'move',
+          offsetH: (e.clientY - rect.top) / PH,
+          duration: s.end - s.start,
+          rects: colRects(grid),
+        };
+      }
     }
     evtEl.classList.add('ghost');
     document.addEventListener('pointermove', onMove, { passive: false });
@@ -142,12 +167,15 @@ export function initGrid() {
     document.addEventListener('pointercancel', onCancel);
   });
 
-  // Tap/click select for coarse pointers and non-drag clicks.
+  // Tap/click select for coarse pointers and non-drag clicks. Selection (and
+  // the editor it opens) is template-only: a planner slot's times are changed
+  // by dragging, its everything-else in the planner.
   grid.addEventListener('click', e => {
     if (suppressClick) { suppressClick = false; return; }
     const evtEl = e.target.closest('.evt');
     if (!evtEl || store.locked) return;
-    toggleSelect(evtEl.dataset.id);
+    const ref = blockRef(evtEl.dataset);
+    if (ref && ref.kind === 'event') toggleSelect(ref.id);
   });
 }
 
@@ -161,7 +189,19 @@ function onMove(e) {
   if (!ptr) return;
   e.preventDefault();
   if (Math.abs(e.clientX - ptr.startX) > 3 || Math.abs(e.clientY - ptr.startY) > 3) ptr.moved = true;
-  if (ptr.type === 'move') {
+  if (ptr.kind === 'slot') {
+    const s = slotOf(ptr.ref);
+    if (!s) return;
+    if (ptr.type === 'move') {
+      const di = dayAtX(e.clientX, ptr.rects);
+      if (di < 0) return;
+      const r = ptr.rects[di];
+      const ns = clampStart(snap(S + (e.clientY - r.top) / PH - ptr.offsetH), ptr.duration);
+      s.day = di; s.start = ns; s.end = ns + ptr.duration;
+    } else {
+      s.end = clampEnd(s.start, snap(S + (e.clientY - ptr.colRect.top) / PH));
+    }
+  } else if (ptr.type === 'move') {
     const di = dayAtX(e.clientX, ptr.rects);
     if (di < 0) return;
     const r = ptr.rects[di];
@@ -174,26 +214,33 @@ function onMove(e) {
     store.events = store.events.map(x => (x.id === ptr.id ? { ...x, end: ne } : x));
   }
   renderGrid();
-  document.querySelector(`#grid .evt[data-id="${ptr.id}"]`)?.classList.add('ghost');
+  document.querySelector(`#grid .evt${ptr.sel}`)?.classList.add('ghost');
 }
 
 function onUp() {
   if (!ptr) return;
-  const { moved, id } = ptr;
+  const { moved, kind, id, ref } = ptr;
   ptr = null;
   document.removeEventListener('pointermove', onMove);
   document.removeEventListener('pointerup', onUp);
   document.removeEventListener('pointercancel', onCancel);
   suppressClick = true; // the browser fires a click right after pointerup; we've handled it
-  if (moved) { notify(); save(); }
+  if (kind === 'slot') {
+    const s = moved ? slotOf(ref) : null;
+    // setSlot → commit → planNotify → tabs.js re-renders the grid (ghost gone).
+    if (s) setSlot(ref.actId, ref.idx, { day: s.day, start: s.start, end: s.end });
+    else renderGrid();                    // no move: just drop the ghost styling
+  } else if (moved) { notify(); save(); }
   else toggleSelect(id);
 }
 
 function onCancel() {
   if (!ptr) return;
+  const { kind, ref, orig } = ptr;
   ptr = null;
   document.removeEventListener('pointermove', onMove);
   document.removeEventListener('pointerup', onUp);
   document.removeEventListener('pointercancel', onCancel);
-  renderGrid(); // clears ghost styling
+  if (kind === 'slot') { const s = slotOf(ref); if (s && orig) Object.assign(s, orig); }
+  renderGrid(); // clears ghost styling (and, for a slot, restores the preview)
 }

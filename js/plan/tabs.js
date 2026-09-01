@@ -5,7 +5,7 @@
 import { initPlan, syncPlan, onPlanChange } from './state.js';
 import { onChange, store, syncSchedule } from '../state.js';
 import { holdSync } from '../sync.js';
-import { isDragging } from '../grid.js';
+import { isDragging, renderGrid } from '../grid.js';
 import { renderToday, paintSynced } from './today.js';
 import { renderYear } from './year.js';
 import { renderSubjects } from './subjects.js';
@@ -106,6 +106,11 @@ export function initPlanner() {
     if (b) setTab(b.dataset.tab);
   });
   onPlanChange(renderViews);
+  // Planner slots are native grid blocks now (js/grid.js), so a plan change —
+  // a slot drop, a bot write, a Claude session moving a slot — must rebuild the
+  // grid too. Never under a drag: a rebuild shifts layout under the cursor and
+  // corrupts drop math (the same reason applyOverlay bails on isDragging).
+  onPlanChange(() => { if (!isDragging()) renderGrid(); });
   onChange(renderViews);            // template changes re-render planner views too
   // Watch #grid/#dayview so the dots survive re-renders that bypass these two
   // hooks entirely (main.js's 60s timer, day-tab taps in js/dayview.js).
