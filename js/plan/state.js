@@ -1,7 +1,7 @@
 // Planner store + persistence. Mirrors ../state.js philosophy.
 // localStorage 'aoife_plan_v1'; KV via /api/plan-get + /api/plan-save.
 import { sanitizePlan, serializePlan, currentCur, todayStr, sortPeriods,
-         PERIOD_TYPES, ISO, chainTimeline } from './model.js';
+         PERIOD_TYPES, ISO, chainTimeline, nextIndex, markSessionDone, unmarkSession } from './model.js';
 import { seedPlan } from './seed.js';
 import { onHold, markSynced } from '../sync.js';
 
@@ -138,13 +138,17 @@ export function togglePaced(actId, date = todayStr()) {
     plan.data.log.splice(i, 1);
     if (entry.curriculum) {
       const cur = (act.chain || []).find(c => c.id === entry.curriculum);
-      if (cur && (cur.done || 0) > 0) cur.done--;
+      if (cur) {
+        if (typeof entry.session === 'number') unmarkSession(cur, entry.session);
+        else if ((cur.done || 0) > 0) cur.done--;
+      }
     }
   } else {
     const cur = currentCur(act);
+    const s = cur ? nextIndex(cur) : null;
     plan.data.log.push({ date, activityId: actId, status: 'done',
-      ...(cur ? { curriculum: cur.id, session: cur.done || 0 } : {}) });
-    if (cur) cur.done = (cur.done || 0) + 1;
+      ...(cur && s != null ? { curriculum: cur.id, session: s } : {}) });
+    if (cur && s != null) markSessionDone(cur, s);
   }
   commit();
 }
@@ -171,10 +175,11 @@ export function logSession(actId, date = todayStr()) {
   if (!act) return null;
   const cur = currentCur(act);
   if (!cur) return null;                    // chain exhausted: nothing to advance
+  const s = nextIndex(cur);                 // lowest OWED slot if any, else the next fresh one
   const entry = { date, activityId: actId, status: 'done',
-                  curriculum: cur.id, session: cur.done || 0 };
+                  curriculum: cur.id, session: s };
   plan.data.log.push(entry);
-  cur.done = (cur.done || 0) + 1;
+  markSessionDone(cur, s);
   commit();
   return entry;
 }
@@ -210,7 +215,7 @@ export function unlogSessionsFrom(actId, curId, fromSession, date = todayStr()) 
   if (!removed.length) return [];
   for (const e of removed) {
     const cur = chain.find(c => c && c.id === e.curriculum);
-    if (cur) cur.done = Math.max(0, (cur.done || 0) - 1);
+    if (cur) unmarkSession(cur, e.session);
   }
   commit();
   return removed.reverse();                 // walked backwards: hand them back in order

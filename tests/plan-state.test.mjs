@@ -431,3 +431,32 @@ test('unlogSessionsFrom: leaves a ✗ marker and a timed row for that day alone'
   assert.ok(left.some(e => e.status === 'missed'));
   assert.ok(left.some(e => e.timed));
 });
+
+// ── Out-of-order sessions: writers go through the primitives (spec 2026-09-01) ──
+test('logSession writes the lowest OWED slot first', () => {
+  SM();
+  const { logSession } = S;
+  c1().done = 14; c1().skipped = [12, 13];
+  const e = logSession('singapore', D);
+  assert.equal(e.session, 12);
+  assert.deepEqual([c1().done, c1().skipped], [15, [13]]);
+});
+
+test('unlogSessionsFrom rolls back through unmarkSession', () => {
+  SM();
+  const { unlogSessionsFrom } = S;
+  c1().done = 14; c1().skipped = [12, 13];
+  plan.data.log.push({ date: D, activityId: 'singapore', status: 'done', curriculum: 'dm3-c1', session: 14 });
+  plan.data.log.push({ date: D, activityId: 'singapore', status: 'done', curriculum: 'dm3-c1', session: 15 });
+  const removed = unlogSessionsFrom('singapore', 'dm3-c1', 14, D);
+  assert.deepEqual(removed.map(r => r.session), [14, 15]);
+  assert.deepEqual([c1().done, c1().skipped ?? null], [12, null]);
+});
+
+test('togglePaced uncheck unmarks the exact session of the removed row', () => {
+  SM();
+  c1().done = 14; c1().skipped = [12, 13];
+  plan.data.log.push({ date: D, activityId: 'singapore', status: 'done', curriculum: 'dm3-c1', session: 15 });
+  togglePaced('singapore', D);
+  assert.deepEqual([c1().done, c1().skipped], [13, [12, 13]]);
+});
