@@ -219,7 +219,7 @@ function onMove(e) {
 
 function onUp() {
   if (!ptr) return;
-  const { moved, kind, id, ref } = ptr;
+  const { moved, kind, id, ref, orig } = ptr;
   ptr = null;
   document.removeEventListener('pointermove', onMove);
   document.removeEventListener('pointerup', onUp);
@@ -229,7 +229,13 @@ function onUp() {
     const s = moved ? slotOf(ref) : null;
     // setSlot → commit → planNotify → tabs.js re-renders the grid (ghost gone).
     if (s) setSlot(ref.actId, ref.idx, { day: s.day, start: s.start, end: s.end });
-    else renderGrid();                    // no move: just drop the ghost styling
+    else {
+      // No move: the preview may still have nudged the live slot by a snap
+      // step under the 3px threshold. Put it back — commit() persists the whole
+      // blob, so an uncommitted drift would ride out on the next unrelated save.
+      const live = slotOf(ref); if (live && orig) Object.assign(live, orig);
+      renderGrid();                       // and drop the ghost styling
+    }
   } else if (moved) { notify(); save(); }
   else toggleSelect(id);
 }
