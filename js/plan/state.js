@@ -348,6 +348,20 @@ export function setTravelMode(id, mode) {
   if (act) { act.travel = mode === 'reduced' ? { mode, factor: 0.5 } : { mode }; commit(); }
 }
 
+// Move/resize one on-grid slot (js/grid.js drag → drop). `idx` is the slot's
+// identity (data-slot, gcal `act:<id>:<idx>`), so this assigns in place and
+// never splices. Only numeric fields are applied; the drag guarantees them.
+export function setSlot(actId, idx, { day, start, end } = {}) {
+  const act = getActivity(actId);
+  const s = act && Array.isArray(act.slots) ? act.slots[idx] : null;
+  if (!s) return false;
+  if (typeof day === 'number') s.day = day;
+  if (typeof start === 'number') s.start = start;
+  if (typeof end === 'number') s.end = end;
+  commit();
+  return true;
+}
+
 // Freeze today's projected per-row finish dates as "the plan" (Subjects 📅
 // Timeline). Overwrites any previous baseline — the UI arms two-tap when one
 // exists. Complete rows and horizon-exhausted rows store nothing: history

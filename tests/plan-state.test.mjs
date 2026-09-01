@@ -460,3 +460,39 @@ test('togglePaced uncheck unmarks the exact session of the removed row', () => {
   togglePaced('singapore', D);
   assert.deepEqual([c1().done, c1().skipped], [13, [12, 13]]);
 });
+
+const { setSlot, onPlanChange } = S;
+
+test('setSlot: patches one slot in place, keeps (actId, idx) identity, and commits', () => {
+  initPlan();
+  const geo = plan.data.activities.find(a => a.id === 'geography');
+  geo.status = 'active'; geo.onGrid = true;
+  geo.slots = [{ day: 2, start: 11, end: 12 }, { day: 4, start: 9, end: 10 }];
+  let fired = 0; onPlanChange(() => fired++);
+  const before = plan.data.savedAt;
+  assert.equal(setSlot('geography', 0, { day: 3, start: 13, end: 14 }), true);
+  assert.deepEqual(geo.slots, [{ day: 3, start: 13, end: 14 }, { day: 4, start: 9, end: 10 }]);
+  assert.equal(fired, 1);
+  assert.notEqual(plan.data.savedAt, before);             // savePlan stamped it
+});
+
+test('setSlot: a partial patch only touches the given fields', () => {
+  initPlan();
+  const geo = plan.data.activities.find(a => a.id === 'geography');
+  geo.slots = [{ day: 2, start: 11, end: 12 }];
+  setSlot('geography', 0, { end: 12.5 });
+  assert.deepEqual(geo.slots, [{ day: 2, start: 11, end: 12.5 }]);
+});
+
+test('setSlot: unknown activity / index / non-numeric values change nothing and do not commit', () => {
+  initPlan();
+  const geo = plan.data.activities.find(a => a.id === 'geography');
+  geo.slots = [{ day: 2, start: 11, end: 12 }];
+  const before = snap(plan.data);
+  let fired = 0; onPlanChange(() => fired++);
+  assert.equal(setSlot('nope', 0, { day: 1 }), false);
+  assert.equal(setSlot('geography', 5, { day: 1 }), false);
+  assert.equal(setSlot('geography', 0, { day: '1', start: null }), true);   // accepted, but nothing numeric to apply
+  assert.deepEqual(snap(plan.data), before);
+  assert.equal(fired, 1);                                   // the third call still commits (a no-op patch is not an error)
+});
