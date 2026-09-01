@@ -204,13 +204,21 @@ const sess = (session, date = D) => ({ date, activityId: 'singapore',
 
 test('two DIFFERENT sessions on one day both survive, and both bump the chapter', () => {
   const current = base({ activities: [sm(11)], log: [sess(10)] });     // the textbook half
-  const incoming = base({ activities: [sm(11)], log: [sess(11)],       // the workbook half
+  // The workbook half (session 11) logged from base done=10 while the textbook
+  // half (session 10) wasn't done yet on THIS writer's view — under the
+  // skipped model that is an out-of-order local record: done=11, skipped=[10]
+  // (was bare done=11 pre-skipped-model; the primitive now makes that state
+  // explicit instead of losing which specific session is still owed).
+  const incoming = base({
+    activities: [{ ...sm(11), chain: [{ ...sm(11).chain[0], skipped: [10] }] }],
+    log: [sess(11)],       // the workbook half
     savedAt: '2026-08-18T10:05:00.000Z' });
 
   const out = mergePlanWrites(current, incoming);
 
   assert.deepEqual(out.log.map(e => e.session).sort((a, b) => a - b), [10, 11]);
   assert.equal(out.activities[0].chain[0].done, 12, 'the carried row replays its own bump');
+  assert.equal('skipped' in out.activities[0].chain[0], false, 'filling the owed slot clears it');
 });
 
 test('the SAME session written twice is still one row (no double count)', () => {
@@ -262,4 +270,15 @@ test('real work is never dropped in favour of an incoming marker', () => {
 
   assert.equal(out.log.length, 3);
   assert.equal(out.activities[0].chain[0].done, 12);
+});
+
+// ── Out-of-order bump-replay (spec 2026-09-01) ───────────────
+test('merge replays a carried-over OUT-OF-ORDER session row through markSessionDone', () => {
+  const act = { id: 'singapore', chain: [{ id: 'c1', pattern: 'tb-wb', lessons: 10, tests: 2, done: 12 }] };
+  const stored = { activities: [{ ...act, chain: [{ ...act.chain[0], done: 13, skipped: [12] }] }],
+    log: [{ date: '2026-09-01', activityId: 'singapore', status: 'done', curriculum: 'c1', session: 13 }], overrides: [] };
+  const incoming = { activities: [act], log: [], overrides: [] };
+  const out = mergePlanWrites(stored, incoming);
+  assert.deepEqual(out.activities[0].chain[0].done, 13);
+  assert.deepEqual(out.activities[0].chain[0].skipped, [12]);
 });

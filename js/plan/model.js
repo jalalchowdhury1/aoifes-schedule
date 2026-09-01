@@ -572,7 +572,11 @@ export function mergePlanWrites(current, incoming) {
       if (!act || !Array.isArray(act.chain)) continue;
       if (!act.chain.some(c => c && c.id === row.curriculum)) continue;
       act.chain = act.chain.map(c =>
-        (c && c.id === row.curriculum ? { ...c, done: (c.done || 0) + 1 } : c));
+        (c && c.id === row.curriculum
+          ? (typeof row.session === 'number'
+              ? markSessionDone({ ...c, skipped: [...(c.skipped || [])] }, row.session)
+              : { ...c, done: (c.done || 0) + 1 })
+          : c));
     }
   }
   return out;
