@@ -645,3 +645,86 @@ test('observer: the callback no-ops while applyOverlay is mid-flight, and self-i
   assert.equal(dotsOf(els.grid.e1).length, 1, 'still exactly one dot');
   assert.equal(obs.takeCalls, before + 1, 'drained its own records once per apply');
 });
+
+const GEO = () => ({
+  id: 'geography', name: 'Geography', type: 'external', status: 'active', cls: 'g', onGrid: true,
+  slots: [{ day: 2, start: 11, end: 12 }], chain: [],
+});
+
+function slotNode(key, cls = 'g') {
+  const el = new FakeNode('div');
+  el.className = `evt ${cls} pslot`;
+  el.attrs['data-slot'] = key;
+  return el;
+}
+const ovSlots = root => root.querySelectorAll('.ov-slot');
+
+test('slots: overlay draws a read-only slot block into #dayview only — the grid renders its own', () => {
+  loadPlan([], [], [GEO()]);
+  store.events = [];
+  const { doc, grid, dayview, dayCol } = makeDom([], [], 2);      // Day view showing Wednesday
+  globalThis.document = doc;
+  applyOverlay();
+  const drawn = ovSlots(dayview);
+  assert.equal(drawn.length, 1);
+  assert.equal(drawn[0].attrs['data-slot'], 'geography:0');
+  assert.equal(drawn[0].className, 'evt g pslot ov-slot');
+  assert.equal(drawn[0].style.top, `${(11 - 9) * 62 + 1}px`);
+  assert.equal(drawn[0].style.height, `${62 - 2}px`);
+  assert.match(drawn[0].innerHTML, /Geography/);
+  assert.match(drawn[0].innerHTML, /11am&ndash;12pm/);
+  assert.equal(drawn[0].parentNode, dayCol);
+  assert.equal(ovSlots(grid).length, 0);
+});
+
+test('slots: a Day view showing another day draws nothing; re-apply never duplicates', () => {
+  loadPlan([], [], [GEO()]);
+  store.events = [];
+  const { doc, dayview } = makeDom([], [], 3);                   // Thursday
+  globalThis.document = doc;
+  applyOverlay();
+  assert.equal(ovSlots(dayview).length, 0);
+  const wed = makeDom([], [], 2);
+  globalThis.document = wed.doc;
+  applyOverlay(); applyOverlay();
+  assert.equal(ovSlots(wed.dayview).length, 1);
+});
+
+test('slots: a timed activityId log row dots the slot block in BOTH roots, one dot per (activity, date)', () => {
+  const wed = addDays(mondayOf(todayStr()), 2);
+  loadPlan([
+    { date: wed, activityId: 'geography', status: 'done' },
+    { date: wed, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },  // same day again
+  ], [], [GEO()]);
+  store.events = [];
+  const { doc, cols, dayview } = makeDom([], [], 2);
+  globalThis.document = doc;
+  const native = cols[2].appendChild(slotNode('geography:0'));   // what renderGrid() now draws
+  applyOverlay();
+  assert.deepEqual(dotsOf(native).map(d => d.className), ['ov-dot ov-done']);
+  const drawn = ovSlots(dayview)[0];
+  assert.deepEqual(dotsOf(drawn).map(d => d.className), ['ov-dot ov-done']);
+});
+
+test('slots: the weekday guard drops a dot whose logged date disagrees with the slot\'s current day', () => {
+  const thu = addDays(mondayOf(todayStr()), 3);
+  loadPlan([{ date: thu, activityId: 'geography', status: 'partial' }], [], [GEO()]);   // slot is Wednesday
+  store.events = [];
+  const { doc, cols } = makeDom([], [], 2);
+  globalThis.document = doc;
+  const native = cols[2].appendChild(slotNode('geography:0'));
+  applyOverlay();
+  assert.equal(dotsOf(native).length, 0);
+});
+
+test('slots: eventId rows never dot a slot block; template dots are unaffected', () => {
+  const wed = addDays(mondayOf(todayStr()), 2);
+  loadPlan([{ date: wed, eventId: 'e1003', status: 'done' }], [], [GEO()]);
+  store.events = [{ id: 'e1003', cat: 'quran', day: 2, start: 10, end: 11 }];
+  const { doc, cols, els } = makeDom([{ id: 'e1003', day: 2 }], [], 2);
+  globalThis.document = doc;
+  const native = cols[2].appendChild(slotNode('geography:0'));
+  applyOverlay();
+  assert.equal(dotsOf(native).length, 0);
+  assert.equal(dotsOf(els.grid.e1003).length, 1);
+});

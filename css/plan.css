@@ -354,6 +354,10 @@ html[data-theme='dark'] {
 .ov-tag { position: absolute; right: 5px; bottom: 2px; font-size: 7.5px; font-weight: 700;
           letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted);
           pointer-events: none; }
+/* Planner slots drawn into the Day view by overlay.js. Read-only there: the
+   Day view has no drag, and its tap handler keys off data-id (template only).
+   The grid's own `.pslot` blocks are native, carry no `ov-slot`, and drag. */
+.evt.ov-slot { pointer-events: none; cursor: default; }
 /* Print stays the clean template week: every overlay decoration is screen-only.
    (A separate block from the one above so neither existing print rule moves.) */
 @media print { .ov-oneoff { display: none !important; } }

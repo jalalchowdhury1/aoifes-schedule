@@ -4,7 +4,7 @@
 import { fmt, esc, DAYS, S, E } from '../model.js';
 import { store, catLabel } from '../state.js';
 import { isDragging } from '../grid.js';
-import { todayStr, mondayOf, addDays, dayIdx, findClashes } from './model.js';
+import { todayStr, mondayOf, addDays, dayIdx, findClashes, gridSlots } from './model.js';
 import { plan } from './state.js';
 
 // Event ids are stored data; escape them before they enter a CSS selector.
@@ -103,6 +103,35 @@ function applyOneOffs(root, blocks) {
   }
 }
 
+// ── Planner slots in the Day view ────────────────────────────
+// js/grid.js renders on-grid planner slots natively (draggable there). The
+// Day view (frozen js/dayview.js) cannot, so the same blocks are drawn here —
+// into #dayview ONLY; drawing them into #grid would duplicate. Read-only:
+// `.ov-slot` is pointer-events:none in css/plan.css (the Day view has no drag;
+// a slot's times are edited on the desktop grid). Metrics come off the column
+// height exactly like the one-offs; identity is the same `data-slot`.
+function applySlots(root, blocks) {
+  if (!blocks.length) return;
+  for (const ca of root.querySelectorAll('.ca')) {
+    const day = Number(ca.getAttribute('data-day'));
+    const ph = parseFloat(ca.style && ca.style.height) / (E - S);
+    if (!Number.isFinite(day) || !Number.isFinite(ph) || ph <= 0) continue;
+    for (const b of blocks) {
+      if (b.day !== day) continue;
+      const height = (b.bottom - b.top) * ph;
+      const el = document.createElement('div');
+      el.className = `evt ${b.cls} pslot ov-slot`;
+      el.setAttribute('data-slot', `${b.actId}:${b.idx}`);
+      el.style.top = `${(b.top - S) * ph + 1}px`;
+      el.style.height = `${height - 2}px`;
+      el.innerHTML = `<div class="et">${esc(b.name)}</div>` +
+        `<div class="en">${fmt(b.start)}&ndash;${fmt(b.end)}</div>` +
+        (b.note && height > 46 ? `<div class="en note">${esc(b.note)}</div>` : '');
+      ca.appendChild(el);
+    }
+  }
+}
+
 export function applyOverlay() {
   // Mid-drag renderGrid() rebuilds fire the observer; re-rendering the clash
   // banner mid-drag shifts layout under the cursor and corrupts drop math
@@ -118,12 +147,16 @@ export function applyOverlay() {
     // sweep that follows only ever sees template decorations.
     for (const root of roots) {
       root.querySelectorAll('.ov-oneoff').forEach(n => n.remove());
+      root.querySelectorAll('.ov-slot').forEach(n => n.remove());
       root.querySelectorAll('.ov-dot').forEach(n => n.remove());
     }
     const mon = mondayOf(todayStr());
     const sun = addDays(mon, 6);
     const oneOffs = oneOffsInWeek(mon, sun);
     for (const root of roots) applyOneOffs(root, oneOffs);
+    const slots = gridSlots(plan.data.activities);
+    const dayview = document.getElementById('dayview');
+    if (dayview) applySlots(dayview, slots);
     for (const e of plan.data.log) {
       if (!e.eventId || e.date < mon || e.date > sun) continue;
       const ev = store.events.find(x => x.id === e.eventId);
@@ -140,6 +173,26 @@ export function applyOverlay() {
       for (const root of roots) {
         root.querySelectorAll(`.evt[data-id="${cssEsc(e.eventId)}"]`)
           .forEach(el => el.appendChild(dotNode(e.status)));
+      }
+    }
+    // Slot dots: a timed log row for an on-grid activity carries activityId
+    // and no eventId (logTimed's slot shape; a paced row on that day counts
+    // too). Same weekday-agreement guard as template dots, and one dot per
+    // (activity, date) — a Geography lesson logged twice on Wednesday is still
+    // one Wednesday.
+    const dotted = new Set();
+    for (const e of plan.data.log) {
+      if (e.eventId || !e.activityId || e.date < mon || e.date > sun) continue;
+      const key = `${e.activityId}|${e.date}`;
+      if (dotted.has(key)) continue;
+      const d = dayIdx(e.date);
+      for (const b of slots) {
+        if (b.actId !== e.activityId || b.day !== d) continue;
+        dotted.add(key);
+        for (const root of roots) {
+          root.querySelectorAll(`.evt[data-slot="${cssEsc(`${b.actId}:${b.idx}`)}"]`)
+            .forEach(el => el.appendChild(dotNode(e.status)));
+        }
       }
     }
     renderClashBanner();
