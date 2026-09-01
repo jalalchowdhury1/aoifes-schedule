@@ -12,7 +12,8 @@ globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 globalThis.document = { dispatchEvent: () => {} };
 const S = await import('../js/plan/state.js');
-const { plan, initPlan, togglePaced, logTimed, logDailyStatus, addPeriod, updatePeriod, deletePeriod } = S;
+const { plan, initPlan, togglePaced, logTimed, logDailyStatus, addPeriod, updatePeriod, deletePeriod,
+        setSlot, onPlanChange } = S;
 
 const curOf = (p, actId, curId) =>
   p.activities.find(a => a.id === actId).chain.find(c => c.id === curId);
@@ -461,7 +462,6 @@ test('togglePaced uncheck unmarks the exact session of the removed row', () => {
   assert.deepEqual([c1().done, c1().skipped], [13, [12, 13]]);
 });
 
-const { setSlot, onPlanChange } = S;
 
 test('setSlot: patches one slot in place, keeps (actId, idx) identity, and commits', () => {
   initPlan();
@@ -484,7 +484,7 @@ test('setSlot: a partial patch only touches the given fields', () => {
   assert.deepEqual(geo.slots, [{ day: 2, start: 11, end: 12.5 }]);
 });
 
-test('setSlot: unknown activity / index / non-numeric values change nothing and do not commit', () => {
+test('setSlot: unknown activity / index → false, no commit; non-numeric values are ignored but still commit', () => {
   initPlan();
   const geo = plan.data.activities.find(a => a.id === 'geography');
   geo.slots = [{ day: 2, start: 11, end: 12 }];

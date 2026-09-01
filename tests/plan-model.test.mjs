@@ -5,7 +5,7 @@ import {
   sessionsCount, nextSession, actTotal, actDone, actRemaining,
   dayAway, dayStatus, awayDaysInWeek, effectiveDaysInWeek,
   sanitizePlan, serializePlan, lessonTotals, compareSubjects, SUBJECT_ORDER,
-  planDeltaChip,
+  planDeltaChip, gridSlots,
 } from '../js/plan/model.js';
 
 test('date helpers: Mon-first indexing and week math', () => {
@@ -1037,7 +1037,6 @@ test('normalizeSkipped drops junk, dupes, out-of-range and the top', () => {
   const top = tbwb(2, [2, 3]); normalizeSkipped(top); assert.equal('skipped' in top, false);
 });
 
-import { gridSlots } from '../js/plan/model.js';
 
 const geo = () => ({
   id: 'geography', name: 'Geography', type: 'paced', status: 'active', cls: 'g', onGrid: true,
