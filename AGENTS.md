@@ -22,7 +22,9 @@ Static vanilla app, no build step, no dependencies, no framework:
 - js/sync.js — tiny shared spine for BOTH stores' live re-sync: the `holdSync()`
   predicate registry and the per-blob freshness stamps. No dependencies, so
   neither store has to import the other or the frozen view layer
-- js/grid.js — week grid render, drag/resize/select (fine pointers only)
+- js/grid.js — week grid render, drag/resize/select (fine pointers only); since
+  2026-09-01 also renders on-grid planner slots as `.evt.pslot[data-slot]`
+  blocks (see "Planner slots on the grid") and drags them through setSlot
 - js/dayview.js — mobile tabs + day column + Day/Week toggle
 - js/editor.js — edit panel (desktop) / bottom sheet (mobile), add form, legend
 - js/theme.js — auto/light/dark cycling
@@ -263,8 +265,9 @@ AND in the Day view (standing directive), from the same overlay module, observer
 and drag guard as the status dots.
 - Class `evt ov-oneoff`: `.evt` supplies the absolute positioning, `.ov-oneoff`
   the dashed, category-neutral treatment, the "one-off" tag and
-  `pointer-events: none` (the app's drag/edit only ever moves the recurring
-  template; a one-off is managed from Today or the bot). It is inset 10px from
+  `pointer-events: none` (the app's drag/edit moves the recurring template and,
+  since 2026-09-01, planner slots — never a one-off, which is managed from
+  Today or the bot). It is inset 10px from
   the left so an overlapping template block still shows its coloured rail.
 - It carries `data-oneoff`, NEVER `data-id`: `data-id` is the template's
   identity and the dot sweep queries it. Its status dot comes from its own
@@ -275,6 +278,44 @@ and drag guard as the status dots.
 - Overrides with no times are skipped (Today-list only); one wholly outside
   9–17 is dropped, one overhanging the edge is clamped while its label keeps
   the real times. Print-hidden like every other overlay decoration.
+
+## Planner slots on the grid (2026-09-01)
+Spec: docs/superpowers/specs/2026-09-01-grid-planner-slots-design.md. Before
+this, the desktop Week grid and the one-page print showed ONLY
+`aoifes_schedule.events`; on-grid planner activities (`status:'active' &&
+onGrid && slots[]` — Jiu Jitsu, Geography, Science) reached the phone views and
+Google Calendar via `buildTimed`/`activity_slot_events` but never the grid.
+- `gridSlots(activities)` (js/plan/model.js, pure) → one block per valid slot,
+  `(actId, idx)` = identity, 9–17 clamp rules identical to the one-off ghosts,
+  `note` = the paced chain's next-session label.
+- `renderGrid()` draws them with `slotHTML()`: class `evt <cls> pslot`,
+  **`data-slot="<actId>:<idx>"` and NEVER `data-id`** (that is the template's
+  identity — editor, dot sweep and template drag all key off it). `.pslot` is
+  a marker only; no visual difference. They print (they ARE the recurring week).
+- Drag/resize: `blockRef(dataset)` resolves `{kind:'event'}` vs `{kind:'slot'}`;
+  a slot drag previews by patching the live slot object in place and the drop
+  calls `setSlot(actId, idx, {day,start,end})` (js/plan/state.js → commit).
+  Same lock (`store.locked`), same fine-pointer gate, same `holdSync(isDragging)`
+  guard. A pointercancel — and a no-move drop — restore `ptr.orig` (commit()
+  persists the whole blob, so an uncommitted preview drift must never linger).
+  Click/select stays template-only: tapping a slot on touch does nothing
+  (known limit — desktop drag only).
+- tabs.js re-renders the grid on every `onPlanChange` (never mid-drag) so a bot
+  or Claude-session slot change reaches the grid without waiting for the 60s tick.
+- Day view parity: js/dayview.js stays frozen; overlay.js `applySlots` draws the
+  selected day's slots into #dayview ONLY (class adds `ov-slot`, pointer-events
+  none). Never into #grid — it renders them natively; drawing both duplicates.
+- Dots: log rows with `activityId` and no `eventId` decorate
+  `.evt[data-slot="<actId>:<idx>"]` in both roots, weekday-agreement guarded,
+  one dot per (activity, date).
+- Calendar: the sync keys these `act:<actId>:<idx>`; a drag keeps the index, so
+  the reconciler PATCHES the recurring event. Never re-pack `slots[]`.
+- Verified 2026-09-01 headless against the live blobs (seed localStorage under
+  a persistent `--user-data-dir`, then `--dump-dom` / `--print-to-pdf`; wrap
+  every call in `timeout` — headless Chrome does not exit under a persistent
+  profile): 3 native `.pslot` blocks, 1 printed page, all 8 names present.
+- Follow-up (reviewer, not blocking): the event/slot drag branches in grid.js
+  duplicate the move/resize formulas verbatim — a small helper would dedupe.
 
 ## Subjects/Today/Year: v2.8 family feedback batch (2026-08-19 night)
 Spec: docs/superpowers/specs/2026-08-19-v2.8-family-feedback-batch.md — every
