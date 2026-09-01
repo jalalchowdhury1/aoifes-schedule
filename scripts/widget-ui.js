@@ -72,7 +72,12 @@ async function loadData() {
 
 async function makeWidget() {
   const w = new ListWidget();
-  w.url = `${APP_BASE}/m/`;
+  // `x-safari-https://` (undocumented, iOS 17+) forces the tap to open in
+  // SAFARI regardless of the phone's default browser. Only Safari's
+  // home-screen web app gives /m its full-screen look; a plain https link
+  // opened Chrome for Nabila (2026-08-31). If iOS ever drops the scheme the
+  // tap does nothing rather than opening the wrong browser.
+  w.url = `x-safari-${APP_BASE}/m/`;
   // ListWidget has no real cornerRadius property (iOS rounds the outer shape
   // itself to match the home-screen grid) — set anyway, harmlessly, so the
   // spec's literal "corner radius 24" is on record and a future Scriptable

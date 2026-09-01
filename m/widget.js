@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 4f124369fe */
+ * build 9a1604f098 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -1645,7 +1645,12 @@ async function loadData() {
 
 async function makeWidget() {
   const w = new ListWidget();
-  w.url = `${APP_BASE}/m/`;
+  // `x-safari-https://` (undocumented, iOS 17+) forces the tap to open in
+  // SAFARI regardless of the phone's default browser. Only Safari's
+  // home-screen web app gives /m its full-screen look; a plain https link
+  // opened Chrome for Nabila (2026-08-31). If iOS ever drops the scheme the
+  // tap does nothing rather than opening the wrong browser.
+  w.url = `x-safari-${APP_BASE}/m/`;
   // ListWidget has no real cornerRadius property (iOS rounds the outer shape
   // itself to match the home-screen grid) — set anyway, harmlessly, so the
   // spec's literal "corner radius 24" is on record and a future Scriptable

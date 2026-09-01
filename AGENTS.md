@@ -713,6 +713,10 @@ the parts worth keeping.
     eval(await new Request(BASE + "/m/widget.js").loadString());
   })();
   ```
+  **Tapping the widget opens `/m/` in SAFARI explicitly** via the
+  undocumented `x-safari-https://` scheme (widget-ui.js `w.url`, 2026-08-31):
+  a plain https URL opens the phone's DEFAULT browser, which for Nabila is
+  Chrome, and only Safari's home-screen web app gives /m its full-screen look.
   On a failed fetch the widget falls back to its `FileManager` cache,
   visibly marked "cached" in red. `widget.refreshAfterDate` is 30 min. The
   day boundary is the PHONE's local date/hour — this is a family-at-home

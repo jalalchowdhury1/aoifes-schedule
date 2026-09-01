@@ -93,3 +93,10 @@ test('widgetNext: Mon Aug 31 12:00 fixture — "now" mode, the widget\'s "NOW ·
   assert.equal(m.name, 'Ruhama');
   assert.equal(m.atLabel, '1:00');                           // widget-ui.js: `NOW · until ${atLabel}`
 });
+
+
+test('widget tap opens /m in SAFARI via the x-safari-https scheme (Nabila\'s default browser is Chrome)', () => {
+  const ui = readFileSync(new URL('../scripts/widget-ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /w\.url = `x-safari-\$\{APP_BASE\}\/m\/`/);
+  assert.match(readFileSync(new URL('../m/widget.js', import.meta.url), 'utf8'), /x-safari-\$\{APP_BASE\}\/m\//);
+});
