@@ -2,6 +2,8 @@
 // drag-bottom-edge-to-resize, click/tap to select.
 import { DAYS, S, E, SPH, CATS, fmt, snap, clampStart, clampEnd, todayIndex, esc } from './model.js';
 import { store, evLabel, save, notify } from './state.js';
+import { plan, setSlot } from './plan/state.js';
+import { gridSlots } from './plan/model.js';
 
 let PH = SPH;
 export const setPH = v => { PH = v; };
@@ -25,11 +27,53 @@ export function evtHTML(ev, ph, { handle = false } = {}) {
   </div>`;
 }
 
+// A planner slot block. Same shape and metrics as evtHTML so it prints and
+// drags identically, but its identity is `data-slot="<actId>:<idx>"` — NEVER
+// data-id, which is the template's identity (the editor, the dot sweep and the
+// template drag all key off it). `.pslot` is a marker only: no visual change.
+export function slotHTML(b, ph, { handle = false } = {}) {
+  const top = (b.top - S) * ph;
+  const height = (b.bottom - b.top) * ph;
+  return `<div class="evt ${b.cls} pslot" data-slot="${esc(b.actId)}:${b.idx}"
+    style="top:${top + 1}px;height:${height - 2}px;">
+    <div class="et">${esc(b.name)}</div>
+    <div class="en">${fmt(b.start)}&ndash;${fmt(b.end)}</div>
+    ${b.note && height > 46 ? `<div class="en note">${esc(b.note)}</div>` : ''}
+    ${handle && height > 22 ? '<div class="rh"></div>' : ''}
+  </div>`;
+}
+
+// Which store owns a rendered block. `data-id` → template event (store.events);
+// `data-slot` → planner slot (plan.data.activities[].slots[idx]). The actId may
+// itself contain ':' — the index is everything after the LAST colon.
+export function blockRef(ds) {
+  if (!ds) return null;
+  if (ds.id) return { kind: 'event', id: ds.id };
+  if (typeof ds.slot === 'string') {
+    const i = ds.slot.lastIndexOf(':');
+    if (i <= 0) return null;
+    const actId = ds.slot.slice(0, i);
+    const idx = Number(ds.slot.slice(i + 1));
+    if (!/^\d+$/.test(ds.slot.slice(i + 1)) || !Number.isInteger(idx)) return null;
+    return { kind: 'slot', actId, idx };
+  }
+  return null;
+}
+
+// The live slot object behind a `blockRef` (or null): the drag preview patches
+// it in place exactly as the template drag patches store.events.
+const slotOf = ref => {
+  const act = plan.data && (plan.data.activities || []).find(a => a.id === ref.actId);
+  const s = act && Array.isArray(act.slots) ? act.slots[ref.idx] : null;
+  return s || null;
+};
+
 export function renderGrid() {
   const grid = document.getElementById('grid');
   const gh = (E - S) * PH;
   const tIdx = todayIndex(new Date().getDay());
   const canDrag = !store.locked && dragOK();
+  const slots = plan.data ? gridSlots(plan.data.activities) : [];
 
   let tc = `<div class="timecol" style="padding-top:30px;">`;
   // Last row (the 5pm label) gets label height only, not a full hour block —
@@ -52,6 +96,7 @@ export function renderGrid() {
       if (h >= S && h <= E) col += `<div class="nowline" style="top:${(h - S) * PH}px;"></div>`;
     }
     store.events.filter(e => e.day === di).forEach(ev => { col += evtHTML(ev, PH, { handle: canDrag }); });
+    slots.filter(b => b.day === di).forEach(b => { col += slotHTML(b, PH, { handle: canDrag }); });
     col += `</div><div class="dayhead">${day}</div></div>`;
     return col;
   }).join('');
