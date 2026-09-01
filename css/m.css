@@ -213,7 +213,7 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .wkstep:active { transform: scale(.9); }
 .wklabel { text-align: center; flex: 1; min-width: 0; }
 .wklabel b { font-size: 15px; font-weight: 700; }
-.wklabel .dim { font-size: 12px; margin-left: 2px; }
+.wklabel .dim { font-size: 11.5px; display: block; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wk-today-cap { margin: 0 auto 12px; min-height: 44px; padding: 0 18px;
   display: flex; align-items: center; justify-content: center; width: fit-content;
   background: rgba(139, 124, 246, .14); }
@@ -237,6 +237,93 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 
 /* ── Week: past-day receipt rows (mday.js's receipt(), item B/E) ── */
 .rcpt-mk { font-size: 15px; flex: none; width: 22px; text-align: center; color: var(--dim); }
+.rcpt-mk.st-done { color: var(--grn); }
+.rcpt-mk.st-half, .rcpt-mk.st-partial { color: var(--amb); }
+.rcpt-mk.st-missed { color: var(--red); }
+.rcpt-mk.st-open { color: var(--faint); opacity: .6; }
+.item.goto { cursor: pointer; }
+.item.goto:active { transform: scale(.99); }
+.wkhint { font-size: 11px; text-align: center; padding: 8px 0 0; }
+
+/* ── Week at a glance (2026-08-31) ── */
+/* The week card: one big pair (done of total · %) over a thin bar, then a
+   capsule per paced daily coloured by its subject dot. */
+.wkcard { padding: 12px 16px 12px; }
+.wksum { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wksum .big { font-size: 28px; }
+.wksum .of { font-size: 14px; color: var(--dim); }
+.wksum .side { margin-left: auto; display: flex; align-items: center; gap: 0; }
+.wksum .pct { font-size: 14px; color: var(--vio-ink); font-weight: 600; margin-right: 4px; }
+.wksum .cap { margin: 0 0 0 6px; }
+.wkcard .bar { margin-top: 8px; }
+.wkpaced { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.wkp { margin: 0; display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 11px; }
+.wkp i, .raildot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); display: inline-block; flex: none; }
+
+/* The grid card: chips as column headers, an hour axis, a dailies rail. A
+   24px gutter on the left carries the hour labels and the rail's subject dot;
+   the seven columns share the rest (≈40px each at 390px). */
+.wkgrid { padding: 10px 12px 10px 8px; }
+.wkgut { width: 24px; flex: none; }
+.wkhead { display: flex; gap: 4px; align-items: stretch; }
+.wkhead .daychip { padding: 6px 0 5px; border-radius: 10px; font-size: 10.5px; min-height: 40px; gap: 2px; }
+.wkhead .daychip b { font-size: 14px; }
+.wkbody { position: relative; display: flex; gap: 4px; height: var(--h); margin-top: 8px; }
+.wkhours { position: relative; }
+.wkhours span { position: absolute; left: 0; transform: translateY(-50%); font-size: 9px; color: var(--faint);
+  font-family: var(--mono); }
+.wkcol { position: relative; flex: 1; min-width: 0; border-radius: 6px;
+  background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, .06) 0 1px, transparent 1px var(--hp));
+  border: 0; padding: 0; }
+.wkcol.today { background-color: rgba(139, 124, 246, .08); }
+.wkcol.on { box-shadow: inset 0 0 0 1px rgba(139, 124, 246, .35); }
+.wkcol.away { background-color: rgba(255, 255, 255, .025); }
+.wkaway { position: absolute; inset: 0; display: grid; place-items: center; font-size: 14px; opacity: .35; font-style: normal; }
+/* One timed block. Colour = the desktop category token; the STATE is the
+   weight: a planned block is a soft fill, done is solid with its ✓, missed
+   is hollow with a red edge, a past block nobody answered fades back, a
+   one-off is dashed. */
+.wkblk { position: absolute; left: 2px; right: 2px; border-radius: 5px; font-style: normal;
+  background: color-mix(in srgb, var(--c) 55%, transparent); border-left: 2px solid var(--c);
+  display: grid; place-items: center; font-size: 9px; color: #fff; overflow: hidden; }
+.wkblk.done { background: color-mix(in srgb, var(--c) 88%, transparent); }
+.wkblk.partial { background: color-mix(in srgb, var(--c) 30%, transparent); color: var(--amb); }
+.wkblk.missed { background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid var(--red);
+  border-left-width: 2px; color: var(--red); }
+.wkblk.open { opacity: .35; }
+.wkblk.oneoff { border: 1px dashed var(--c); border-left-width: 2px; background: color-mix(in srgb, var(--c) 18%, transparent); }
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .wkblk { background: var(--c); opacity: .6; }
+  .wkblk.done { opacity: .95; }
+  .wkblk.missed { background: transparent; opacity: 1; }
+}
+.wknow { position: absolute; left: -2px; right: -2px; height: 0; border-top: 1.5px solid var(--vio-ink);
+  box-shadow: 0 0 6px rgba(139, 124, 246, .8); }
+.wknow::before { content: ""; position: absolute; left: -3px; top: -4px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--vio-ink); }
+/* The dailies rail: one row per paced daily, one cell per day. */
+.wkrail { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .07); }
+.railrow { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+.railrow .wkgut { display: grid; place-items: center; }
+.railcell { flex: 1; min-width: 0; height: 14px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, .14);
+  background: none; padding: 0; }
+.railcell.done { background: var(--c); border-color: var(--c); }
+.railcell.half { background: linear-gradient(90deg, var(--c) 50%, transparent 50%); border-color: var(--c); }
+.railcell.missed { border: 1.5px solid var(--red); }
+.railcell.future { border-color: rgba(255, 255, 255, .07); }
+.railcell.blank { border-color: transparent; }
+.railkey { display: flex; gap: 12px; justify-content: flex-end; margin-top: 6px; font-size: 10px; color: var(--faint); }
+.railkey span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Changes this week: day · sign · name/time */
+.chg { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid rgba(255, 255, 255, .07); }
+.chg:first-child { border-top: 0; }
+.chg-d { width: 30px; font-size: 12px; color: var(--dim); flex: none; }
+.chg-s { width: 16px; text-align: center; font-size: 14px; flex: none; }
+.chg-s .grn { color: var(--grn); } .chg-s .amb { color: var(--amb); }
+.chg-n { flex: 1; min-width: 0; }
+.chg-n b { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chg-n span { display: block; font-size: 12px; color: var(--dim); }
 
 /* ── subjects ── */
 .sub .hd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }

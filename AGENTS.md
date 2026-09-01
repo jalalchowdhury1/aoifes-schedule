@@ -741,6 +741,32 @@ the parts worth keeping.
   still show the plan list. The selected day and week are session-only
   (never written to localStorage) — same "remembered only this session"
   rule as everything else view-local in `state` (js/m.js).
+- **Week tab = the week at a glance (2026-08-31, spec docs/superpowers/specs/
+  2026-08-31-m-week-glance-design.md).** One pure model, `weekGlance(weekStart,
+  events, plan, today, nameForEvent)` in js/plan/mday.js (tests pin it on the
+  fixture's real Aug 24–30 week), drawn by `renderWeek` in js/m.js. Top to
+  bottom: ‹ › nav with an HONEST Mama caption (`mamaRuns` — runs of `isWorkDay`
+  across Mon..Sun, e.g. "Mama: work Mon · home Tue–Sun"; the old caption read
+  Monday alone, and a Tue→Mon duty stretch makes Monday the odd one out six
+  days in seven, so it was wrong for most of every week) · the week card
+  (classes done of total · % · missed/to-go capsules; one capsule per paced
+  daily "Singapore 5 of 7 lessons" = curriculum-bearing done rows ÷ per vs
+  `expectedSessions(act, Mon, Sun)` ÷ per; an all-away week reads "✈ away all
+  week") · the grid card (the 7 chips as column headers, an hour axis from the
+  week's earliest start to latest end (min 6h, 22px/hour), blocks in the
+  desktop's tokens.css dark `--el` category colours via `CLS_COLOR`, state =
+  weight: plan soft / done solid ✓ / missed hollow red-edged ✗ / past-unanswered
+  faded / one-off dashed; today's column tinted with a live `.wknow` line; a
+  dailies rail under it with one cell per paced daily per day — filled done,
+  half-filled half, red ring missed, faint ring nothing, blank away/paused) ·
+  "Changes this week" (dated `add`s, `skip`s, away runs clipped to the week;
+  hidden when empty) · the selected day's list under a `.psec` naming the day
+  (Today/Tomorrow/Yesterday suffix); TODAY's rows now carry their ✓/◐/✗
+  (`statusMark`, the exported `markFor`) and a tap on one calls `setTab('today')`
+  — navigation, never a write. `dayDot` moved here from js/m.js so the chip dot
+  and the rail agree. Tapping a chip, a column or a rail cell selects the day.
+  Verified at 390px on live data (current, previous, next and the Jan trip
+  week) via the throwaway iframe probe harness described above.
 - **What `/m` deliberately does NOT do**: no Manage (activate/park/cancel a
   subject, edit the chain, set travel mode, freeze a baseline — Subjects'
   sheet only offers the "oops, remove last logged session" undo plus a

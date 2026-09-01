@@ -17,6 +17,7 @@ import {
   dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls, sessionsCount,
   actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip, paceGapLessons,
   dailyStreak, mondayOf, addDays, compareSubjects, s2d, sessionLabel,
+  expectedSessions, dayAway,
 } from './model.js';
 
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
@@ -226,7 +227,10 @@ function noteForDaily(cur) {
 // dailyStatus: a marker settles the whole day, so it wins over any session
 // rows logged alongside it. `nameForEvent` is passed straight through to
 // buildTimed (see its own comment) so a catLabels rename shows here too.
+// Exported as `statusMark` too: the Week tab's today rows and the receipt rows
+// draw the same glyph for the same status (2026-08-31 week-glance round).
 const markFor = status => status === 'done' ? '✓' : status === 'half' || status === 'partial' ? '◐' : '✗';
+export const statusMark = markFor;
 
 export function receipt(dateStr, events, plan, nameForEvent) {
   const out = [];
@@ -574,4 +578,153 @@ export function widgetNext(dateStr, events, plan, now, nameForEvent) {
   if (ahead) return { ...ahead, doneCount, total };
   return { mode: timed.length ? 'done' : 'none', name: null, at: null, atLabel: null,
     rest: unloggedDailies, doneCount, total };
+}
+
+
+// ── Week at a glance (2026-08-31) ───────────────────────────
+// The /m Week tab used to be seven chips and ONE day's list — you had to tap
+// every day to learn anything, and the "Mama: work" caption read Monday's
+// state only although a Charlton duty stretch runs Tue→Mon (so Mon and
+// Tue–Sun are usually opposite). `weekGlance` is the pure model behind the
+// redesigned tab: the week's timed blocks laid on an hour axis, a per-day
+// cell for every paced daily, honest Mama runs, the week's numbers in pairs,
+// and the one-offs/skips/away days that differ from the recurring template.
+// js/m.js only draws it; tests/plan-mday.test.mjs pins it on real fixture
+// weeks.
+
+// The chip dot (moved here from js/m.js's dotClassFor so the chip and the
+// dailies rail can never disagree): green = every loggable item done, red =
+// anything missed, amber = something logged but not everything, null for an
+// empty day or a future day.
+export function dayDot(items, dateStr, today) {
+  if (dateStr > today) return null;
+  if (!items || !items.length) return null;
+  if (items.some(it => it.status === 'missed')) return 'red';
+  if (items.every(it => it.status === 'done')) return 'grn';
+  if (items.some(it => it.status != null)) return 'amb';
+  return null;
+}
+
+const DOW3 = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const rangeDow = (a, b) => (a === b ? DOW3[a] : `${DOW3[a]}–${DOW3[b]}`);
+
+// Consecutive-day runs of the parent cycle across Mon..Sun, e.g.
+// [{state:'work', from:0, to:0}, {state:'home', from:1, to:6}]; empty when no
+// active activity rides the cycle (same gate dayHeader uses for its caption).
+export function mamaRuns(plan, weekStart) {
+  const hasCycle = (plan?.activities || []).some(a => a && a.status === 'active' && a.rhythm?.kind === 'cycle');
+  if (!hasCycle) return [];
+  const runs = [];
+  for (let i = 0; i < 7; i++) {
+    const state = isWorkDay(plan.parentCycle, addDays(weekStart, i)) ? 'work' : 'home';
+    const last = runs[runs.length - 1];
+    if (last && last.state === state) last.to = i;
+    else runs.push({ state, from: i, to: i });
+  }
+  return runs;
+}
+export const mamaLabel = runs => !runs.length ? ''
+  : runs.length === 1 ? `Mama: ${runs[0].state}`
+  : 'Mama: ' + runs.map(r => `${r.state} ${rangeDow(r.from, r.to)}`).join(' · ');
+
+// h → "10am" / "12pm" / "2:30pm" — the grid's own compact clock.
+export function fmtClock(h) {
+  const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${h12}${mm ? ':' + String(mm).padStart(2, '0') : ''}${hh < 12 ? 'am' : 'pm'}`;
+}
+
+export function weekGlance(weekStart, events, plan, today, nameForEvent) {
+  const weekEnd = addDays(weekStart, 6);
+  const dailies = (plan?.activities || []).filter(a =>
+    a && a.status === 'active' && a.type === 'paced' && !a.onGrid);
+  const days = [];
+  let hourMin = Infinity, hourMax = -Infinity;
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(weekStart, i);
+    const st = dayStatus(plan?.periods, date);
+    const items = dayItems(date, events, plan, nameForEvent);
+    const timed = items.filter(it => it.kind === 'timed').map(it => ({
+      key: it.key, start: it.start, end: it.end, cls: it.cls, name: it.name,
+      emoji: it.emoji, status: it.status ?? null, oneOff: it.key.startsWith('ov:'),
+    }));
+    for (const t of timed) { hourMin = Math.min(hourMin, t.start); hourMax = Math.max(hourMax, t.end); }
+    const cells = dailies.map(a => {
+      const visible = dailyVisible(a, st);
+      return { id: a.id, color: colorFor(a.id), visible,
+        status: visible ? (dailyStatus(a, plan?.log, date) ?? null) : null };
+    });
+    days.push({
+      date, idx: i, dow: DOW3[i], dNum: Number(date.slice(-2)),
+      isToday: date === today, isPast: date < today,
+      away: st.away ? { type: st.type, label: awayLabelFor(st), dayN: st.dayN, total: st.total } : null,
+      timed, dailies: cells, dot: st.away ? null : dayDot(items, date, today),
+    });
+  }
+  if (!Number.isFinite(hourMin)) { hourMin = null; hourMax = null; }
+  else {
+    hourMin = Math.floor(hourMin); hourMax = Math.ceil(hourMax);
+    if (hourMax - hourMin < 6) hourMax = hourMin + 6;    // a two-block week still gets a readable axis
+  }
+
+  // The week's numbers. `total` counts every timed block on a non-away day
+  // (an away day contributes none — dayItems already empties it); `elapsed`
+  // is the part of that already behind us, so a current week can say "5
+  // left" honestly.
+  const all = days.flatMap(d => d.timed.map(t => ({ ...t, date: d.date })));
+  const timedSum = {
+    total: all.length,
+    done: all.filter(t => t.status === 'done').length,
+    missed: all.filter(t => t.status === 'missed').length,
+    elapsed: all.filter(t => t.date <= today).length,
+  };
+  const log = Array.isArray(plan?.log) ? plan.log : [];
+  const paced = dailies.map(a => {
+    const cur = currentCur(a);
+    const per = cur?.pattern === 'tb-wb' ? 2 : 1;
+    const sessions = log.filter(e => e && e.activityId === a.id && e.status === 'done' &&
+      !e.timed && !e.eventId && e.curriculum && e.date >= weekStart && e.date <= weekEnd).length;
+    const expected = expectedSessions(a, weekStart, weekEnd, plan);
+    return { id: a.id, name: a.name || a.id, short: WIDGET_NICK[a.id] || shortName(a.name || a.id),
+      color: colorFor(a.id), sessions, expected, per,
+      unit: per === 2 ? 'lessons' : 'sessions' };
+  });
+
+  // What differs from the recurring template this week: dated one-offs,
+  // skips, and away runs (an away period that straddles the week is clipped
+  // to it, with the day-of-trip count from its first day in the week).
+  const changes = [];
+  const overrides = Array.isArray(plan?.overrides) ? plan.overrides : [];
+  for (const o of overrides) {
+    if (!o || o.date < weekStart || o.date > weekEnd) continue;
+    const i = dayIdx(o.date);
+    if (o.action === 'add') {
+      const a = (plan?.activities || []).find(x => x && x.id === o.activityId);
+      changes.push({ kind: 'add', date: o.date, dow: DOW3[i], sort: `${o.date}${String(o.start).padStart(5, '0')}`,
+        label: o.name || (a?.name || 'Extra') + ' · makeup',
+        time: Number.isFinite(o.start) && Number.isFinite(o.end) ? `${fmtClock(o.start)}–${fmtClock(o.end)}` : '' });
+    } else if (o.action === 'skip') {
+      const ev = (events || []).find(e => e && e.id === o.eventId);
+      const a = (plan?.activities || []).find(x => x && x.id === o.activityId);
+      const name = ev ? (nameForEvent ? nameForEvent(ev) : ev.name) || catLabelDefault(ev.cat) : (a?.name || 'Class');
+      changes.push({ kind: 'skip', date: o.date, dow: DOW3[i], sort: `${o.date}zz`, label: name,
+        time: ev && Number.isFinite(ev.start) ? fmtClock(ev.start) : '' });
+    }
+  }
+  let i = 0;
+  while (i < 7) {
+    const d = days[i];
+    if (!d.away) { i++; continue; }
+    let j = i;
+    while (j + 1 < 7 && days[j + 1].away && days[j + 1].away.label === d.away.label) j++;
+    changes.push({ kind: d.away.type === 'off' ? 'off' : 'away', date: d.date, dow: rangeDow(i, j),
+      sort: `${d.date}00`, label: d.away.label,
+      time: d.away.total > 1 ? `day ${d.away.dayN}${j > i ? `–${d.away.dayN + (j - i)}` : ''} of ${d.away.total}` : '' });
+    i = j + 1;
+  }
+  changes.sort((a, b) => a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0);
+
+  const runs = mamaRuns(plan, weekStart);
+  return { weekStart, weekEnd, hourMin, hourMax, days, mamaRuns: runs, mamaLabel: mamaLabel(runs),
+    timed: timedSum, paced, changes };
 }

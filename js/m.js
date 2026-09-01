@@ -15,7 +15,7 @@ import {
   actualFinishes,
 } from './plan/model.js';
 import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt,
-         tbWbCard } from './plan/mday.js';
+         tbWbCard, weekGlance, statusMark } from './plan/mday.js';
 import { syncedAt } from './sync.js';
 
 const $ = id => document.getElementById(id);
@@ -646,14 +646,28 @@ function wireTodayEvents(el, items, today) {
   }));
 }
 
-// ── Week tab (read-only; item E, polish round 2) ─────────────
-// Navigable week window (unlimited both directions — ‹ › buttons or a
-// horizontal swipe), a "This week" snap-back capsule when off the current
-// week, a per-day dot under each chip (green all-done/amber some-logged/
-// red-ish any-missed/none for empty or future), away days show ✈/⏸ in the
-// chip instead. A PAST selected day shows its collapsed receipt (mday.js's
-// receipt(), item B) instead of the plan list; today/future show the plan
-// list, same as before. The selected day is remembered only for the session.
+// ── Week tab (read-only) ─────────────────────────────────────
+// Redesigned 2026-08-31 ("see the week at a glance"): everything below is
+// laid out from ONE pure model, mday.js's weekGlance(). Top to bottom:
+//   * ‹ › nav + an HONEST Mama caption (runs of isWorkDay across Mon..Sun —
+//     the old caption read Monday alone, and a Tue→Mon duty stretch makes
+//     Monday the odd one out six days in seven);
+//   * the week's numbers in pairs (classes done of total · %, one capsule
+//     per paced daily: "Singapore 5 of 7 lessons");
+//   * the grid: the 7 day chips as column headers over an hour axis with the
+//     week's timed blocks in the desktop's category colours (one-offs
+//     dashed, today tinted with a live now-line, past blocks solid when done
+//     / dim when unanswered / red-edged when missed), and under it a rail
+//     with one cell per paced daily per day (filled = done, half = half,
+//     red ring = missed, faint ring = nothing, blank = away/paused);
+//   * "Changes this week" — dated one-offs, skips and away runs, only when
+//     there are any;
+//   * the selected day's list, now headed by its date; today's rows carry
+//     their ✓/◐/✗ and a tap on one jumps to the Today tab to log it
+//     (navigation only — nothing on this tab writes).
+// Navigation is unchanged: ‹ › or a horizontal swipe moves the week
+// (unlimited), "This week" snaps back, tapping a chip OR its column selects
+// the day; the selection is session-only, never persisted.
 const WEEK_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function weekRangeLabel(start, end) {
   const [ys, ms, ds] = start.split('-').map(Number);
@@ -662,14 +676,107 @@ function weekRangeLabel(start, end) {
   return `${WEEK_MON[ms - 1]} ${ds} – ${sameMonth ? de : `${WEEK_MON[me - 1]} ${de}`}`;
 }
 
-function dotClassFor(dateStr, today) {
-  if (dateStr > today) return null;
-  const items = dayItems(dateStr, store.events, plan.data, nameForEvent);
-  if (!items.length) return null;
-  if (items.some(it => it.status === 'missed')) return 'red';
-  if (items.every(it => it.status === 'done')) return 'grn';
-  if (items.some(it => it.status != null)) return 'amb';
-  return null;
+// The desktop grid's own category colours (css/tokens.css dark `--el`), so a
+// block is the same colour here as on the printed week. Activity classes the
+// desktop has no token for (j, s, g…) fall back to the subject colour map
+// where one exists, else a neutral slate.
+const CLS_COLOR = { q: '#1D9E75', r: '#7F77DD', h: '#D85A30', b: '#EF9F27', a: '#D4537E', ot: '#378ADD',
+  j: '#4cc9b0', s: '#5ea3f2', g: '#4cc9b0' };
+const blockColor = cls => CLS_COLOR[cls] || '#8b9bb4';
+const HOUR_PX = 22;
+const fmt1 = n => (Math.abs(n - Math.round(n)) < 0.05 ? String(Math.round(n)) : n.toFixed(1));
+
+function weekSummaryHtml(g, today) {
+  const t = g.timed;
+  const isFuture = g.weekStart > today;
+  const isPastWeek = g.weekEnd < today;
+  let big, of, side;
+  if (g.days.every(d => d.away)) {
+    big = g.days[0].away.type === 'off' ? '⏸' : '✈'; of = 'away all week'; side = '';
+  } else if (isFuture || !t.total) {
+    big = t.total; of = `class${t.total === 1 ? '' : 'es'} this week`; side = '';
+  } else {
+    big = t.done; of = `of ${t.total} classes`;
+    const pct = Math.round((t.done / t.total) * 100);
+    const left = t.total - t.done - t.missed;
+    side = `<span class="pct">${pct}%</span>` +
+      (t.missed ? `<span class="cap amb">${t.missed} missed</span>` : '') +
+      (!isPastWeek && left ? `<span class="cap">${left} to go</span>` : '');
+  }
+  const pct = t.total ? Math.round(((isFuture ? 0 : t.done) / t.total) * 100) : 0;
+  const caps = g.paced.map(p => {
+    const done = p.sessions / p.per, exp = p.expected / p.per;
+    const txt = exp > 0 ? `${fmt1(done)} of ${fmt1(exp)} ${p.unit}` : `${fmt1(done)} ${p.unit}`;
+    return `<span class="cap wkp" style="--c:${p.color}"><i></i>${esc(p.short)} ${txt}</span>`;
+  }).join('');
+  return `<div class="glass wkcard">
+    <div class="wksum"><span class="big mono">${big}</span><span class="of">${esc(of)}</span><span class="side">${side}</span></div>
+    ${t.total ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
+    ${caps ? `<div class="wkpaced">${caps}</div>` : ''}
+  </div>`;
+}
+
+function weekGridHtml(g, today) {
+  const hasAxis = g.hourMin != null;
+  const hours = hasAxis ? g.hourMax - g.hourMin : 0;
+  const H = hours * HOUR_PX;
+  let h = `<div class="glass wkgrid"><div class="wkhead"><span class="wkgut"></span>`;
+  for (const d of g.days) {
+    const mark = d.away ? `<i class="chipaway">${d.away.type === 'off' ? '⏸' : '✈'}</i>`
+      : d.dot ? `<i class="chipdot ${d.dot}"></i>` : '';
+    h += `<button type="button" class="daychip${d.date === state.weekDate ? ' on' : ''}${d.isToday ? ' today' : ''}" data-day="${d.date}"><b>${d.dNum}</b>${d.dow}${mark}</button>`;
+  }
+  h += `</div>`;
+  if (hasAxis) {
+    h += `<div class="wkbody" style="--h:${H}px;--hp:${HOUR_PX}px"><div class="wkgut wkhours">`;
+    for (let i = 0; i <= hours; i += 2)
+      h += `<span style="top:${i * HOUR_PX}px">${fmtHourShort(g.hourMin + i)}</span>`;
+    h += `</div>`;
+    const nowH = new Date().getHours() + new Date().getMinutes() / 60;
+    for (const d of g.days) {
+      h += `<div class="wkcol${d.isToday ? ' today' : ''}${d.date === state.weekDate ? ' on' : ''}${d.away ? ' away' : ''}" data-day="${d.date}">`;
+      if (d.away) h += `<span class="wkaway">${d.away.type === 'off' ? '⏸' : '✈'}</span>`;
+      for (const b of d.timed) {
+        const top = (b.start - g.hourMin) * HOUR_PX, ht = Math.max(6, (b.end - b.start) * HOUR_PX - 2);
+        const st = b.status === 'done' ? 'done' : b.status === 'missed' ? 'missed'
+          : b.status ? 'partial' : d.isPast ? 'open' : 'plan';
+        const glyph = ht >= 14 && (st === 'done' || st === 'missed' || st === 'partial') ? statusMark(b.status) : '';
+        h += `<i class="wkblk ${st}${b.oneOff ? ' oneoff' : ''}" style="--c:${blockColor(b.cls)};top:${top}px;height:${ht}px" title="${esc(b.name)}">${glyph}</i>`;
+      }
+      if (d.isToday && nowH >= g.hourMin && nowH <= g.hourMax)
+        h += `<i class="wknow" style="top:${(nowH - g.hourMin) * HOUR_PX}px"></i>`;
+      h += `</div>`;
+    }
+    h += `</div>`;
+  }
+  const rails = g.paced.filter(p => g.days.some(d => d.dailies.find(c => c.id === p.id)?.visible));
+  if (rails.length) {
+    h += `<div class="wkrail">`;
+    for (const p of rails) {
+      h += `<div class="railrow"><span class="wkgut"><i class="raildot" style="--c:${p.color}"></i></span>`;
+      for (const d of g.days) {
+        const c = d.dailies.find(x => x.id === p.id);
+        const st = !c || !c.visible ? 'blank' : c.status === 'done' ? 'done' : c.status === 'half' || c.status === 'partial' ? 'half'
+          : c.status === 'missed' ? 'missed' : d.isPast || d.isToday ? 'open' : 'future';
+        h += `<button type="button" class="railcell ${st}" style="--c:${p.color}" data-day="${d.date}" aria-label="${esc(p.short)} ${d.dow}"></button>`;
+      }
+      h += `</div>`;
+    }
+    h += `<div class="railkey">${rails.map(p => `<span><i class="raildot" style="--c:${p.color}"></i>${esc(p.short)}</span>`).join('')}</div></div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+const fmtHourShort = hh => `${hh % 12 === 0 ? 12 : hh % 12}${hh < 12 ? 'a' : 'p'}`;
+
+function weekChangesHtml(g) {
+  if (!g.changes.length) return '';
+  const rows = g.changes.map(c => {
+    const sign = c.kind === 'add' ? '<b class="grn">+</b>' : c.kind === 'skip' ? '<b class="amb">−</b>' : c.kind === 'off' ? '⏸' : '✈';
+    return `<div class="chg"><span class="chg-d mono">${esc(c.dow)}</span><span class="chg-s">${sign}</span>
+      <span class="chg-n"><b>${esc(c.label)}</b>${c.time ? `<span>${esc(c.time)}</span>` : ''}</span></div>`;
+  }).join('');
+  return `<div class="psec">Changes this week</div><div class="glass">${rows}</div>`;
 }
 
 function renderWeek() {
@@ -681,31 +788,22 @@ function renderWeek() {
   const weekStart = state.weekStart, weekEnd = addDays(weekStart, 6);
   if (state.weekDate < weekStart || state.weekDate > weekEnd) state.weekDate = weekStart;
   const isCurWeek = weekStart === curMon;
-  const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const g = weekGlance(weekStart, store.events, plan.data, today, nameForEvent);
 
-  const hasCycle = plan.data.activities.some(a => a && a.status === 'active' && a.rhythm?.kind === 'cycle');
-  const mamaTxt = hasCycle ? ` · Mama: ${isWorkDay(plan.data.parentCycle, weekStart) ? 'work' : 'home'}` : '';
   let h = `<div class="wknav">
     <button type="button" class="wkstep glass" data-wk="-1" aria-label="Previous week">‹</button>
-    <div class="wklabel"><b>${esc(weekRangeLabel(weekStart, weekEnd))}</b><span class="dim">${esc(mamaTxt)}</span></div>
+    <div class="wklabel"><b>${esc(weekRangeLabel(weekStart, weekEnd))}</b>${g.mamaLabel ? `<span class="dim">${esc(g.mamaLabel)}</span>` : ''}</div>
     <button type="button" class="wkstep glass" data-wk="1" aria-label="Next week">›</button>
   </div>`;
   if (!isCurWeek) h += `<button type="button" id="wk-today" class="cap vio wk-today-cap">This week</button>`;
-
-  h += '<div class="daychips">';
-  for (let i = 0; i < 7; i++) {
-    const d = addDays(weekStart, i);
-    const dNum = Number(d.slice(-2));
-    const st = dayStatus(plan.data.periods, d);
-    const dotCls = st.away ? null : dotClassFor(d, today);
-    const mark = st.away ? `<i class="chipaway">${st.type === 'off' ? '⏸' : '✈'}</i>`
-      : dotCls ? `<i class="chipdot ${dotCls}"></i>` : '';
-    h += `<button type="button" class="daychip${d === state.weekDate ? ' on' : ''}${d === today ? ' today' : ''}" data-day="${d}"><b>${dNum}</b>${DOW[i]}${mark}</button>`;
-  }
-  h += '</div>';
+  h += weekSummaryHtml(g, today);
+  h += weekGridHtml(g, today);
+  h += weekChangesHtml(g);
 
   const sel = state.weekDate;
   const status = dayStatus(plan.data.periods, sel);
+  const hd = dayHeader(sel, plan.data);
+  h += `<div class="psec">${esc(hd.dateLabel)}${sel === today ? ' · Today' : sel === addDays(today, 1) ? ' · Tomorrow' : sel === addDays(today, -1) ? ' · Yesterday' : ''}</div>`;
   let body;
   if (status.away) {
     body = `<div class="glass away-banner">${status.type === 'off' ? '⏸' : '✈'} ${esc((status.label || '').replace(/[✈⏸]/g, '').trim() || (status.type === 'off' ? 'Off' : 'Time away'))} · day ${status.dayN} of ${status.total}</div>`;
@@ -719,12 +817,14 @@ function renderWeek() {
     </div>`).join('')}</div>`;
   } else {
     const items = dayItems(sel, store.events, plan.data, nameForEvent);
+    const isToday = sel === today;
     body = !items.length ? `<div class="glass dim">Nothing scheduled.</div>`
-      : `<div class="glass">${items.map(it => `<div class="item">
+      : `<div class="glass">${items.map(it => `<div class="item${isToday ? ' goto' : ''}"${isToday ? ' data-goto="today" role="button" tabindex="0"' : ''}>
       <span class="t mono">${it.kind === 'timed' ? esc(fmt(it.start)) : '—'}</span>
       <span class="em" aria-hidden="true">${it.emoji}</span>
       <span class="n"><b>${esc(it.name)}</b>${it.note ? `<span>${esc(it.note)}</span>` : ''}</span>
-    </div>`).join('')}</div>`;
+      ${isToday ? `<span class="rcpt-mk ${it.status ? 'st-' + esc(it.status) : 'st-open'}">${it.status ? statusMark(it.status) : '○'}</span>` : ''}
+    </div>`).join('')}${isToday ? `<div class="wkhint dim">Tap a row to log it on Today</div>` : ''}</div>`;
   }
 
   el.innerHTML = h + body;
@@ -746,6 +846,12 @@ function wireWeekNav(el) {
     state.weekDate = b.dataset.day;
     renderWeek();
   }));
+  // A today row is a shortcut to the tab that can log it — Week itself never writes.
+  el.querySelectorAll('[data-goto]').forEach(r => {
+    const go = () => setTab(r.dataset.goto);
+    r.addEventListener('click', go);
+    r.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
   wireWeekSwipe(el);
 }
 

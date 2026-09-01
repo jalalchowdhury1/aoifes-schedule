@@ -14,6 +14,7 @@ import {
   dayItems, dayHeader, nowBlock, subjectCards, widgetModel, widgetNext, fmtHM,
   dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
   EMOJI_MAP, EMOJI_FALLBACK, dayState, fieldClassFor, receipt, tbWbCard,
+  weekGlance, dayDot, mamaRuns, mamaLabel, fmtClock, statusMark,
 } from '../js/plan/mday.js';
 
 const events = JSON.parse(readFileSync(new URL('./fixtures/plan-mday-schedule.json', import.meta.url), 'utf8')).events;
@@ -702,4 +703,85 @@ test('subjectCards: carries the PACE gap, not just the date-derived week delta',
   assert.equal(card.pace.lessons, 2, '12 sessions logged against 8 the plan expected');
   assert.equal(card.pace.done, 12);
   assert.equal(card.pace.expected, 8);
+});
+
+
+// ── weekGlance: the Week tab's at-a-glance model (2026-08-31) ─────────
+// Pinned on the fixture's REAL logged week, Mon Aug 24 → Sun Aug 30, as of
+// Sun Aug 30: 14 timed blocks (7 done, 4 missed), Singapore 10 sessions = 5
+// lessons against a 14-session plan week, LoE 1 of 1, and the two dated
+// one-offs the bot added that week.
+const WK = weekGlance('2026-08-24', events, plan, TODAY);
+
+test('weekGlance: 7 days, hour axis 10→17, week numbers in pairs', () => {
+  assert.equal(WK.days.length, 7);
+  assert.equal(WK.weekEnd, '2026-08-30');
+  assert.deepEqual([WK.hourMin, WK.hourMax], [10, 17]);
+  assert.deepEqual(WK.timed, { total: 14, done: 7, missed: 4, elapsed: 14 });
+  assert.equal(WK.days[0].dNum, 24);
+  assert.equal(WK.days[6].isToday, true);
+  assert.equal(WK.days[5].isPast, true);
+});
+
+test('weekGlance: Mama caption is per-day runs, not Monday\'s state for the whole week', () => {
+  // dutyStart 2026-08-11: work Aug 11–17, home 18–24, work 25–31, home Sep 1–7.
+  assert.equal(WK.mamaLabel, 'Mama: home Mon · work Tue–Sun');
+  assert.deepEqual(mamaRuns(plan, '2026-08-24'), [{ state: 'home', from: 0, to: 0 }, { state: 'work', from: 1, to: 6 }]);
+  assert.equal(weekGlance('2026-08-31', events, plan, TODAY).mamaLabel, 'Mama: work Mon · home Tue–Sun');
+  assert.equal(mamaLabel([{ state: 'home', from: 0, to: 6 }]), 'Mama: home');
+  assert.equal(mamaLabel([]), '');
+});
+
+test('weekGlance: timed blocks carry status/one-off flags; a past day\'s dot follows dayDot', () => {
+  const mon = WK.days[0];
+  assert.deepEqual(mon.timed.map(t => [t.start, t.status, t.oneOff]),
+    [[10, 'missed', false], [11, 'done', false], [16, null, false], [16, null, true]]);
+  assert.equal(mon.dot, 'red');                 // Quran missed
+  assert.equal(WK.days[1].dot, 'red');          // LoE marker missed that day
+  assert.equal(dayDot([{ status: 'done' }, { status: 'done' }], '2026-08-25', TODAY), 'grn');
+  assert.equal(dayDot([{ status: 'done' }, { status: null }], '2026-08-25', TODAY), 'amb');
+  assert.equal(dayDot([{ status: null }], '2026-08-25', TODAY), null);
+  assert.equal(dayDot([{ status: 'done' }], '2026-09-25', TODAY), null, 'future day never gets a dot');
+});
+
+test('weekGlance: dailies rail — one cell per paced daily per day, statuses from dailyStatus', () => {
+  const ids = WK.days[0].dailies.map(c => c.id);
+  assert.deepEqual(ids, ['singapore', 'loe']);
+  assert.deepEqual(WK.days.map(d => d.dailies[0].status), [null, null, null, null, 'done', 'done', 'done']);
+  assert.deepEqual(WK.days.map(d => d.dailies[1].status), ['missed', 'missed', 'missed', 'missed', 'missed', 'done', 'missed']);
+  // On the Jan trip LoE pauses (blank cell), Singapore runs reduced (visible).
+  const trip = weekGlance('2027-01-04', events, plan, TODAY);
+  assert.deepEqual(trip.days[0].dailies.map(c => c.visible), [true, false]);
+  assert.equal(trip.hourMin, null, 'an all-away week has no hour axis');
+  assert.equal(trip.timed.total, 0);
+});
+
+test('weekGlance: paced summary counts curriculum-bearing done rows vs expectedSessions for the week', () => {
+  const sm = WK.paced.find(p => p.id === 'singapore'), loe = WK.paced.find(p => p.id === 'loe');
+  assert.deepEqual([sm.sessions, sm.expected, sm.per, sm.unit, sm.short], [10, 14, 2, 'lessons', 'Singapore']);
+  assert.equal(loe.sessions, 1);
+  assert.ok(Math.abs(loe.expected - 1) < 1e-9);
+  assert.deepEqual([loe.per, loe.unit, loe.short], [1, 'sessions', 'LoE']);
+  const next = weekGlance('2026-08-31', events, plan, TODAY);
+  assert.equal(next.paced.find(p => p.id === 'loe').expected, 2.5, 'home week: 2.5 LoE sessions');
+});
+
+test('weekGlance: changes = dated one-offs, skips and away runs, clipped to the week, sorted by date', () => {
+  assert.deepEqual(WK.changes.map(c => [c.kind, c.dow, c.label, c.time]), [
+    ['add', 'Mon', 'Gracie Jiu-Jitsu', '4pm–5pm'],
+    ['add', 'Fri', 'Arya art', '3:30pm–4:30pm'],
+  ]);
+  const next = weekGlance('2026-08-31', events, plan, TODAY);
+  assert.deepEqual(next.changes.map(c => [c.kind, c.dow, c.label, c.time]), [['add', 'Tue', 'Science trial', '12pm–1pm']]);
+  const trip = weekGlance('2027-01-04', events, plan, TODAY);
+  assert.equal(trip.changes.length, 1);
+  assert.deepEqual([trip.changes[0].kind, trip.changes[0].dow, trip.changes[0].time], ['away', 'Mon–Sun', 'day 1–7 of 35']);
+  const withSkip = sanitizePlan({ ...rawPlan, overrides: [...rawPlan.overrides, { date: '2026-08-26', action: 'skip', eventId: 'e1003' }] });
+  const c = weekGlance('2026-08-24', events, withSkip, TODAY).changes.find(x => x.kind === 'skip');
+  assert.deepEqual([c.dow, c.label, c.time], ['Wed', 'Quran', '10am']);
+});
+
+test('fmtClock / statusMark', () => {
+  assert.deepEqual([fmtClock(10), fmtClock(12), fmtClock(15.5), fmtClock(0)], ['10am', '12pm', '3:30pm', '12am']);
+  assert.deepEqual(['done', 'half', 'partial', 'missed'].map(statusMark), ['✓', '◐', '◐', '✗']);
 });
