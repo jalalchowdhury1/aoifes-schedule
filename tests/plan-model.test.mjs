@@ -1036,3 +1036,48 @@ test('normalizeSkipped drops junk, dupes, out-of-range and the top', () => {
   normalizeSkipped(cur); assert.deepEqual(cur.skipped, [1, 5]);
   const top = tbwb(2, [2, 3]); normalizeSkipped(top); assert.equal('skipped' in top, false);
 });
+
+import { gridSlots } from '../js/plan/model.js';
+
+const geo = () => ({
+  id: 'geography', name: 'Geography', type: 'paced', status: 'active', cls: 'g', onGrid: true,
+  slots: [{ day: 2, start: 11, end: 12 }],
+  chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 0, unitWord: 'Week',
+            titles: { '1': 'Introduction to Geography' } }],
+});
+
+test('gridSlots: an active on-grid activity yields one block per slot with a stable (actId, idx) identity', () => {
+  const sci = { id: 'science', name: 'Science', type: 'external', status: 'active', cls: 's', onGrid: true,
+                slots: [{ day: 2, start: 14, end: 15 }, { day: 4, start: 9, end: 10 }] };
+  const out = gridSlots([geo(), sci]);
+  assert.deepEqual(out.map(b => [b.actId, b.idx, b.day, b.start, b.end, b.cls]), [
+    ['geography', 0, 2, 11, 12, 'g'],
+    ['science', 0, 2, 14, 15, 's'],
+    ['science', 1, 4, 9, 10, 's'],
+  ]);
+  assert.equal(out[0].name, 'Geography');
+  assert.equal(out[1].note, '');                         // not paced: no lesson label
+});
+
+test('gridSlots: a paced activity carries its next session label as the note', () => {
+  assert.equal(gridSlots([geo()])[0].note, 'Introduction to Geography');
+});
+
+test('gridSlots: planned / off-grid / slot-less / malformed activities contribute nothing', () => {
+  const planned = { ...geo(), status: 'planned' };
+  const offGrid = { ...geo(), onGrid: false };
+  const noSlots = { ...geo(), slots: undefined };
+  const bad = { ...geo(), slots: [{ day: '2', start: 11, end: 12 }, { day: 7, start: 11, end: 12 },
+                                   { day: 2, start: 12, end: 11 }, null] };
+  assert.deepEqual(gridSlots([planned, offGrid, noSlots, bad]), []);
+  assert.deepEqual(gridSlots(undefined), []);
+});
+
+test('gridSlots: outside 9–17 is dropped, overhanging is clamped for drawing but keeps its real times', () => {
+  const a = { ...geo(), slots: [{ day: 0, start: 7, end: 8 }, { day: 1, start: 8, end: 10 }, { day: 3, start: 16, end: 18 }] };
+  const out = gridSlots([a]);
+  assert.deepEqual(out.map(b => [b.idx, b.top, b.bottom, b.start, b.end]), [
+    [1, 9, 10, 8, 10],
+    [2, 16, 17, 16, 18],
+  ]);
+});

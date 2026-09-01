@@ -2,6 +2,8 @@
 // All dates are local 'YYYY-MM-DD' strings. Week walks are keyed by their
 // Monday; time away is day-precise and lives in `plan.periods` (v2).
 
+import { S, E } from '../model.js';
+
 export const d2s = d =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const s2d = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
@@ -178,6 +180,35 @@ export const currentCur = act => (act.chain || []).find(c => (c.done || 0) < ses
 export const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCount(c), 0);
 export const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);
 export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
+
+// ── Planner slots on the week grid (2026-09-01) ─────────────
+// An active on-grid activity's `slots[]` are recurring weekly blocks, the
+// planner-side twin of `aoifes_schedule.events`. `(actId, idx)` IS a slot's
+// identity everywhere — the grid's data-slot attribute, the gcal sync key
+// `act:<id>:<idx>` — so the index must never be re-packed here: a malformed
+// slot is skipped, not spliced. Same drawing rules as the one-off ghosts: a
+// slot wholly outside 9–17 is dropped, an overhanging one is clamped to the
+// band (`top`/`bottom`) while the label keeps its real `start`/`end`.
+export function gridSlots(activities) {
+  const out = [];
+  for (const a of Array.isArray(activities) ? activities : []) {
+    if (!a || a.status !== 'active' || !a.onGrid || !Array.isArray(a.slots)) continue;
+    const cur = a.type === 'paced' ? currentCur(a) : null;
+    const ns = cur ? nextSession(cur) : null;
+    const note = ns ? ns.label : '';
+    a.slots.forEach((s, idx) => {
+      if (!s || !Number.isInteger(s.day) || s.day < 0 || s.day > 6) return;
+      if (typeof s.start !== 'number' || typeof s.end !== 'number') return;
+      if (s.end <= s.start || s.end <= S || s.start >= E) return;
+      out.push({
+        actId: a.id, idx, day: s.day, start: s.start, end: s.end,
+        top: Math.max(S, s.start), bottom: Math.min(E, s.end),
+        name: a.name || a.id, cls: okCls(a.cls), note,
+      });
+    });
+  }
+  return out;
+}
 
 // ── Lesson-based totals (Subjects header: "2/60 lessons") ───
 // A session count and a LESSON count differ for tb-wb chains: two sessions
