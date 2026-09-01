@@ -686,6 +686,23 @@ test('tbWbCard: full labels are sessionLabel\'s own strings, so a toast names th
   assert.equal(c.lessons[1].halves[1].fullLabel, 'Lesson 7 · workbook');
 });
 
+// ── tbWbCard honesty after out-of-order logging (spec 2026-09-01) ──
+test('tbWbCard after L8-before-L7: L7 row is next, L8 row is done+undoable', () => {
+  const act = { id: 'singapore', name: 'Singapore Math' };
+  const cur = { id: 'c1', name: '3A Ch 4 · Fractions', pattern: 'tb-wb', lessons: 11, tests: 0, done: 14, skipped: [12, 13] };
+  const log = [14, 15].map(s => ({ date: '2026-09-01', activityId: 'singapore', status: 'done', curriculum: 'c1', session: s }));
+  const card = tbWbCard(act, cur, log, '2026-09-01');
+  assert.equal(card.currentLabel, 'L7');
+  assert.deepEqual(card.lessons.map(l => l.lesson), [7, 8]);
+  const [l7, l8] = card.lessons;
+  assert.equal(l7.halves[0].next, true);  assert.equal(l7.halves[0].done, false);
+  assert.equal(l7.halves[1].needs, 'Textbook');
+  assert.equal(l8.halves[0].done, true);  assert.equal(l8.halves[1].undoable, true);
+  assert.equal(l8.halves[0].next, false);
+  assert.equal(card.doneSessions, 14);
+  assert.equal(card.addLesson, null);
+});
+
 test('subjectCards: carries the PACE gap, not just the date-derived week delta', () => {
   const p = sanitizePlan({
     version: 2, periods: [],

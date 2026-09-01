@@ -17,7 +17,7 @@ import {
   dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls, sessionsCount,
   actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip, paceGapLessons,
   dailyStreak, mondayOf, addDays, compareSubjects, s2d, sessionLabel,
-  expectedSessions, dayAway,
+  expectedSessions, dayAway, nextIndex, isSessionDone,
 } from './model.js';
 
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
@@ -163,6 +163,7 @@ export function tbWbCard(act, cur, log, dateStr, extraOpen = false) {
   if (!total) return null;                    // counts still pending: nothing to tap
   const paired = Math.max(0, (cur.lessons || 0) * 2);
   const done = Math.min(Math.max(0, cur.done || 0), total);
+  const ni = nextIndex(cur);                  // the lowest OWED slot if any, else the fresh next
   const rows = (Array.isArray(log) ? log : []).filter(e =>
     e && e.activityId === act.id && e.status === 'done' && !e.timed && !e.eventId &&
     e.curriculum && typeof e.session === 'number');
@@ -177,26 +178,32 @@ export function tbWbCard(act, cur, log, dateStr, extraOpen = false) {
   const dateOf = s => rows.find(e => e.curriculum === cur.id && e.session === s)?.date || null;
   const item = s => {
     const on = dateOf(s);
+    const done_ = isSessionDone(cur, s);
     return { session: s, label: halfLabel(cur, s), fullLabel: sessionLabel(cur, s),
-      done: s < done, loggedOn: on, undoable: !!on && on === dateStr, next: s === done,
-      needs: s > done ? halfLabel(cur, done) : null };
+      done: done_, loggedOn: on, undoable: !!on && on === dateStr, next: s === ni,
+      needs: (!done_ && s !== ni && ni != null) ? halfLabel(cur, ni) : null };
   };
   const base = { chapter: shortChainName(cur), curId: cur.id,
     doneSessions: done, totalSessions: total };
 
-  if (done >= paired) {                       // trailing chapter review(s), self-contained
+  if (ni == null || ni >= paired) {           // trailing chapter review(s), self-contained
     const tests = [];
     for (let s = paired; s < total; s++) tests.push(item(s));
     return { ...base, lessons: [], tests, addLesson: null,
-      currentLabel: done < total ? sessionLabel(cur, done) : null };
+      currentLabel: ni == null ? null : sessionLabel(cur, ni) };
   }
 
-  const current = Math.floor(done / 2) + 1;   // first lesson with a half still owed
-  const inProgress = done % 2 === 1;          // textbook logged, workbook outstanding
+  const current = Math.floor(ni / 2) + 1;     // first lesson with a half still owed
+  const inProgress = ni % 2 === 1;            // textbook logged, workbook outstanding
+  // An OWED lesson (below the high-water mark, from `skipped`) is unfinished
+  // work, never a voluntary new addition — it must show unconditionally, the
+  // same as an in-progress lesson, rather than sit behind the ➕ gate meant
+  // for "start a further lesson today".
+  const owed = Array.isArray(cur.skipped) && cur.skipped.length > 0;
   const lessonsToday = [...new Set(rows
     .filter(e => e.date === dateStr && e.curriculum === cur.id && e.session < paired)
     .map(e => Math.floor(e.session / 2) + 1))];
-  const showCurrent = inProgress || !anyToday || !!extraOpen;
+  const showCurrent = inProgress || !anyToday || !!extraOpen || owed;
   const nums = [...new Set([...lessonsToday, ...(showCurrent ? [current] : [])])]
     .sort((a, b) => a - b);
   return { ...base, tests: [], currentLabel: `L${current}`,
