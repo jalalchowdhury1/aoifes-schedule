@@ -239,20 +239,82 @@ function noteForDaily(cur) {
 const markFor = status => status === 'done' ? '✓' : status === 'half' || status === 'partial' ? '◐' : '✗';
 export const statusMark = markFor;
 
+// One receipt line's lesson detail for a paced activity's rows on the day —
+// the tb-wb half/pair folding and the simple-chain label list. Shared by the
+// timed pass (an on-grid class whose ✓ also logged its lesson, 2026-09-01)
+// and the no-slot dailies pass, so both read identically.
+function lessonDetail(act, entries) {
+  const byChain = new Map();
+  for (const e of entries) {
+    if (!byChain.has(e.curriculum)) byChain.set(e.curriculum, []);
+    byChain.get(e.curriculum).push(e);
+  }
+  const details = [];
+  for (const [curId, es] of byChain) {
+    const cur = (act.chain || []).find(c => c && c.id === curId);
+    if (!cur) continue;
+    if (cur.pattern === 'tb-wb') {
+      // Mirror sessionLabel/_tb_wb_paired_sessions' own paired-region
+      // boundary (review 2 fix): a session at or past `lessons*2` is a
+      // trailing, unpaired review/test (the real dm3 shape — a chapter
+      // with an odd `tests` count, e.g. dm3-c4/c7/c11/c15 in production)
+      // and has no lesson number to fold into — the naive floor(session/2)
+      // math used to fabricate one ('L11' for the first test after an
+      // 10-lesson/20-session chapter). It now renders via sessionLabel
+      // itself ('Test 1'), same as the bot. Inside the paired region, a
+      // lesson touched by BOTH halves collapses to 'L6'; a lone half (the
+      // day only got the textbook, or only the workbook — an unfinished
+      // pair, still a real thing to show on a past day even though
+      // dailyStatus itself reads 'half' rather than 'done' for it) stays
+      // 'L6 textbook' / 'L6 workbook' rather than silently dropping which
+      // half actually happened.
+      const paired = (cur.lessons || 0) * 2;
+      const lessonHalves = new Map();      // lesson# -> Set(0=textbook,1=workbook)
+      const trailing = new Set();
+      for (const e of es) {
+        const s = e.session ?? 0;
+        if (s >= paired) { trailing.add(s); continue; }
+        const lesson = Math.floor(s / 2) + 1;
+        if (!lessonHalves.has(lesson)) lessonHalves.set(lesson, new Set());
+        lessonHalves.get(lesson).add(s % 2);
+      }
+      const lessonParts = [...lessonHalves.entries()].sort((a, b) => a[0] - b[0])
+        .map(([n, halves]) => halves.size >= 2 ? `L${n}` : `L${n} ${halves.has(1) ? 'workbook' : 'textbook'}`);
+      const trailingParts = [...trailing].sort((a, b) => a - b).map(s => sessionLabel(cur, s));
+      details.push([...lessonParts, ...trailingParts].join(' + '));
+    } else {
+      const labels = [...new Set(es.map(e => sessionLabel(cur, e.session ?? 0)))];
+      details.push(labels.join(' + '));
+    }
+  }
+  return details.filter(Boolean).join(' · ');
+}
+
 export function receipt(dateStr, events, plan, nameForEvent) {
   const out = [];
-  const timed = buildTimed(dateStr, events, plan, nameForEvent);
-  for (const it of timed) {
-    const st = statusOfTimed(plan, dateStr, it);
-    if (st == null) continue;
-    out.push({ emoji: it.emoji, name: widgetName(it), mark: markFor(st), detail: '' });
-  }
-
   const byAct = new Map();
   for (const e of plan?.log || []) {
     if (!e || e.date !== dateStr || e.timed || e.eventId || e.activityId == null) continue;
     if (!byAct.has(e.activityId)) byAct.set(e.activityId, []);
     byAct.get(e.activityId).push(e);
+  }
+  const timed = buildTimed(dateStr, events, plan, nameForEvent);
+  for (const it of timed) {
+    const st = statusOfTimed(plan, dateStr, it);
+    if (st == null) continue;
+    // An on-grid class whose ✓ also logged its lesson (logTimed, 2026-09-01)
+    // leaves two rows for one class: fold the lesson label into this timed
+    // line and take the activity out of the dailies pass below, or the day
+    // would read "Geography ✓" twice.
+    let detail = '';
+    const entries = it.activityId != null ? byAct.get(it.activityId) : null;
+    if (entries) {
+      const act = (plan?.activities || []).find(a => a && a.id === it.activityId);
+      const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
+      if (act && !marker) detail = lessonDetail(act, entries);
+      byAct.delete(it.activityId);
+    }
+    out.push({ emoji: it.emoji, name: widgetName(it), mark: markFor(st), detail });
   }
   for (const [actId, entries] of byAct) {
     const act = (plan?.activities || []).find(a => a && a.id === actId);
@@ -260,50 +322,7 @@ export function receipt(dateStr, events, plan, nameForEvent) {
     const nick = WIDGET_NICK[actId] || shortName(act.name || act.id);
     const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
     if (marker) { out.push({ emoji: emojiFor(actId), name: nick, mark: markFor(marker.status), detail: '' }); continue; }
-    const byChain = new Map();
-    for (const e of entries) {
-      if (!byChain.has(e.curriculum)) byChain.set(e.curriculum, []);
-      byChain.get(e.curriculum).push(e);
-    }
-    const details = [];
-    for (const [curId, es] of byChain) {
-      const cur = (act.chain || []).find(c => c && c.id === curId);
-      if (!cur) continue;
-      if (cur.pattern === 'tb-wb') {
-        // Mirror sessionLabel/_tb_wb_paired_sessions' own paired-region
-        // boundary (review 2 fix): a session at or past `lessons*2` is a
-        // trailing, unpaired review/test (the real dm3 shape — a chapter
-        // with an odd `tests` count, e.g. dm3-c4/c7/c11/c15 in production)
-        // and has no lesson number to fold into — the naive floor(session/2)
-        // math used to fabricate one ('L11' for the first test after an
-        // 10-lesson/20-session chapter). It now renders via sessionLabel
-        // itself ('Test 1'), same as the bot. Inside the paired region, a
-        // lesson touched by BOTH halves collapses to 'L6'; a lone half (the
-        // day only got the textbook, or only the workbook — an unfinished
-        // pair, still a real thing to show on a past day even though
-        // dailyStatus itself reads 'half' rather than 'done' for it) stays
-        // 'L6 textbook' / 'L6 workbook' rather than silently dropping which
-        // half actually happened.
-        const paired = (cur.lessons || 0) * 2;
-        const lessonHalves = new Map();      // lesson# -> Set(0=textbook,1=workbook)
-        const trailing = new Set();
-        for (const e of es) {
-          const s = e.session ?? 0;
-          if (s >= paired) { trailing.add(s); continue; }
-          const lesson = Math.floor(s / 2) + 1;
-          if (!lessonHalves.has(lesson)) lessonHalves.set(lesson, new Set());
-          lessonHalves.get(lesson).add(s % 2);
-        }
-        const lessonParts = [...lessonHalves.entries()].sort((a, b) => a[0] - b[0])
-          .map(([n, halves]) => halves.size >= 2 ? `L${n}` : `L${n} ${halves.has(1) ? 'workbook' : 'textbook'}`);
-        const trailingParts = [...trailing].sort((a, b) => a - b).map(s => sessionLabel(cur, s));
-        details.push([...lessonParts, ...trailingParts].join(' + '));
-      } else {
-        const labels = [...new Set(es.map(e => sessionLabel(cur, e.session ?? 0)))];
-        details.push(labels.join(' + '));
-      }
-    }
-    out.push({ emoji: emojiFor(actId), name: nick, mark: '✓', detail: details.filter(Boolean).join(' · ') });
+    out.push({ emoji: emojiFor(actId), name: nick, mark: '✓', detail: lessonDetail(act, entries) });
   }
   return out;
 }

@@ -820,3 +820,32 @@ test('subjectCards: sessionsThisWeek counts lesson rows, not the attendance row 
   const card = subjectCards(p, '2026-09-01').find(c => c.id === 'geography');
   assert.equal(card.sessionsThisWeek, 1);
 });
+
+// ── receipt: an on-grid class whose ✓ also logged its lesson is ONE line (2026-09-01) ──
+const onGridPlan = log => sanitizePlan({
+  version: 2, year: 2026,
+  parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+  periods: [], overrides: [],
+  activities: [{ id: 'geography', name: 'Geography', type: 'paced', status: 'active', cls: 'g', onGrid: true,
+    slots: [{ day: 2, start: 11, end: 12 }], rhythm: { kind: 'weekly', perWeek: 1 },
+    chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1, unitWord: 'Week', titles: {} }] }],
+  log,
+});
+
+test('receipt: an on-grid class ticked ✓ (attendance + lesson rows) is ONE line carrying the lesson', () => {
+  const p = onGridPlan([
+    { date: '2026-09-02', status: 'done', timed: true, activityId: 'geography' },
+    { date: '2026-09-02', activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+  ]);
+  const rows = receipt('2026-09-02', [], p);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].mark, '✓');
+  assert.equal(rows[0].detail, 'Week 1');
+});
+
+test('receipt: a ✗ on an on-grid class stays one bare line; a lesson logged without attendance still lists', () => {
+  const missed = onGridPlan([{ date: '2026-09-02', status: 'missed', timed: true, activityId: 'geography' }]);
+  assert.deepEqual(receipt('2026-09-02', [], missed).map(r => [r.mark, r.detail]), [['✗', '']]);
+  const lessonOnly = onGridPlan([{ date: '2026-09-02', activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 }]);
+  assert.deepEqual(receipt('2026-09-02', [], lessonOnly).map(r => [r.mark, r.detail]), [['✓', 'Week 1']]);
+});

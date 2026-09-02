@@ -175,8 +175,11 @@ function pacedNoteLine(a) {
   }
   // (b) sessions logged this week, Mon..Sun.
   const weekStart = mondayOf(today), weekEnd = addDays(weekStart, 6);
+  // Lesson rows only: an on-grid class also carries a `timed` attendance row
+  // for the same date (logTimed, 2026-09-01), and that is not a second session.
   const sessions = (Array.isArray(p.log) ? p.log : []).filter(e =>
-    e && e.activityId === a.id && e.status === 'done' && e.date >= weekStart && e.date <= weekEnd).length;
+    e && e.activityId === a.id && e.status === 'done' && !e.timed && !e.eventId &&
+    e.date >= weekStart && e.date <= weekEnd).length;
   parts.push(`${sessions} session${sessions === 1 ? '' : 's'} this week`);
   // (c) streak — omit "0-day"/"1-day": below 2 it isn't a streak worth naming.
   const streak = dailyStreak(p.log, a.id, p.periods, today);

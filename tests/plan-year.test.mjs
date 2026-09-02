@@ -367,3 +367,19 @@ test('historyRows: under the cap, no notice row is added anywhere', () => {
   assert.equal(groups.flatMap(g => g.rows).length, 5);
   assert.ok(!groups.flatMap(g => g.rows).some(r => r.notice));
 });
+
+test('historyRows: an on-grid class ticked ✓ lists its lesson once (attendance implied); a ✗ shows the slot hours', () => {
+  const act = { id: 'geography', slots: [{ day: 2, start: 11, end: 12 }],
+    chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1, unitWord: 'Week', titles: {} }] };
+  const wed = '2026-09-02', wed2 = '2026-09-09';
+  const p = { overrides: [], log: [
+    { date: wed, status: 'done', timed: true, activityId: 'geography' },
+    { date: wed, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+    { date: wed2, status: 'missed', timed: true, activityId: 'geography' },
+  ] };
+  const rows = historyRows(act, [], p).flatMap(g => g.rows).filter(r => !r.notice);
+  assert.deepEqual(rows.map(r => [r.date, r.status, r.sessionLabel ?? null, r.timeLabel ?? null]), [
+    [wed2, 'missed', null, '11am–12pm'],
+    [wed, 'done', 'Week 1', null],
+  ]);
+});

@@ -9,7 +9,7 @@ import { store, catLabel } from '../state.js';
 import {
   todayStr, addDays, mondayOf, weeksBetween, daysBetween, dayStatus,
   weekCapacity, actTotal, actDone, projectFinish, tripImpact, isWorkDay,
-  weekAttendance, okCls, WALK_CAP, ISO, sessionLabel,
+  weekAttendance, okCls, WALK_CAP, ISO, sessionLabel, dayIdx,
 } from './model.js';
 import { plan, addPeriod, updatePeriod, deletePeriod } from './state.js';
 
@@ -295,12 +295,24 @@ export function historyRows(act, events, plan) {
   const ovById = new Map(overrides.filter(o => o && o.id != null).map(o => [o.id, o]));
   const chain = Array.isArray(act.chain) ? act.chain : [];
 
-  const rows = log
-    .filter(e => isISO(e?.date) && ownsRow(e, act, tplIds, ovIds))
+  const owned = log.filter(e => isISO(e?.date) && ownsRow(e, act, tplIds, ovIds));
+  // An on-grid class whose ✓ also logged its lesson (logTimed, 2026-09-01)
+  // leaves two rows for one date; the attendance row is implied by the lesson
+  // row, so it is dropped here rather than listed as a blank second line.
+  const shadowed = e => e.timed && e.activityId === act.id && e.eventId == null &&
+    owned.some(o => o !== e && o.date === e.date && o.activityId === act.id &&
+                    !o.timed && o.eventId == null && o.curriculum);
+  const rows = owned
+    .filter(e => !shadowed(e))
     .map(e => {
       const tplEv = e.eventId != null ? evById.get(e.eventId) : null;
       const ov = e.eventId != null ? ovById.get(e.eventId) : null;
-      const timed = tplEv || (ov && Number.isFinite(ov.start) && Number.isFinite(ov.end) ? ov : null);
+      // A timed row against the activity's OWN slot (a ✗ on Geography, say)
+      // has no event to read hours from: use the slot for that weekday.
+      const slot = e.timed && e.eventId == null && e.activityId === act.id && Array.isArray(act.slots)
+        ? act.slots.find(sl => sl && sl.day === dayIdx(e.date) && Number.isFinite(sl.start) && Number.isFinite(sl.end))
+        : null;
+      const timed = tplEv || (ov && Number.isFinite(ov.start) && Number.isFinite(ov.end) ? ov : null) || slot;
       const row = { date: e.date, dayLabel: dayLabelFor(e.date), status: e.status };
       if (timed) row.timeLabel = `${fmt(timed.start)}–${fmt(timed.end)}`;
       else if (e.curriculum || e.label) {
