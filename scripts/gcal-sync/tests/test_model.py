@@ -190,6 +190,121 @@ def test_activity_status_no_longer_active_yields_a_delete():
     assert plan.deletes == ["g1"] and not plan.inserts and not plan.patches
 
 
+# ── skip overrides -> EXDATE ────────────────────────────────────────────────
+def skip(eventId=None, activityId=None, date="2026-08-24"):
+    o = {"date": date, "action": "skip"}
+    if eventId is not None:
+        o["eventId"] = eventId
+    if activityId is not None:
+        o["activityId"] = activityId
+    return o
+
+
+def test_slot_skip_on_the_right_weekday_adds_an_exdate_line():
+    """activity() is Mondays 4-5pm; 2026-08-24 is the next Monday on/after DTSTART (08-17)."""
+    plan = {"activities": [activity()], "overrides": [skip(activityId="jj", date="2026-08-24")]}
+    body = model.activity_slot_events(plan, TODAY)["act:jj:0"]
+    assert body["recurrence"] == [
+        "RRULE:FREQ=WEEKLY;BYDAY=MO",
+        "EXDATE;TZID=America/New_York:20260824T160000",
+    ]
+
+
+def test_two_slot_skips_produce_two_sorted_exdate_lines():
+    plan = {
+        "activities": [activity()],
+        "overrides": [
+            skip(activityId="jj", date="2026-09-07"),
+            skip(activityId="jj", date="2026-08-31"),
+        ],
+    }
+    body = model.activity_slot_events(plan, TODAY)["act:jj:0"]
+    assert body["recurrence"] == [
+        "RRULE:FREQ=WEEKLY;BYDAY=MO",
+        "EXDATE;TZID=America/New_York:20260831T160000",
+        "EXDATE;TZID=America/New_York:20260907T160000",
+    ]
+
+
+def test_slot_skip_on_a_different_weekday_is_ignored():
+    plan = {"activities": [activity()], "overrides": [skip(activityId="jj", date="2026-08-25")]}  # Tuesday
+    body = model.activity_slot_events(plan, TODAY)["act:jj:0"]
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+
+
+def test_slot_skip_before_dtstart_is_ignored():
+    plan = {"activities": [activity()], "overrides": [skip(activityId="jj", date="2026-08-10")]}  # before 08-17
+    body = model.activity_slot_events(plan, TODAY)["act:jj:0"]
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+
+
+def test_template_eventid_skip_and_slot_activityid_skip_do_not_cross_apply():
+    """A tpl: eventId skip and an act: activityId skip in the SAME overrides list
+    each land on their own event only, even when the ids happen to line up."""
+    overrides = [
+        skip(eventId="e1", date="2026-08-24"),
+        skip(activityId="jj", date="2026-08-24"),
+    ]
+    tpl_body = model.template_events(schedule([ev(id="e1", day=0, start=10, end=11)]), TODAY, overrides)["tpl:e1"]
+    act_body = model.activity_slot_events({"activities": [activity(id="jj")], "overrides": overrides}, TODAY)["act:jj:0"]
+    assert tpl_body["recurrence"] == [
+        "RRULE:FREQ=WEEKLY;BYDAY=MO",
+        "EXDATE;TZID=America/New_York:20260824T100000",
+    ]
+    assert act_body["recurrence"] == [
+        "RRULE:FREQ=WEEKLY;BYDAY=MO",
+        "EXDATE;TZID=America/New_York:20260824T160000",
+    ]
+    # An eventId-only row must not leak onto the activity, and vice versa.
+    act_only = model.activity_slot_events(
+        {"activities": [activity(id="jj")], "overrides": [skip(eventId="jj", date="2026-08-24")]}, TODAY
+    )["act:jj:0"]
+    assert act_only["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+    tpl_only = model.template_events(
+        schedule([ev(id="e1", day=0, start=10, end=11)]), TODAY, [skip(activityId="e1", date="2026-08-24")]
+    )["tpl:e1"]
+    assert tpl_only["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+
+
+def test_garbage_skip_rows_are_ignored():
+    overrides = [
+        "junk",
+        None,
+        {"action": "skip", "activityId": "jj"},                      # no date
+        {"action": "skip", "activityId": "jj", "date": "not-a-date"},  # non-ISO
+        {"activityId": "jj", "date": "2026-08-24"},                    # no action
+        {"action": "add", "activityId": "jj", "date": "2026-08-24"},   # wrong action
+    ]
+    plan = {"activities": [activity()], "overrides": overrides}
+    body = model.activity_slot_events(plan, TODAY)["act:jj:0"]
+    assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+
+
+def test_no_skips_leaves_recurrence_byte_identical():
+    s = schedule([ev()])
+    plain = model.template_events(s, TODAY)
+    assert model.template_events(s, TODAY, None) == plain
+    assert model.template_events(s, TODAY, []) == plain
+    assert plain["tpl:e1"]["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO"]
+
+
+def test_skip_changes_the_signature_so_the_reconciler_will_patch():
+    without = model.activity_slot_events({"activities": [activity()]}, TODAY)["act:jj:0"]
+    plan = {"activities": [activity()], "overrides": [skip(activityId="jj", date="2026-08-24")]}
+    with_skip = model.activity_slot_events(plan, TODAY)["act:jj:0"]
+    assert model.signature(without) != model.signature(with_skip)
+
+
+def test_desired_state_passes_overrides_into_template_events():
+    s = schedule([ev(id="e1", day=0, start=10, end=11)])
+    plan = {"overrides": [skip(eventId="e1", date="2026-08-24")]}
+    out = model.desired_state(s, plan, TODAY)
+    assert out["tpl:e1"]["recurrence"] == [
+        "RRULE:FREQ=WEEKLY;BYDAY=MO",
+        "EXDATE;TZID=America/New_York:20260824T100000",
+    ]
+
+
 # ── overrides ───────────────────────────────────────────────────────────────
 def override(id="x1", date="2026-08-19", action="add", start=15.5, end=16.5, name="Arya art"):
     return {"id": id, "date": date, "action": action, "start": start, "end": end, "name": name}

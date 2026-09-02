@@ -225,12 +225,64 @@ def sig_of(body: dict) -> str | None:
 
 
 # ── builders ────────────────────────────────────────────────────────────────
-def template_events(schedule: dict, today: dt.date) -> dict:
+def _weekday_skip_dates(overrides, weekday: int, dtstart: dt.date, *,
+                         event_id=None, activity_id=None) -> list:
+    """ISO skip dates from `overrides` that apply to one recurring series.
+
+    A row matches when `action == 'skip'` AND (its `eventId` stringifies to
+    `event_id` — template events) OR (its `activityId` equals `activity_id`
+    exactly — planner slots; a slot skip is keyed by activity, so it applies
+    to every slot of that activity on the matching weekday). Exactly one of
+    `event_id`/`activity_id` is passed by each caller, so only that predicate
+    is active. Dates that don't parse as ISO, land on a different weekday than
+    the series, or fall before the series' own DTSTART are dropped — an
+    unparseable/garbage row is silently ignored rather than raising.
+    """
+    out = []
+    for o in overrides or []:
+        if not isinstance(o, dict) or o.get("action") != "skip":
+            continue
+        if event_id is not None and str(o.get("eventId")) != str(event_id):
+            continue
+        if activity_id is not None and o.get("activityId") != activity_id:
+            continue
+        date = parse_iso(o.get("date"))
+        if date is None or date.weekday() != weekday or date < dtstart:
+            continue
+        out.append(date)
+    return out
+
+
+def _recurrence(byday: str, tz: str, start: float, skip_dates) -> list:
+    """`[RRULE, EXDATE...]` — one EXDATE per skip date, sorted, after the RRULE.
+
+    `EXDATE;TZID=<tz>:<YYYYMMDD>T<HHMMSS>` is the documented shape for an
+    EXDATE on a `dateTime`+`timeZone` recurring series (matches the DTSTART
+    format Google's Calendar API `recurrence` docs use) — same `tz` string
+    `_timed` put in this event's `start`, same clock time as the event's own
+    start (half-hours included). No skips -> just the RRULE line, so the
+    common case stays byte-identical to before EXDATE existed.
+    """
+    lines = [f"RRULE:FREQ=WEEKLY;BYDAY={byday}"]
+    if skip_dates:
+        clock = hhmmss(start).replace(":", "")
+        lines.extend(
+            f"EXDATE;TZID={tz}:{d.strftime('%Y%m%d')}T{clock}" for d in sorted(set(skip_dates))
+        )
+    return lines
+
+
+def template_events(schedule: dict, today: dt.date, overrides=None) -> dict:
     """Week template -> open-ended weekly recurring events, keyed `tpl:<ev.id>`.
 
     DTSTART lands on this week's instance of the event's weekday, so a freshly
     created calendar starts at the current week and runs forever (no UNTIL).
     altSun is deliberately ignored in v1 — the regular-week shape is synced.
+
+    `overrides` (the plan's `aoife_plan.overrides`, passed in by
+    `desired_state`) supplies `action:'skip'` rows keyed by `eventId`: each one
+    that matches this event's id, lands on its weekday, and is on/after this
+    week's DTSTART becomes an EXDATE on the RRULE (see `_weekday_skip_dates`).
     """
     schedule = schedule if isinstance(schedule, dict) else {}
     cat_labels = schedule.get("catLabels") if isinstance(schedule.get("catLabels"), dict) else {}
@@ -244,12 +296,13 @@ def template_events(schedule: dict, today: dt.date) -> dict:
         date = monday + dt.timedelta(days=day)
         s, e = _timed(date, start, end)
         key = f"tpl:{ev['id']}"
+        skips = _weekday_skip_dates(overrides, day, date, event_id=ev["id"])
         out[key] = _event(
             key,
             display_name(ev, cat_labels),
             s,
             e,
-            [f"RRULE:FREQ=WEEKLY;BYDAY={BYDAY[day]}"],
+            _recurrence(BYDAY[day], s["timeZone"], start, skips),
         )
     return out
 
@@ -274,11 +327,14 @@ def activity_slot_events(plan: dict, today: dt.date) -> dict:
     delete+insert pair rather than a no-op patch — accepted, since the array
     index is the documented key.
 
-    `action:'skip'` overrides are NOT reflected here either, for the same
-    reason `override_events`/AGENTS.md documents for template events: no
-    EXDATE handling in v1.
+    `plan.overrides` supplies `action:'skip'` rows keyed by `activityId`: each
+    one that matches this activity's id applies to EVERY slot of that activity
+    on the matching weekday — one skip cancels the whole day, not one slot
+    index — and becomes an EXDATE on that slot's RRULE when it's on/after this
+    week's DTSTART (see `_weekday_skip_dates`).
     """
     plan = plan if isinstance(plan, dict) else {}
+    overrides = plan.get("overrides")
     monday = week_monday(today)
     out = {}
     for a in plan.get("activities", []) or []:
@@ -302,12 +358,13 @@ def activity_slot_events(plan: dict, today: dt.date) -> dict:
             date = monday + dt.timedelta(days=day)
             st, en = _timed(date, start, end)
             key = f"act:{aid}:{i}"
+            skips = _weekday_skip_dates(overrides, day, date, activity_id=aid)
             out[key] = _event(
                 key,
                 name,
                 st,
                 en,
-                [f"RRULE:FREQ=WEEKLY;BYDAY={BYDAY[day]}"],
+                _recurrence(BYDAY[day], st["timeZone"], start, skips),
             )
     return out
 
@@ -317,7 +374,10 @@ def override_events(plan: dict, today: dt.date) -> dict:
 
     Only rows with numeric start/end are positionable (the same rule
     js/plan/overlay.js uses); a timeless override is a Today-list item and has
-    no calendar shape. `action:'skip'` is NOT reflected — see AGENTS.md.
+    no calendar shape. `action:'skip'` rows are not synced here at all — a
+    skip is reflected as an EXDATE on the recurring series it references
+    (`template_events`/`activity_slot_events`), never as a standalone `ov:`
+    event of its own.
     """
     plan = plan if isinstance(plan, dict) else {}
     lo, hi = today - dt.timedelta(days=PAST_DAYS), today + dt.timedelta(days=FUTURE_DAYS)
@@ -377,7 +437,7 @@ def desired_state(schedule: dict, plan: dict, today: dt.date) -> dict:
     ever colliding — a period `p1` and an override `p1` are different events.
     """
     out = {}
-    out.update(template_events(schedule, today))
+    out.update(template_events(schedule, today, plan.get("overrides") if isinstance(plan, dict) else None))
     out.update(activity_slot_events(plan, today))
     out.update(override_events(plan, today))
     out.update(period_events(plan))

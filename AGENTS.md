@@ -575,13 +575,13 @@ date); `gcal_sync/cli.py` is the only module that fetches, authenticates or prin
   fleet (`github-notion-sync`: `log_marker` probe + `schedule_snapshot.py`
   CATALOG entry).
 - **Known limitations (v1, deliberate)**
-  - **`action:'skip'` overrides are NOT reflected** — for template events NOR
-    activity slots. A cancelled session still shows on the calendar as its
-    recurring instance. Doing it right means EXDATE on the master (or a
-    cancelled-instance write on that occurrence), which is fiddly enough to be
-    its own change; the planner's Today view remains the authority on what
-    actually happened. **Do not "fix" this by deleting the master series** —
-    that would drop every future occurrence too.
+  - **skip overrides are reflected as `EXDATE`s since 2026-09-02**
+    (weekday-matched, on/after the series DTSTART; the sig change makes the
+    reconciler PATCH). The EXDATE lands on the master series itself, not a
+    cancelled-instance write on that occurrence; the planner's Today view
+    remains the authority on what actually happened. **Do not "fix" this by
+    deleting the master series** — that would drop every future occurrence
+    too.
   - **`altSun` is ignored** — the regular-week shape is synced. (Same reason the
     print sheet always shows the week grid.)
   - Periods are NOT windowed (the list is short and curated); overrides are.
