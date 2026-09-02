@@ -341,6 +341,16 @@ test('unknown counts (waiting for books) -> no projection', () => {
   assert.equal(projectFinish(waiting, '2026-08-17', { periods: [], parentCycle: CYC }), null);
 });
 
+test('projectFinish: a fixed-calendar class (finishOn) projects THAT date verbatim, ignoring chain/rhythm (red-team M3)', () => {
+  const fixed = { ...SM, finishOn: '2027-01-13',
+                  chain: [{ pattern: 'tb-wb', lessons: 0, tests: 0, done: 0 }] };  // even waiting-for-books
+  assert.deepEqual(projectFinish(fixed, '2026-08-17', { periods: [], parentCycle: CYC }),
+    { date: '2027-01-13', weeks: null, fixed: true });
+  // A junk finishOn is not an ISO date -> falls through to the normal walk.
+  const junk = { ...SM, finishOn: 'soon' };
+  assert.notEqual(projectFinish(junk, '2026-08-17', { periods: [], parentCycle: CYC })?.date, 'soon');
+});
+
 test('cycleStats: one work-week lesson is on pace; targets 3-4', () => {
   const log = [{ date: '2026-08-20', activityId: 'loe', status: 'done' }];
   const st = cycleStats(LOE, '2026-08-22', CYC, log);   // Sat of anchor (work) week
@@ -363,6 +373,17 @@ test('targetStats: JJ 3 done at ~week 11 of 48 teaching weeks, target 20 -> behi
   assert.equal(st.done, 3);
   assert.ok(st.expected >= 4 && st.expected <= 5, String(st.expected)); // 20 * 11/48
   assert.ok(st.behind >= 1);
+});
+
+test('targetStats: only a bare session marker counts — a timed attendance row or a curriculum row is a different reader\'s (red-team L5)', () => {
+  const jj = { id: 'jj', type: 'target', status: 'active', target: 20 };
+  const plan = { year: { start: '2026-09-01', end: '2027-08-31' }, periods: [], parentCycle: CYC };
+  const log = [
+    { date: '2026-09-05', activityId: 'jj', status: 'done' },                       // bare marker: counts
+    { date: '2026-09-12', activityId: 'jj', status: 'done', timed: true },          // attendance: excluded
+    { date: '2026-09-19', activityId: 'jj', status: 'done', curriculum: 'x', session: 0 }, // lesson-shaped: excluded
+  ];
+  assert.equal(targetStats(jj, plan, log, '2026-11-10').done, 1);
 });
 
 test('targetStats: a teaching week needs >=4 plain school days', () => {

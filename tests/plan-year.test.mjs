@@ -383,3 +383,22 @@ test('historyRows: an on-grid class ticked ✓ lists its lesson once (attendance
     [wed, 'done', 'Week 1', null],
   ]);
 });
+
+test('historyRows: shadowing only ever hides a DONE attendance row — a missed row is never hidden by a lesson row (red-team L1)', () => {
+  const act = { id: 'geography', slots: [{ day: 2, start: 11, end: 12 }],
+    chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1, unitWord: 'Week', titles: {} }] };
+  const wed = '2026-09-02';
+  // Not a real logTimed sequence (that never leaves a lesson row beside a
+  // missed attendance row) — an edge case worth pinning: a genuine miss must
+  // never be silently swallowed just because a lesson row shares its date.
+  const p = { overrides: [], log: [
+    { date: wed, status: 'missed', timed: true, activityId: 'geography' },
+    { date: wed, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+  ] };
+  const rows = historyRows(act, [], p).flatMap(g => g.rows).filter(r => !r.notice);
+  // Both rows survive; the tie-sort on an equal date is stable, so log order holds.
+  assert.deepEqual(rows.map(r => [r.date, r.status, r.sessionLabel ?? null, r.timeLabel ?? null]), [
+    [wed, 'missed', null, '11am–12pm'],
+    [wed, 'done', 'Week 1', null],
+  ]);
+});

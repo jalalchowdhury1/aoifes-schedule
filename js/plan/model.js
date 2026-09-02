@@ -652,6 +652,11 @@ export function weekCapacity(act, weekStart, periods, cycle) {
 
 // Walk weeks forward until remaining sessions are covered. null = can't project.
 export function projectFinish(act, fromDate, plan, horizon = 300) {
+  // A fixed-calendar class (e.g. a Zoom class run by someone else) ends on the
+  // TEACHER's date, not a pace walk — `finishOn` wins outright, chain/rhythm
+  // notwithstanding (red-team M3). `weeks: null` since none was walked; every
+  // caller reads `.date` and tolerates that.
+  if (isISO(act?.finishOn)) return { date: act.finishOn, weeks: null, fixed: true };
   const remaining = actRemaining(act);
   if (actTotal(act) === 0) return null;              // unknown counts (waiting for books)
   if (remaining === 0) return { date: fromDate, weeks: 0, done: true };
@@ -738,7 +743,13 @@ export function targetStats(act, plan, log, dateStr) {
     }
     w = addDays(w, 7);
   }
-  const done = log.filter(e => e.activityId === act.id && e.status === 'done').length;
+  // `!e.curriculum && !e.timed`: the target tally is a plain session count, not
+  // an attendance marker or a paced chain's lesson row — those belong to a
+  // different reader (red-team L5, same "two rows, two meanings" invariant as
+  // historyRows/yesterdayHtml). Currently a no-op in production: jj (the only
+  // `target` activity) is `status:'planned'`/off-grid, so it never yet writes
+  // a `timed` row; this only guards the day it goes active+onGrid.
+  const done = log.filter(e => e.activityId === act.id && e.status === 'done' && !e.curriculum && !e.timed).length;
   const expected = total ? Math.floor((act.target || 0) * (elapsed / total)) : 0;
   return { done, target: act.target || 0, expected, behind: Math.max(0, expected - done) };
 }

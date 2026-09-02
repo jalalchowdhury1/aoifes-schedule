@@ -299,7 +299,7 @@ export function historyRows(act, events, plan) {
   // An on-grid class whose ✓ also logged its lesson (logTimed, 2026-09-01)
   // leaves two rows for one date; the attendance row is implied by the lesson
   // row, so it is dropped here rather than listed as a blank second line.
-  const shadowed = e => e.timed && e.activityId === act.id && e.eventId == null &&
+  const shadowed = e => e.status === 'done' && e.timed && e.activityId === act.id && e.eventId == null &&
     owned.some(o => o !== e && o.date === e.date && o.activityId === act.id &&
                     !o.timed && o.eventId == null && o.curriculum);
   const rows = owned

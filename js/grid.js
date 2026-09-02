@@ -11,6 +11,12 @@ export const setPH = v => { PH = v; };
 let ptr = null;
 export const isDragging = () => !!ptr;
 
+// Ids are stored data; escape them before they enter a CSS selector (same
+// helper as overlay.js's cssEsc, copied rather than imported — grid.js has no
+// other dependency on overlay.js and this is two lines).
+const cssEsc = x =>
+  (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(x) : x);
+
 // Drag/resize only on fine pointers (mouse/trackpad); touch gets tap-to-edit.
 export const dragOK = () => matchMedia('(hover:hover) and (pointer:fine)').matches;
 
@@ -128,7 +134,7 @@ export function initGrid() {
       const ev = store.events.find(x => x.id === ref.id);
       if (!ev) return;
       base.id = ref.id;
-      base.sel = `[data-id="${ref.id}"]`;
+      base.sel = `[data-id="${cssEsc(ref.id)}"]`;
       if (e.target.closest('.rh')) {
         const col = grid.querySelector(`.ca[data-day="${ev.day}"]`);
         ptr = { ...base, type: 'resize', colRect: col.getBoundingClientRect() };
@@ -150,7 +156,7 @@ export function initGrid() {
       const s = slotOf(ref);
       if (!s) return;
       base.orig = { day: s.day, start: s.start, end: s.end };
-      base.sel = `[data-slot="${ref.actId}:${ref.idx}"]`;
+      base.sel = `[data-slot="${cssEsc(`${ref.actId}:${ref.idx}`)}"]`;
       if (e.target.closest('.rh')) {
         const col = grid.querySelector(`.ca[data-day="${s.day}"]`);
         ptr = { ...base, type: 'resize', colRect: col.getBoundingClientRect() };
@@ -178,7 +184,13 @@ export function initGrid() {
     const evtEl = e.target.closest('.evt');
     if (!evtEl || store.locked) return;
     const ref = blockRef(evtEl.dataset);
-    if (ref && ref.kind === 'event') toggleSelect(ref.id);
+    if (!ref) return;
+    // A slot has no editor of its own (its times are changed by dragging), but
+    // clicking one while a template block's editor is open must still close
+    // it — otherwise the stale editor lingers over an unrelated tap (red-team
+    // M5). toggleSelect(null) is a harmless no-op when nothing was selected.
+    if (ref.kind === 'event') toggleSelect(ref.id);
+    else toggleSelect(null);
   });
 }
 
@@ -230,13 +242,18 @@ function onUp() {
   suppressClick = true; // the browser fires a click right after pointerup; we've handled it
   if (kind === 'slot') {
     const s = moved ? slotOf(ref) : null;
+    // A real drag that nets out to the exact original {day,start,end} (picked
+    // up and set back down) is still a no-op — commit() persists the WHOLE
+    // blob, so calling setSlot here would be a pointless full-blob POST
+    // (red-team L2).
+    const changed = s && orig && (s.day !== orig.day || s.start !== orig.start || s.end !== orig.end);
     // setSlot → commit → planNotify → tabs.js re-renders the grid (ghost gone).
-    if (s) setSlot(ref.actId, ref.idx, { day: s.day, start: s.start, end: s.end });
+    if (changed) setSlot(ref.actId, ref.idx, { day: s.day, start: s.start, end: s.end });
     else {
-      // No move: the preview may still have nudged the live slot by a snap
-      // step under the 3px threshold. Put it back — commit() persists the whole
-      // blob, so an uncommitted drift would ride out on the next unrelated save.
-      const live = slotOf(ref); if (live && orig) Object.assign(live, orig);
+      // No move, or a no-op net move: the preview may still have nudged the
+      // live slot by a snap step under the 3px threshold, or sit exactly on
+      // `orig` already — put it back either way, uncommitted.
+      const live = s || slotOf(ref); if (live && orig) Object.assign(live, orig);
       renderGrid();                       // and drop the ghost styling
     }
   } else if (moved) { notify(); save(); }
