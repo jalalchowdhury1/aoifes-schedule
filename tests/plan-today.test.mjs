@@ -347,6 +347,59 @@ test('yesterdayHtml: renders in schedule order, not tap/log order — a late-tap
     '<div class="tmwrow">Yesterday: ✓ Morning block · ✓ Afternoon block</div>');
 });
 
+// ── Yesterday folds attendance + lesson (red-team H3) ─────────
+// A ✓ on a paced on-grid class writes an attendance row AND a lesson row for
+// the same day (2026-09-01); before this fold, both resolved to the same
+// name via receiptEntry and the class read TWICE.
+test('yesterdayHtml: a ✓ on an on-grid class (attendance + lesson row) reads once', () => {
+  const Y = '2026-08-17';                                   // Monday, dayIdx 0
+  const TACT = {
+    id: 'tact', name: 'Ruhamah — ELA/Math', type: 'paced', status: 'active', onGrid: true,
+    rhythm: { kind: 'daily' }, slots: [{ day: dayIdx(Y), start: 13, end: 14 }],
+    chain: [{ id: 'tact-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1 }],
+  };
+  store.events = [];
+  plan.data = sanitizePlan({
+    year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], activities: [TACT],
+    log: [
+      { date: Y, activityId: 'tact', status: 'done', timed: true },
+      { date: Y, activityId: 'tact', status: 'done', curriculum: 'tact-1', session: 0, viaTimed: true },
+    ],
+    overrides: [],
+  });
+  assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ✓ Ruhamah — ELA/Math</div>');
+});
+
+test('yesterdayHtml: a tb-wb day (two Singapore session rows) reads once', () => {
+  const Y = '2026-08-17';
+  store.events = [];
+  loadPlan([]);
+  plan.data.log.push(
+    { date: Y, activityId: 'sm', status: 'done', curriculum: 'sm-c', session: 0 },
+    { date: Y, activityId: 'sm', status: 'done', curriculum: 'sm-c', session: 1 },
+  );
+  assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ✓ Singapore Math</div>');
+});
+
+test('yesterdayHtml: a missed attendance with no lesson row still shows once', () => {
+  const Y = '2026-08-17';
+  const TACT = {
+    id: 'tact', name: 'Ruhamah — ELA/Math', type: 'paced', status: 'active', onGrid: true,
+    rhythm: { kind: 'daily' }, slots: [{ day: dayIdx(Y), start: 13, end: 14 }], chain: [],
+  };
+  store.events = [];
+  plan.data = sanitizePlan({
+    year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], activities: [TACT],
+    log: [{ date: Y, activityId: 'tact', status: 'missed', timed: true }],
+    overrides: [],
+  });
+  assert.equal(yesterdayHtml(Y), '<div class="tmwrow">Yesterday: ✗ Ruhamah — ELA/Math</div>');
+});
+
 // ── Bot interop: an override carries its own identity ────────
 // The Telegram bot (aoife-school-bot) writes a one-off as an override with its
 // OWN `id` ('x<n>') and a `name`, never an activityId, and logs it back as

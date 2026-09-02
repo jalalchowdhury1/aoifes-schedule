@@ -151,8 +151,20 @@ export function yesterdayHtml(dateStr) {
   if (status.away)
     return `<div class="tmwrow">Yesterday: ${AWAY_ICON[status.type] || '✈'} ${esc(awayLabel(status))}</div>`;
   const timedItems = timedFor(dateStr);
+  const dayLog = p.log.filter(x => x.date === dateStr);
+  // A ✓ on a paced on-grid class writes an attendance row AND a lesson row for
+  // the same day (2026-09-01) — fold them into one line (red-team H3): drop
+  // the attendance half when its lesson sibling is present, then dedupe by
+  // owner so a tb-wb day's two session rows also read once.
+  const hasLesson = actId => dayLog.some(x =>
+    x.activityId === actId && !x.timed && !x.eventId && x.curriculum);
+  const seen = new Set();
   const entries = [];
-  for (const e of p.log.filter(x => x.date === dateStr)) {
+  for (const e of dayLog) {
+    if (e.timed && e.activityId && !e.eventId && hasLesson(e.activityId)) continue;
+    const key = e.eventId ?? `${e.activityId}|${e.timed ? 't' : 'l'}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const r = receiptEntry(e, timedItems);
     if (!r) continue;
     const icon = e.status === 'done' ? '✓' : e.status === 'partial' ? '◐' : '✗';
