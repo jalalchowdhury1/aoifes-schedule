@@ -910,11 +910,28 @@ function renderSubjects() {
   el.querySelectorAll('.sub').forEach(node => node.addEventListener('click', () => openSubjectSheet(node.dataset.id)));
 }
 
+// One Subjects-card capsule (style C, 2026-09-02): done → solid "Ch 1 ✓", current →
+// dots + count with the violet glow, future → hollow pill with its size. Colour
+// is the SUBJECT's (--c on the card); the glow is the app's "now" violet.
+export function pillHtml(g) {
+  if (g.kind === 'done') return `<span class="pill done">${esc(g.short)} ✓</span>`;
+  if (g.kind === 'cur') {
+    const dots = g.dots.map(s => `<i class="pd ${s}"></i>`).join('') +
+      g.revs.map(f => `<i class="prv${f ? ' full' : ''}">◆</i>`).join('');
+    return `<span class="pill cur" title="${esc(g.label)}"><em>${esc(g.short)}</em>${dots}<b>${g.done}/${g.total}</b></span>`;
+  }
+  return `<span class="pill todo" title="${esc(g.label)}">${esc(g.short)}<small>${g.total}</small></span>`;
+}
+export const pillsHtml = c => (c.pills && c.pills.length) ? `<div class="pills">${c.pills.map(pillHtml).join('')}</div>` : '';
+
 function cardHtml(c) {
   const finTxt = c.status !== 'active' ? (c.status === 'planned' ? 'planned' : c.status)
     : c.finish ? `→ ${fmtDateShort(c.finish)}` : c.lessonsTotal ? 'counts pending' : '';
+  // The current chapter's "8 of 11" now lives in its pill; the line keeps the
+  // chapter NAME only (one idea per line, no number said twice).
+  const pills = pillsHtml(c);
   const dots = c.isTbWb && c.chapterSessions
-    ? `<div class="chline">${esc(c.chapterLabel)} · ${c.chapterDone} of ${c.chapterSessions}</div>`
+    ? `<div class="chline">${esc(c.chapterLabel)}${pills ? '' : ` · ${c.chapterDone} of ${c.chapterSessions}`}</div>`
     : '';
   const caps = [];
   if (c.status === 'active') {
@@ -922,11 +939,12 @@ function cardHtml(c) {
     if (c.streak >= 2) caps.push(`<span class="cap">${c.streak}-day streak</span>`);
     if (c.nextLabel) caps.push(`<span class="cap vio">next: ${esc(c.nextLabel)}</span>`);
   }
-  return `<div class="glass sub${c.status !== 'active' ? ' dim-card' : ''}" data-id="${esc(c.id)}" role="button" tabindex="0">
+  return `<div class="glass sub${c.status !== 'active' ? ' dim-card' : ''}" data-id="${esc(c.id)}" role="button" tabindex="0" style="--c:${c.color}">
     <div class="hd"><b><span class="dotc" style="background:${c.color}"></span>${esc(c.name)}</b><span class="fin">${finTxt}</span></div>
     <div class="nums"><span class="big mono">${c.lessonsDone}<span class="of">/${c.lessonsTotal}</span></span><span class="rel dim">${c.lessonsTotal ? `· ${c.pct}%` : ''}</span></div>
     ${c.lessonsTotal ? `<div class="bar"><i style="width:${c.pct}%;background:${c.color}"></i></div>` : ''}
     ${dots}
+    ${pills}
     <div>${caps.join('')}</div>
   </div>`;
 }

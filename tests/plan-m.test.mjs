@@ -31,7 +31,7 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph } = await import('../js/m.js');
+const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph, pillHtml, pillsHtml } = await import('../js/m.js');
 const { planGapDays, planDeltaChip, paceGap, paceGapLessons, expectedSessions } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
@@ -244,4 +244,15 @@ test('blockGlyph: an unanswered block shows its emoji quietly; an answered one s
   assert.equal(blockGlyph({ ...geo, status: 'missed' }, 20, 'missed'), '✗');
   assert.equal(blockGlyph(geo, 10, 'plan'), '');
   assert.equal(blockGlyph({ status: null }, 20, 'plan'), '');
+});
+
+// ── Subjects card pills (style C) ──
+test('pillHtml: three shapes by state; the current one carries dots, reviews and the count', () => {
+  assert.equal(pillHtml({ kind: 'done', short: 'Ch 1' }), '<span class="pill done">Ch 1 ✓</span>');
+  assert.equal(pillHtml({ kind: 'todo', short: 'Ch 3', label: '3A Ch 3', total: 7 }), '<span class="pill todo" title="3A Ch 3">Ch 3<small>7</small></span>');
+  const cur = pillHtml({ kind: 'cur', short: 'Ch 2', label: '3A Ch 2 · Add', dots: ['full', 'half', 'empty'], revs: [false], done: 1.5, total: 3 });
+  assert.match(cur, /^<span class="pill cur" title="3A Ch 2 · Add"><em>Ch 2<\/em>/);
+  assert.match(cur, /<i class="pd full"><\/i><i class="pd half"><\/i><i class="pd empty"><\/i><i class="prv">◆<\/i><b>1.5\/3<\/b><\/span>$/);
+  assert.equal(pillsHtml({ pills: [] }), '');
+  assert.match(pillsHtml({ pills: [{ kind: 'done', short: 'Ch 1' }] }), /^<div class="pills">.*<\/div>$/);
 });

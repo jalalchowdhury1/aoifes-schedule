@@ -17,7 +17,7 @@ import {
   dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls, sessionsCount,
   actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip, paceGapLessons,
   dailyStreak, mondayOf, addDays, compareSubjects, s2d, sessionLabel,
-  expectedSessions, dayAway, nextIndex, isSessionDone,
+  expectedSessions, dayAway, nextIndex, isSessionDone, timelineRows,
 } from './model.js';
 
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
@@ -29,7 +29,7 @@ export const EMOJI_FALLBACK = '📌';
 export const emojiFor = key => (key != null && EMOJI_MAP[key]) || EMOJI_FALLBACK;
 
 // ── Subject color dots (Subjects tab + Year) ────────────────
-export const SUBJECT_COLORS = { singapore: '#e8834a', loe: '#5ea3f2', geography: '#4cc9b0' };
+export const SUBJECT_COLORS = { singapore: '#e8834a', loe: '#5ea3f2', geography: '#4cc9b0', science: '#378add' };
 export const SUBJECT_COLOR_NEUTRAL = '#9aa0b4';
 export const colorFor = id => SUBJECT_COLORS[id] || SUBJECT_COLOR_NEUTRAL;
 
@@ -434,6 +434,45 @@ export function nowBlock(dateStr, items, hourFloat) {
   return { state: 'after', item: null, left: ds.left };
 }
 
+// ── chapterPills: the Subjects card's per-chapter capsules (user sketch 2026-09-02,
+//    style "C · fold the finished") ─────────────────────────────────────────
+// One pill per tb-wb chapter, or per timelineRows band of a simple chain (LoE's
+// fives; Geography's tens). Three shapes, chosen by STATE so the eye lands on
+// the one that matters: a finished group folds to a solid "Ch 1 ✓" pill, the
+// CURRENT group opens up with its dots (full / half = textbook only / empty, ◆
+// reviews) and a done/total count, a future group is a hollow pill with its
+// size. Exactly one group is `cur` — the first with anything left — so the
+// glow never appears twice. Pure; rendered by m.js pillHtml.
+export function chapterPills(act) {
+  const chain = Array.isArray(act?.chain) ? act.chain : [];
+  const rows = chain.some(c => c && c.pattern === 'simple') ? timelineRows(act) : [];
+  const out = [];
+  let curSeen = false;
+  const push = g => { if (!curSeen && !g.complete) { g.kind = 'cur'; curSeen = true; } else g.kind = g.complete ? 'done' : 'todo'; out.push(g); };
+  for (const c of chain) {
+    if (!c || !c.pattern) continue;
+    if (c.pattern === 'tb-wb') {
+      const L = Math.max(0, c.lessons || 0); if (!L) continue;
+      const d = Math.min(Math.max(0, c.done || 0), L * 2), T = Math.max(0, c.tests || 0);
+      const dots = Array.from({ length: L }, (_, i) => d >= (i + 1) * 2 ? 'full' : d === i * 2 + 1 ? 'half' : 'empty');
+      const revs = Array.from({ length: T }, (_, k) => (c.done || 0) > L * 2 + k);
+      const m = /Ch\s*(\d+)/.exec(c.name || '');
+      push({ key: c.id, short: m ? `Ch ${m[1]}` : shortName(c.name || c.id), label: c.name || c.id,
+        dots, revs, done: Math.floor(d / 2) + (d % 2 ? 0.5 : 0), total: L,
+        complete: d >= L * 2 && revs.every(Boolean) });
+    } else if (c.pattern === 'simple') {
+      for (const r of rows.filter(r => r.chainId === c.id)) {
+        if (!r.sessions) continue;
+        const m = /(\d+)\s*[–-]\s*(\d+)/.exec(r.label || '');
+        push({ key: r.key, short: m ? `${m[1]}–${m[2]}` : r.label, label: r.label,
+          dots: Array.from({ length: r.sessions }, (_, i) => i < r.done ? 'full' : 'empty'), revs: [],
+          done: r.done, total: r.sessions, complete: r.done >= r.sessions });
+      }
+    }
+  }
+  return out;
+}
+
 // ── subjectCards: one card per PACED subject, in SUBJECT_ORDER ──
 // Planned/parked subjects come through too (status carried on the card so
 // the page can dim them), but only an ACTIVE subject gets a projected
@@ -483,6 +522,7 @@ export function subjectCards(plan, dateStr) {
       streak: dailyStreak(plan?.log, a.id, plan?.periods, dateStr),
       chapterLabel, chapterDone, chapterSessions,
       nextLabel: ns ? ns.label : null, isTbWb, sessionsThisWeek,
+      pills: a.status === 'active' ? chapterPills(a) : [],
     };
   });
 }

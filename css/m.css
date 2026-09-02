@@ -442,3 +442,27 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .ychip.ahead { color: var(--grn); }
 .ychip.behind { color: var(--amb); }
 .ychip.pend { color: var(--faint); }
+
+/* ── Subjects card chapter pills (style C, 2026-09-02) ──
+   State picks the shape: finished = solid pill with ✓, current = open capsule
+   with dots + count and the "now" violet glow, future = hollow pill with its
+   size. One hue per subject (--c), never one per chapter. */
+.pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 8px; }
+.pill { display: inline-flex; align-items: center; gap: 3px; padding: 5px 10px; border-radius: 999px;
+  font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 11px; line-height: 1; white-space: nowrap; }
+.pill.done { background: color-mix(in srgb, var(--c) 32%, transparent); border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); color: var(--ink); }
+.pill.todo { background: transparent; border: 1px solid rgba(255, 255, 255, .14); color: var(--dim); gap: 5px; }
+.pill.todo small { font-size: 9px; color: rgba(255, 255, 255, .38); }
+.pill.cur { padding: 5px 9px 5px 8px; background: color-mix(in srgb, var(--c) 10%, transparent);
+  border: 1px solid var(--vio-ink); box-shadow: 0 0 0 1px rgba(201, 192, 255, .22), 0 0 14px rgba(139, 124, 246, .35); }
+.pill.cur em { font-style: normal; font-size: 9px; color: var(--dim); margin-right: 3px; }
+.pill.cur b { font-size: 10px; color: var(--vio-ink); margin-left: 4px; font-weight: 600; }
+.pd { width: 6px; height: 6px; border-radius: 99px; border: 1px solid rgba(255, 255, 255, .28); flex: 0 0 auto; }
+.pd.full { background: var(--c); border-color: var(--c); }
+.pd.half { border-color: var(--c); background: linear-gradient(90deg, var(--c) 50%, transparent 50%); }
+.prv { font-size: 6px; line-height: 1; color: rgba(255, 255, 255, .28); margin-left: 1px; font-style: normal; }
+.prv.full { color: var(--c); }
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+  .pill.done { background: var(--c); opacity: .7; }
+  .pill.cur { background: transparent; }
+}

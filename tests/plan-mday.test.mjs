@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { sanitizePlan, mondayOf } from '../js/plan/model.js';
 import {
+  chapterPills,
   dayItems, dayHeader, nowBlock, subjectCards, widgetModel, widgetNext, fmtHM,
   dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
   EMOJI_MAP, EMOJI_FALLBACK, dayState, fieldClassFor, receipt, tbWbCard,
@@ -971,4 +972,48 @@ test('buildTimed: a template event may carry its own emoji; otherwise the catego
                { id: 'e1013', cat: 'other', day: 4, start: 12, end: 15, name: "Jumu'ah", emoji: '🤲' }];
   const items = buildTimed('2026-09-04', evs, p);
   assert.deepEqual(items.map(it => it.emoji), ['📖', '🤲']);
+});
+
+// ── chapterPills (Subjects card capsules, style C) ──
+test('chapterPills: tb-wb chapters fold by state — done ✓ pill, one current with dots + count, future hollow', () => {
+  const act = { chain: [
+    { id: 'c1', name: '3A Ch 1 · Numbers', pattern: 'tb-wb', lessons: 2, tests: 0, done: 4 },
+    { id: 'c2', name: '3A Ch 2 · Addition', pattern: 'tb-wb', lessons: 3, tests: 1, done: 3 },
+    { id: 'c3', name: '3A Ch 3 · More', pattern: 'tb-wb', lessons: 2, tests: 0, done: 0 },
+  ] };
+  const p = chapterPills(act);
+  assert.deepEqual(p.map(g => [g.short, g.kind, g.done, g.total]), [['Ch 1', 'done', 2, 2], ['Ch 2', 'cur', 1.5, 3], ['Ch 3', 'todo', 0, 2]]);
+  assert.deepEqual(p[1].dots, ['full', 'half', 'empty']);
+  assert.deepEqual(p[1].revs, [false]);
+  assert.equal(p.filter(g => g.kind === 'cur').length, 1);
+});
+
+test('chapterPills: a chapter with its lessons done but its review pending is still current', () => {
+  const act = { chain: [{ id: 'c4', name: '3A Ch 4 · Mult', pattern: 'tb-wb', lessons: 2, tests: 1, done: 4 }] };
+  const [g] = chapterPills(act);
+  assert.equal(g.kind, 'cur'); assert.deepEqual(g.dots, ['full', 'full']); assert.deepEqual(g.revs, [false]);
+});
+
+test('chapterPills: simple chains split into timelineRows bands (LoE fives) with full/empty dots', () => {
+  const act = { chain: [{ id: 'loe-c', name: 'Foundations C', pattern: 'simple', firstUnit: 101, lastUnit: 110, done: 4, bandSize: 5, titles: {} }] };
+  const p = chapterPills(act);
+  assert.deepEqual(p.map(g => [g.short, g.kind, g.done, g.total]), [['101–105', 'cur', 4, 5], ['106–110', 'todo', 0, 5]]);
+  assert.deepEqual(p[0].dots, ['full', 'full', 'full', 'full', 'empty']);
+});
+
+test('chapterPills: everything finished → all done pills, no current; empty chain → []', () => {
+  const act = { chain: [{ id: 'c1', name: 'Ch 1', pattern: 'tb-wb', lessons: 1, tests: 0, done: 2 }] };
+  assert.deepEqual(chapterPills(act).map(g => g.kind), ['done']);
+  assert.deepEqual(chapterPills({ chain: [] }), []);
+});
+
+test('subjectCards: an active paced subject carries its pills; a planned one carries none', () => {
+  const p = sanitizePlan({ version: 2, year: 2026, parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true }, periods: [], overrides: [], log: [],
+    activities: [
+      { id: 'singapore', name: 'SM', type: 'paced', status: 'active', onGrid: false, rhythm: { kind: 'daily', sessionsPerDay: 2 }, chain: [{ id: 'c1', name: '3A Ch 1', pattern: 'tb-wb', lessons: 2, tests: 0, done: 1 }] },
+      { id: 'geography', name: 'Geo', type: 'paced', status: 'planned', onGrid: true, slots: [], chain: [{ id: 'g', pattern: 'simple', firstUnit: 1, lastUnit: 10, done: 0 }] },
+    ] });
+  const cards = subjectCards(p, '2026-09-02');
+  assert.deepEqual(cards.find(c => c.id === 'singapore').pills.map(g => g.kind), ['cur']);
+  assert.deepEqual(cards.find(c => c.id === 'geography').pills, []);
 });
