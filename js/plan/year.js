@@ -96,7 +96,7 @@ function trackFor(a, wks, away, today) {
   const cells = wks.map((w, i) => {
     const cls = [];
     if (paced) {
-      const cap = weekCapacity(a, w, p.periods, p.parentCycle);
+      const cap = weekCapacity(a, w, p.periods, p.parentCycle, p.overrides);
       if (w <= mon && remainingDone > 0) { cls.push('fill'); remainingDone -= cap; }
       else if (cap > 0) cls.push('plan');
     } else if (a.status === 'active' && away[i].total < 7) {

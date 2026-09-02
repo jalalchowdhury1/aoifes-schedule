@@ -107,8 +107,8 @@ const LAST_DAYS = 3;               // warn only inside the cycle's last 3 days
 // 1 of 3 on day two says nothing yet.
 function paceChip(act, cs, dateStr) {
   const p = plan.data;
-  const cap = ps => weekCapacity(act, cs.start, ps, p.parentCycle)
-                  + weekCapacity(act, addDays(cs.start, 7), ps, p.parentCycle);
+  const cap = ps => weekCapacity(act, cs.start, ps, p.parentCycle, p.overrides)
+                  + weekCapacity(act, addDays(cs.start, 7), ps, p.parentCycle, p.overrides);
   const cycleCap = cap(p.periods), fullCap = cap([]);
   if (cycleCap <= 0) return `<span class="pchip">paused</span>`;
   const target = fullCap > 0

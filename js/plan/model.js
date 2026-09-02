@@ -312,7 +312,7 @@ export function chainTimeline(act, fromDate, plan, horizon = 300) {
   if (!cum) return rows;              // nothing left anywhere
   let acc = 0, w = mondayOf(fromDate), i = 0;
   for (let wk = 0; wk < horizon && i < rows.length; wk++) {
-    acc += weekCapacity(act, w, plan.periods, plan.parentCycle);
+    acc += weekCapacity(act, w, plan.periods, plan.parentCycle, plan.overrides);
     // A zero-session row (a chapter waiting for its counts, a first-class
     // state in this app) contributes nothing to `targets`, so it shares its
     // target with whichever row precedes it and would otherwise be popped
@@ -389,14 +389,21 @@ export function expectedSessions(act, fromDate, toDate, plan) {
   const r = act?.rhythm || {};
   const perDay = Number(r.sessionsPerDay);
   const mult = Number.isFinite(perDay) && perDay > 0 ? perDay : 1;
+  const overrides = plan?.overrides;
   let n = 0, d = fromDate;
   for (let i = 0; i < WALK_CAP * 7 && d <= toDate; i++) {
-    // A DAILY rhythm is pinned to actual days, so an away day is priced on the
-    // day itself. A weekly/cycle rhythm is not tied to any particular weekday,
-    // so its week's capacity is spread evenly across that week instead.
-    n += r.kind === 'daily'
-      ? mult * dayWeight(act, d, plan?.periods)
-      : weekCapacity(act, mondayOf(d), plan?.periods, plan?.parentCycle) / 7;
+    // A DAILY rhythm is pinned to actual days, so an away day — and now a
+    // skip override (A2, 2026-09-02) — is priced on the day itself. A
+    // weekly/cycle rhythm is not tied to any particular weekday, so its
+    // week's capacity (skip already folded in by weekCapacity) is spread
+    // evenly across that week instead.
+    if (r.kind === 'daily') {
+      const skipped = Array.isArray(overrides) && overrides.some(o =>
+        o && o.action === 'skip' && o.activityId === act.id && o.date === d);
+      n += skipped ? 0 : mult * dayWeight(act, d, plan?.periods);
+    } else {
+      n += weekCapacity(act, mondayOf(d), plan?.periods, plan?.parentCycle, overrides) / 7;
+    }
     d = addDays(d, 1);
   }
   return n;
@@ -631,7 +638,16 @@ export function mergePlanWrites(current, incoming) {
 // ── Weekly capacity: how many sessions this activity expects in a week ──
 // `periods` is the day-precise time-away list — always an array (sanitizePlan
 // guarantees it on both load paths); every caller in the app passes plan.periods.
-export function weekCapacity(act, weekStart, periods, cycle) {
+// `overrides` (optional, default []) is the plan's overrides list: a `skip`
+// override dated inside this week for THIS activity costs the week one
+// session (× the sessionsPerDay multiplier), same as a family member manually
+// crossing a class off — a skipped week must never still "expect" it (A2,
+// 2026-09-02). Only a skip landing on a day this activity would otherwise
+// have taught (dayWeight > 0) counts, so a skip on an already-paused travel
+// day never double-subtracts; a template `eventId` skip (it belongs to a core
+// category, never an activity) never matches. Mirrored in
+// aoife-school-bot/lib/compose.py's week_capacity (parity tests both sides).
+export function weekCapacity(act, weekStart, periods, cycle, overrides = []) {
   const r = act.rhythm || {};
   let base = 0;
   if (r.kind === 'daily') base = 7;
@@ -647,7 +663,12 @@ export function weekCapacity(act, weekStart, periods, cycle) {
   // subject unprojectable). Mirrored in aoife-school-bot/lib/compose.py.
   const perDay = Number(r.sessionsPerDay);
   const mult = Number.isFinite(perDay) && perDay > 0 ? perDay : 1;
-  return base * mult * effectiveDaysInWeek(act, weekStart, periods) / 7;
+  const cap = base * mult * effectiveDaysInWeek(act, weekStart, periods) / 7;
+  const weekEnd = addDays(weekStart, 6);
+  const ov = Array.isArray(overrides) ? overrides : [];
+  const skips = ov.filter(o => o && o.action === 'skip' && o.activityId === act.id &&
+    weekStart <= o.date && o.date <= weekEnd && dayWeight(act, o.date, periods) > 0).length;
+  return Math.max(0, cap - skips * mult);
 }
 
 // Walk weeks forward until remaining sessions are covered. null = can't project.
@@ -662,7 +683,7 @@ export function projectFinish(act, fromDate, plan, horizon = 300) {
   if (remaining === 0) return { date: fromDate, weeks: 0, done: true };
   let acc = 0, w = mondayOf(fromDate);
   for (let i = 0; i < horizon; i++) {
-    acc += weekCapacity(act, w, plan.periods, plan.parentCycle);
+    acc += weekCapacity(act, w, plan.periods, plan.parentCycle, plan.overrides);
     if (acc >= remaining) return { date: addDays(w, 6), weeks: i + 1 };
     w = addDays(w, 7);
   }
@@ -680,7 +701,7 @@ export function requiredPerCycle(act, fromDate, plan) {
   let usable = 0, w = mondayOf(fromDate), n = 0;
   while (w <= act.goal.finishBy) {
     if (n++ >= WALK_CAP) break;                      // behave as if the walk ended
-    if (weekCapacity(act, w, plan.periods, plan.parentCycle) > 0) usable++;
+    if (weekCapacity(act, w, plan.periods, plan.parentCycle, plan.overrides) > 0) usable++;
     w = addDays(w, 7);
   }
   if (!usable) return null;

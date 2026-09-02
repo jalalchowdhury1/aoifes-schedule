@@ -158,6 +158,28 @@ test('expectedSessions: a trip at half speed lowers what the plan expects', () =
   assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', off), 0);
 });
 
+// ── skip-aware capacity (A2, 2026-09-02): expectedSessions half of the rule ──
+test('expectedSessions: a daily rhythm prices a skipped date at 0 (loses that day\'s full sessionsPerDay)', () => {
+  const withSkip = { ...SM_PLAN, overrides: [{ date: '2026-08-29', action: 'skip', activityId: 'singapore' }] };
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', withSkip), 6);   // 8 - 2 (mult), not 8 - 1
+  // A skip for a DIFFERENT activity, or dated outside the range, changes nothing.
+  const otherAct = { ...SM_PLAN, overrides: [{ date: '2026-08-29', action: 'skip', activityId: 'loe' }] };
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', otherAct), 8);
+  const outside = { ...SM_PLAN, overrides: [{ date: '2026-09-05', action: 'skip', activityId: 'singapore' }] };
+  assert.equal(expectedSessions(SM_ACT, '2026-08-28', '2026-08-31', outside), 8);
+});
+
+test('expectedSessions: a weekly/cycle rhythm loses exactly one session over two weeks with one skip', () => {
+  const WEEKLY_ACT = { id: 'geography', rhythm: { kind: 'weekly', perWeek: 1 }, travel: { mode: 'pause' } };
+  const plan = { periods: [], parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11' },
+    activities: [WEEKLY_ACT] };
+  const base = expectedSessions(WEEKLY_ACT, '2026-08-17', '2026-08-30', plan);       // 2 full weeks
+  assert.ok(Math.abs(base - 2) < 1e-9, String(base));
+  const withSkip = { ...plan, overrides: [{ date: '2026-08-19', action: 'skip', activityId: 'geography' }] };
+  const skipped = expectedSessions(WEEKLY_ACT, '2026-08-17', '2026-08-30', withSkip);
+  assert.ok(Math.abs(skipped - 1) < 1e-9, String(skipped));
+});
+
 test('paceGap: the live case reads 2 lessons AHEAD, not 7 behind', () => {
   const g = paceGapLessons(SM_ACT, SM_PLAN, '2026-08-31');
   assert.equal(g.done, 12);

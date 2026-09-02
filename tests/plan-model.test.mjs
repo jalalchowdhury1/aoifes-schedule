@@ -317,6 +317,49 @@ test('weekCapacity: Singapore (daily, reduced) Mon-Wed away = 5.5; the same days
   assert.equal(weekCapacity(SM, '2026-08-17', off, CYC), 4);
 });
 
+// ── skip-aware capacity (A2, 2026-09-02): a skipped class costs the week
+// one session, same rule mirrored in aoife-school-bot's week_capacity ──
+test('weekCapacity: a skip inside the week subtracts one session (× the sessionsPerDay multiplier)', () => {
+  const skip = [{ date: '2026-08-19', action: 'skip', activityId: 'singapore' }];
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC, skip), 6);            // 7 - 1
+  const skipLoe = [{ date: '2026-08-19', action: 'skip', activityId: 'loe' }];
+  assert.equal(weekCapacity(LOE, '2026-08-17', [], CYC, skipLoe), 0);        // 1 - 1
+  const SM2 = { ...SM, rhythm: { kind: 'daily', sessionsPerDay: 2 } };
+  const skipSM2 = [{ date: '2026-08-19', action: 'skip', activityId: 'singapore' }];
+  assert.equal(weekCapacity(SM2, '2026-08-17', [], CYC, skipSM2), 12);       // 14 - 2 (mult)
+  // Never below zero: two skips on a 1/week activity still floors at 0.
+  const geo = { id: 'geography', rhythm: { kind: 'weekly', perWeek: 1 }, travel: { mode: 'pause' } };
+  const twoSkips = [
+    { date: '2026-08-17', action: 'skip', activityId: 'geography' },
+    { date: '2026-08-18', action: 'skip', activityId: 'geography' },
+  ];
+  assert.equal(weekCapacity(geo, '2026-08-17', [], CYC, twoSkips), 0);
+});
+
+test('weekCapacity: a skip on an already-paused (off) day never double-subtracts', () => {
+  const off = [{ id: 'p9', start: '2026-08-17', end: '2026-08-19', type: 'off' }];  // Mon-Wed off
+  const base = weekCapacity(SM, '2026-08-17', off, CYC);                           // 4 (4 teaching days)
+  assert.equal(base, 4);
+  const skipOnOffDay = [{ date: '2026-08-17', action: 'skip', activityId: 'singapore' }];
+  assert.equal(weekCapacity(SM, '2026-08-17', off, CYC, skipOnOffDay), base, 'dayWeight is already 0 there');
+});
+
+test('weekCapacity: a skip dated in a DIFFERENT week is ignored', () => {
+  const nextWeek = [{ date: '2026-08-25', action: 'skip', activityId: 'singapore' }];
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC, nextWeek), 7);
+});
+
+test('weekCapacity: a template eventId skip never matches an activity (belongs to a core category)', () => {
+  const templateSkip = [{ date: '2026-08-18', action: 'skip', eventId: 'e1234' }];
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC, templateSkip), 7);
+});
+
+test('weekCapacity: overrides defaults to [] — every existing 4-arg call site is untouched', () => {
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC), 7);
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC, undefined), 7);
+  assert.equal(weekCapacity(SM, '2026-08-17', [], CYC, null), 7);
+});
+
 test('LoE projection: C ~Nov 2026, C+D Feb-Mar 2027 with the Jan trip, before goal', () => {
   // 39 sessions left at 3.5/cycle from 2026-08-17 with a 35-day January travel pause.
   const fin = projectFinish(LOE, '2026-08-17', { periods: JAN_TRIP, parentCycle: CYC });
