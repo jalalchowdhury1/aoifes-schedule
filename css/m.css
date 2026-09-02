@@ -291,6 +291,9 @@ main { padding: calc(env(safe-area-inset-top, 0px) + 66px) 14px
 .wkblk.missed { background: color-mix(in srgb, var(--c) 14%, transparent); border: 1px solid var(--red);
   border-left-width: 2px; color: var(--red); }
 .wkblk.open { opacity: .35; }
+/* The subject emoji inside an unanswered block: small and quiet, so the colour
+   still reads first and the mark (✓ ◐ ✗) replaces it once the block is answered. */
+.wkblk .wkemo { font-size: 10px; line-height: 1; opacity: .7; filter: saturate(.85); pointer-events: none; }
 .wkblk.oneoff { border: 1px dashed var(--c); border-left-width: 2px; background: color-mix(in srgb, var(--c) 18%, transparent); }
 @supports not (background: color-mix(in srgb, red 50%, transparent)) {
   .wkblk { background: var(--c); opacity: .6; }

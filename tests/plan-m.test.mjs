@@ -31,7 +31,7 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry, paceCaption, paceSentence, controlsFor } = await import('../js/m.js');
+const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph } = await import('../js/m.js');
 const { planGapDays, planDeltaChip, paceGap, paceGapLessons, expectedSessions } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
@@ -233,4 +233,15 @@ test('paceCaption: the Now tile says the same thing, shorter', () => {
 
 test('paceSentence: with no baseline it says so instead of claiming zero', () => {
   assert.match(paceSentence(null), /No plan frozen for this subject yet/);
+});
+
+// ── Week grid block glyph: emoji when unanswered, status mark once answered ──
+test('blockGlyph: an unanswered block shows its emoji quietly; an answered one shows its mark; a sliver shows nothing', () => {
+  const geo = { emoji: '🌍', status: null };
+  assert.equal(blockGlyph(geo, 20, 'plan'), '<span class="wkemo">🌍</span>');
+  assert.equal(blockGlyph(geo, 20, 'open'), '<span class="wkemo">🌍</span>');
+  assert.equal(blockGlyph({ ...geo, status: 'done' }, 20, 'done'), '✓');
+  assert.equal(blockGlyph({ ...geo, status: 'missed' }, 20, 'missed'), '✗');
+  assert.equal(blockGlyph(geo, 10, 'plan'), '');
+  assert.equal(blockGlyph({ status: null }, 20, 'plan'), '');
 });

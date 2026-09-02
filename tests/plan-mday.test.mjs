@@ -963,3 +963,12 @@ test('widgetNext: an ask:false block is on the timeline but never in done/total'
   assert.equal(r.mode, 'now');
   assert.equal(r.name, "Jumu'ah");                       // still the "now" block on the timeline
 });
+
+test('buildTimed: a template event may carry its own emoji; otherwise the category default', () => {
+  const p = sanitizePlan({ version: 2, year: 2026, parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], overrides: [], activities: [], log: [] });
+  const evs = [{ id: 'q4', cat: 'quran', day: 4, start: 10, end: 11 },
+               { id: 'e1013', cat: 'other', day: 4, start: 12, end: 15, name: "Jumu'ah", emoji: '🤲' }];
+  const items = buildTimed('2026-09-04', evs, p);
+  assert.deepEqual(items.map(it => it.emoji), ['📖', '🤲']);
+});

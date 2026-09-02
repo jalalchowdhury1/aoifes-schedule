@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 06fc776e48 */
+ * build 9f3fe647e4 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -58,6 +58,8 @@ const maxIdNum = events =>
   events.reduce((mx, e) => Math.max(mx, parseInt(String(e.id).replace('e', ''), 10) || 0), 0);
 
 // An event may additionally carry `ask: false` (additive, 2026-09-02): the
+// Optional `emoji` on an event: shown in the phone's Week grid / Today rows instead
+// of the category's default (Jumu'ah 🤲; cat 'other' would otherwise fall back to 📌).
 // block is real on the calendar/grid/print, but no ✓/◐/✗ question is ever
 // asked about it (Jumu'ah) — isValidEvent/sanitizeEvents/updateEvent all
 // pass it through untouched since none of them check beyond the keys below.
@@ -1036,7 +1038,7 @@ function buildTimed(dateStr, events, plan, nameForEvent = ev => ev.name || catLa
   for (const ev of (events || []).filter(e => e && e.day === d))
     items.push({ key: `ev:${ev.id}`, kind: 'timed', eventId: ev.id, activityId: undefined,
       cls: okCls(CATS[ev.cat]?.cls), name: nameForEvent(ev) || catLabelDefault(ev.cat),
-      emoji: emojiFor(ev.cat), start: ev.start, end: ev.end, note: ev.note || '',
+      emoji: ev.emoji || emojiFor(ev.cat), start: ev.start, end: ev.end, note: ev.note || '',
       // A template event may opt out of ever being asked about (Jumu'ah,
       // `ask: false`) — the block stays real (grid/print/calendar/"now-next"
       // untouched) but day-done counts and the ✓/◐/✗ controls skip it.

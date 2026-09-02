@@ -731,6 +731,16 @@ function weekSummaryHtml(g, today) {
   </div>`;
 }
 
+// What a Week-grid block shows inside: its status mark once answered (✓ ◐ ✗),
+// otherwise its subject emoji, quietly — the blocks carry no text, so the
+// emoji is the only hint of WHICH class a block is (user ask, 2026-09-02:
+// "super subtly… earth for geography"). A block under 14px shows nothing.
+export function blockGlyph(b, ht, st) {
+  if (ht < 14) return '';
+  if (st === 'done' || st === 'missed' || st === 'partial') return statusMark(b.status);
+  return b.emoji ? `<span class="wkemo">${esc(b.emoji)}</span>` : '';
+}
+
 function weekGridHtml(g, today) {
   const hasAxis = g.hourMin != null;
   const hours = hasAxis ? g.hourMax - g.hourMin : 0;
@@ -755,8 +765,7 @@ function weekGridHtml(g, today) {
         const top = (b.start - g.hourMin) * HOUR_PX, ht = Math.max(6, (b.end - b.start) * HOUR_PX - 2);
         const st = b.status === 'done' ? 'done' : b.status === 'missed' ? 'missed'
           : b.status ? 'partial' : d.isPast ? 'open' : 'plan';
-        const glyph = ht >= 14 && (st === 'done' || st === 'missed' || st === 'partial') ? statusMark(b.status) : '';
-        h += `<i class="wkblk ${st}${b.oneOff ? ' oneoff' : ''}" style="--c:${blockColor(b.cls)};top:${top}px;height:${ht}px" title="${esc(b.name)}">${glyph}</i>`;
+        h += `<i class="wkblk ${st}${b.oneOff ? ' oneoff' : ''}" style="--c:${blockColor(b.cls)};top:${top}px;height:${ht}px" title="${esc(b.name)}">${blockGlyph(b, ht, st)}</i>`;
       }
       if (d.isToday && nowH >= g.hourMin && nowH <= g.hourMax)
         h += `<i class="wknow" style="top:${(nowH - g.hourMin) * HOUR_PX}px"></i>`;

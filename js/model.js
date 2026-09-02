@@ -51,6 +51,8 @@ export const maxIdNum = events =>
   events.reduce((mx, e) => Math.max(mx, parseInt(String(e.id).replace('e', ''), 10) || 0), 0);
 
 // An event may additionally carry `ask: false` (additive, 2026-09-02): the
+// Optional `emoji` on an event: shown in the phone's Week grid / Today rows instead
+// of the category's default (Jumu'ah 🤲; cat 'other' would otherwise fall back to 📌).
 // block is real on the calendar/grid/print, but no ✓/◐/✗ question is ever
 // asked about it (Jumu'ah) — isValidEvent/sanitizeEvents/updateEvent all
 // pass it through untouched since none of them check beyond the keys below.

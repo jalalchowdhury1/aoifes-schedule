@@ -68,7 +68,7 @@ export function buildTimed(dateStr, events, plan, nameForEvent = ev => ev.name |
   for (const ev of (events || []).filter(e => e && e.day === d))
     items.push({ key: `ev:${ev.id}`, kind: 'timed', eventId: ev.id, activityId: undefined,
       cls: okCls(CATS[ev.cat]?.cls), name: nameForEvent(ev) || catLabelDefault(ev.cat),
-      emoji: emojiFor(ev.cat), start: ev.start, end: ev.end, note: ev.note || '',
+      emoji: ev.emoji || emojiFor(ev.cat), start: ev.start, end: ev.end, note: ev.note || '',
       // A template event may opt out of ever being asked about (Jumu'ah,
       // `ask: false`) — the block stays real (grid/print/calendar/"now-next"
       // untouched) but day-done counts and the ✓/◐/✗ controls skip it.
