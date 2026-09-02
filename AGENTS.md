@@ -316,6 +316,25 @@ Google Calendar via `buildTimed`/`activity_slot_events` but never the grid.
   profile): 3 native `.pslot` blocks, 1 printed page, all 8 names present.
 - Follow-up (reviewer, not blocking): the event/slot drag branches in grid.js
   duplicate the move/resize formulas verbatim — a small helper would dedupe.
+- **A ✓ on a paced on-grid class IS its next lesson (2026-09-01, user directive
+  "attendance is the lesson — the parents aren't in the room").** `logTimed`
+  keeps writing the attendance row `{date,status,timed:true,activityId}` and,
+  for a `type:'paced'` activity logged by activityId (never eventId), ALSO
+  appends a lesson row `{date,activityId,status:'done',curriculum,session}` at
+  `nextIndex(cur)` on entering `done`, and removes THAT DAY's lesson rows
+  (`unmarkSession` each) on leaving `done` (toggle-off, or → partial/missed).
+  Exhausted chain ⇒ attendance only. **Two rows, two meanings** — every reader
+  must split on `e.timed`/`e.eventId` (attendance) vs `e.curriculum` (lesson).
+  Readers fixed to do so in the same release: `subjectCards.sessionsThisWeek`
+  and `receipt()` (mday.js — the lesson label folds into the class's own line
+  via `lessonDetail`), `historyRows()` (year.js — the attendance row is
+  `shadowed` by its lesson sibling; a lone ✗ shows the slot's hours),
+  `pacedNoteLine` (subjects.js), `countDone` (model.js) and `togglePaced`
+  (state.js — `!e.timed`, or the phone's Oops would splice the ✓ instead of
+  the lesson). Bot parity: aoife-school-bot `ops._apply_log_status` timed
+  branch does the same with `src:'tg'`, appends `· <lesson label>` to its
+  confirmation, and `compose.tally_summary` shadows the attendance row.
+  Spec: docs/superpowers/specs/2026-09-01-class-tick-advances-lesson-design.md.
 
 ## Subjects/Today/Year: v2.8 family feedback batch (2026-08-19 night)
 Spec: docs/superpowers/specs/2026-08-19-v2.8-family-feedback-batch.md — every
