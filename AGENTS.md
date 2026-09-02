@@ -60,6 +60,12 @@ via MutationObserver.
 - Shape: {events:[{id:"e<n>",cat,day:0-6 Mon-first,start,end,note,name}], altSun:bool, catLabels:{}}
 - Hours are decimal (half-hour steps), grid spans 9–17
 - Category keys: quran, ruhamah, hala, barakot, art, other
+- Optional `ask: false` on an event (2026-09-02): a real block on the grid,
+  print and calendar that nobody is asked "did it happen" about (Jumu'ah,
+  Fri 12–15, e1013). `buildTimed` carries it as `item.ask`; `dayState`,
+  `weekGlance`, the phone's N-of-M counters, `widgetNext`'s done/total and the
+  bot's check-in/`unlogged_items` all skip it; now/next timers, the preview
+  and `last_class_end` still see it. Missing/other values = askable.
 - Extra localStorage keys (additive, safe): aoife_theme, aoife_mobile_view
 - Load-time sanitization: events missing id/cat or with non-numeric day/start/end
   are dropped by sanitizeEvents (the live KV blob once contained a corrupt stray
@@ -357,6 +363,19 @@ Google Calendar via `buildTimed`/`activity_slot_events` but never the grid.
   only `curriculum` rows. (7) `m/widget.js` was 7 commits stale — rebuilt, and
   `tests/plan-widget.test.mjs` now fails whenever the checked-in bundle differs
   from `buildBundle()`. (8) scripts/gcal-sync emits `EXDATE`s for skip overrides.
+- **2026-09-02 round 2 (plan docs/superpowers/plans/2026-09-02-ask-flag-skip-capacity-lows.md):**
+  `ask:false` (see the data contract above); **`weekCapacity(act, weekStart,
+  periods, cycle, overrides = [])`** subtracts one session (× `sessionsPerDay`)
+  per activity-keyed `skip` override inside the week whose `dayWeight` > 0,
+  clamped at 0 — `expectedSessions` prices a skipped daily date at 0 and
+  threads overrides into the weekly branch; EVERY caller passes
+  `plan.overrides` (chainTimeline, projectFinish, requiredPerCycle, today.js
+  paceChip, year.js trackFor) and the bot's `week_capacity` mirrors it
+  (parity pins unchanged). Lows: `suppressClick` clears on a `setTimeout(0)`
+  and on the next pointerdown (a pointerup outside #grid no longer swallows
+  the next click); `receipt()` hands the lesson detail to the `act:` slot item
+  when a same-day `ov:` makeup shares the activityId; the Day-view `.pslot-skip`
+  twin is now tested.
 
 ## Subjects/Today/Year: v2.8 family feedback batch (2026-08-19 night)
 Spec: docs/superpowers/specs/2026-08-19-v2.8-family-feedback-batch.md — every
