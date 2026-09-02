@@ -717,6 +717,29 @@ test('slots: the weekday guard drops a dot whose logged date disagrees with the 
   assert.equal(dotsOf(native).length, 0);
 });
 
+// ── Missing test (A3, red-team 2026-09-02): the Day-view twin greys a
+// this-week skip, exactly like js/grid.js's own native .pslot ──
+test('slots: a skip override dated this week greys the Day-view twin; the same skip next week does not', () => {
+  const wed = addDays(mondayOf(todayStr()), 2);              // GEO's slot is Wednesday (day: 2)
+  loadPlan([], [{ date: wed, action: 'skip', activityId: 'geography' }], [GEO()]);
+  store.events = [];
+  const { doc, dayview } = makeDom([], [], 2);
+  globalThis.document = doc;
+  applyOverlay();
+  const drawn = ovSlots(dayview)[0];
+  assert.match(drawn.className, /pslot-skip/);
+  assert.match(drawn.innerHTML, /skipped/);
+
+  const nextWed = addDays(wed, 7);
+  loadPlan([], [{ date: nextWed, action: 'skip', activityId: 'geography' }], [GEO()]);
+  const later = makeDom([], [], 2);
+  globalThis.document = later.doc;
+  applyOverlay();
+  const drawnLater = ovSlots(later.dayview)[0];
+  assert.doesNotMatch(drawnLater.className, /pslot-skip/);
+  assert.doesNotMatch(drawnLater.innerHTML, /skipped/);
+});
+
 test('slots: eventId rows never dot a slot block; template dots are unaffected', () => {
   const wed = addDays(mondayOf(todayStr()), 2);
   loadPlan([{ date: wed, eventId: 'e1003', status: 'done' }], [], [GEO()]);

@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build e369ae8a0d */
+ * build b184635f74 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -1278,13 +1278,24 @@ function receipt(dateStr, events, plan, nameForEvent) {
     // leaves two rows for one class: fold the lesson label into this timed
     // line and take the activity out of the dailies pass below, or the day
     // would read "Geography ✓" twice.
+    //
+    // L8 (red-team 2026-09-02): when several timed items share an
+    // activityId — the act: slot PLUS a same-day ov: makeup — only the act:
+    // item is the real lesson slot; the ov: one stays a bare line. Without
+    // this check, whichever item happened to sort FIRST by start time (not
+    // necessarily act:) grabbed the shared byAct entries. When there is no
+    // act: item at all for this activityId (only ov: makeups, say), the
+    // first one processed still takes it — today's behaviour, unchanged.
     let detail = '';
     const entries = it.activityId != null ? byAct.get(it.activityId) : null;
     if (entries) {
-      const act = (plan?.activities || []).find(a => a && a.id === it.activityId);
-      const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
-      if (act && !marker) detail = lessonDetail(act, entries);
-      byAct.delete(it.activityId);
+      const hasActItem = timed.some(x => x.activityId === it.activityId && x.key.startsWith('act:'));
+      if (!hasActItem || it.key.startsWith('act:')) {
+        const act = (plan?.activities || []).find(a => a && a.id === it.activityId);
+        const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
+        if (act && !marker) detail = lessonDetail(act, entries);
+        byAct.delete(it.activityId);
+      }
     }
     out.push({ emoji: it.emoji, name: widgetName(it), mark: markFor(st), detail });
   }

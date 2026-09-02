@@ -150,3 +150,64 @@ test('grid drag: a slot dropped back at its original position never POSTs; a gen
     globalThis.localStorage = savedLS;
   }
 });
+
+// ── suppressClick latch (red-team L6, 2026-09-02) ──
+// A pointerup that lands OUTSIDE #grid never produces the browser's
+// synthesized click, so the click listener above never gets a turn to clear
+// the latch itself — before the fix it stayed `true` forever and swallowed
+// the NEXT genuine click on the grid. Drives the real pointerdown/pointerup
+// handlers (same harness as the drag test above), deliberately never firing
+// `click` for the tap that sets the latch, to stand in for that "released
+// outside #grid" case.
+test('grid click: a suppressClick latch left stuck (no synthesized click ever arrived) clears on its own instead of swallowing the NEXT real click forever (L6)', async () => {
+  const savedDoc = globalThis.document;
+  const savedMM = globalThis.matchMedia;
+  globalThis.matchMedia = () => ({ matches: true, addEventListener() {} });
+  const gridListeners = {};
+  const docListeners = {};
+  const fakeGrid = {
+    addEventListener: (t, fn) => { gridListeners[t] = fn; },
+    querySelectorAll: sel => (sel === '.ca' ? [{ getBoundingClientRect: () => ({ left: 0, right: 700, top: 0 }) }] : []),
+    innerHTML: '',
+  };
+  globalThis.document = {
+    getElementById: id => (id === 'grid' ? fakeGrid : null),
+    addEventListener: (t, fn) => { docListeners[t] = fn; },
+    removeEventListener: () => {},
+    querySelector: () => null,
+    dispatchEvent: () => {},
+  };
+  try {
+    store.locked = false;
+    store.selId = null;
+    store.events = [{ id: 'e1', cat: 'quran', day: 2, start: 11, end: 12 }];
+    plan.data = { activities: [], overrides: [], log: [], periods: [],
+      parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true } };
+    initGrid();
+    const evtEl = { dataset: { id: 'e1' },
+      closest: sel => (sel === '.evt' ? evtEl : null),
+      getBoundingClientRect: () => ({ top: 0 }),
+      classList: { add() {} } };
+
+    // A no-move press+release toggles selection directly (onUp's own
+    // no-drag branch) and latches suppressClick=true — stand-in for a
+    // pointerup that released outside #grid: its synthesized click (if any)
+    // is deliberately never delivered here.
+    gridListeners.pointerdown({ button: 0, target: evtEl, clientX: 10, clientY: 0, preventDefault() {} });
+    docListeners.pointerup();
+    assert.equal(store.selId, 'e1', 'the tap itself still selected the block');
+
+    // Wait for the macrotask the fix schedules — nothing else ever clears
+    // the latch in this scenario (no click was fired for the tap above).
+    await new Promise(r => setTimeout(r, 0));
+
+    // A later, UNRELATED real click on the grid must land — before the fix
+    // the stale latch swallowed it forever (silently ate the click, never
+    // toggling selection off).
+    gridListeners.click({ target: evtEl });
+    assert.equal(store.selId, null, 'the later click was not swallowed by the stale latch');
+  } finally {
+    globalThis.document = savedDoc;
+    globalThis.matchMedia = savedMM;
+  }
+});

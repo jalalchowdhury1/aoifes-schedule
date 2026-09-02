@@ -905,3 +905,48 @@ test('receipt: a ✗ on an on-grid class stays one bare line; a lesson logged wi
   const lessonOnly = onGridPlan([{ date: '2026-09-02', activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 }]);
   assert.deepEqual(receipt('2026-09-02', [], lessonOnly).map(r => [r.mark, r.detail]), [['✓', 'Week 1']]);
 });
+
+// ── L8 (red-team 2026-09-02): the act: slot always owns the lesson detail ──
+test('receipt: an on-grid class with a same-day ov: makeup — the act: slot item takes the lesson detail, regardless of sort order', () => {
+  const p = sanitizePlan({
+    version: 2, year: 2026,
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [],
+    activities: [{ id: 'geography', name: 'Geography', type: 'paced', status: 'active', cls: 'g', onGrid: true,
+      slots: [{ day: 2, start: 11, end: 12 }], rhythm: { kind: 'weekly', perWeek: 1 },
+      chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1, unitWord: 'Week', titles: {} }] }],
+    // The makeup (ov:) starts BEFORE the act: slot (9 < 11) — it sorts FIRST
+    // in buildTimed's own start-time order, so a naive "whichever comes
+    // first" bug would hand the lesson detail to the makeup instead.
+    overrides: [{ date: '2026-09-02', action: 'add', id: 'mkup1', activityId: 'geography', start: 9, end: 10, name: 'Geography · makeup' }],
+    log: [
+      { date: '2026-09-02', status: 'done', timed: true, activityId: 'geography' },       // act: attendance
+      { date: '2026-09-02', eventId: 'mkup1', status: 'done', timed: true },              // ov: attendance
+      { date: '2026-09-02', activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },  // ONE lesson row
+    ],
+  });
+  const rows = receipt('2026-09-02', [], p);
+  assert.equal(rows.length, 2);
+  const byName = Object.fromEntries(rows.map(r => [r.name, r]));
+  assert.equal(byName['Geography'].detail, 'Week 1');
+  assert.equal(byName['Geography · makeup'].detail, '');
+});
+
+test('receipt: no act: item exists for the activityId — the first item processed still takes the detail (unchanged behaviour)', () => {
+  const p = sanitizePlan({
+    version: 2, year: 2026,
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [],
+    activities: [{ id: 'geography', name: 'Geography', type: 'paced', status: 'active', cls: 'g', onGrid: false,
+      slots: [], rhythm: { kind: 'weekly', perWeek: 1 },
+      chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1, unitWord: 'Week', titles: {} }] }],
+    overrides: [{ date: '2026-09-02', action: 'add', id: 'mkup1', activityId: 'geography', start: 9, end: 10, name: 'Geography · makeup' }],
+    log: [
+      { date: '2026-09-02', eventId: 'mkup1', status: 'done', timed: true },
+      { date: '2026-09-02', activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+    ],
+  });
+  const rows = receipt('2026-09-02', [], p);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].detail, 'Week 1');
+});

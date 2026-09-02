@@ -122,6 +122,9 @@ export function initGrid() {
   const grid = document.getElementById('grid');
 
   grid.addEventListener('pointerdown', e => {
+    // A fresh interaction always clears a stale latch (belt-and-braces
+    // alongside the setTimeout in onUp below — see its own comment).
+    suppressClick = false;
     if (e.button !== 0) return;
     if (store.locked || !dragOK()) return;
     const evtEl = e.target.closest('.evt');
@@ -240,6 +243,14 @@ function onUp() {
   document.removeEventListener('pointerup', onUp);
   document.removeEventListener('pointercancel', onCancel);
   suppressClick = true; // the browser fires a click right after pointerup; we've handled it
+  // WHY the timeout: a pointerup that lands OUTSIDE #grid never produces that
+  // synthesized click (nothing ever reaches the grid's own click listener
+  // above to clear the latch), so without this the latch stuck true forever
+  // and swallowed the NEXT genuine click on the grid (L6, red-team
+  // 2026-09-02). The synthesized click for THIS interaction — when it does
+  // land on #grid — fires synchronously right after pointerup, before this
+  // macrotask runs, so it still finds suppressClick true and clears it itself.
+  setTimeout(() => { suppressClick = false; }, 0);
   if (kind === 'slot') {
     const s = moved ? slotOf(ref) : null;
     // A real drag that nets out to the exact original {day,start,end} (picked
