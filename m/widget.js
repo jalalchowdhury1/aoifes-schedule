@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 9a1604f098 */
+ * build c68440444c */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -78,6 +78,8 @@ const applyAltSun = (events, altSun) =>
 // Planner pure model — no DOM, no storage. Companion to ../model.js.
 // All dates are local 'YYYY-MM-DD' strings. Week walks are keyed by their
 // Monday; time away is day-precise and lives in `plan.periods` (v2).
+
+
 
 const d2s = d =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -185,9 +187,46 @@ function sessionLabel(cur, i) {              // i = 0-based session index
   return (cur.titles || {})[u] || `${cur.unitWord || 'Lesson'} ${u}`;
 }
 
+// ── Out-of-order sessions: `skipped` (spec 2026-09-01) ──────────────
+// `done` stays a COUNT. `skipped` = owed session indices below the high-water
+// mark hw = done + skipped.length. Absent/empty ⇒ exactly the old behaviour.
+// Ported byte-for-byte in aoife-school-bot/lib/compose.py — change both.
+const skippedOf = cur => (Array.isArray(cur?.skipped) ? cur.skipped : []);
+const highWater = cur => (cur?.done || 0) + skippedOf(cur).length;
+function normalizeSkipped(cur) {
+  if (!cur) return cur;
+  const n = sessionsCount(cur), done = cur.done || 0;
+  let s = [...new Set(skippedOf(cur).map(Number).filter(x => Number.isInteger(x) && x >= 0 && x < n))]
+    .sort((a, b) => a - b);
+  while (s.length && s[s.length - 1] === done + s.length - 1) s.pop();
+  if (s.length) cur.skipped = s; else delete cur.skipped;
+  return cur;
+}
+const nextIndex = cur => {
+  const sk = skippedOf(cur), hw = highWater(cur);
+  const i = sk.length ? Math.min(...sk) : hw;
+  return i >= sessionsCount(cur) ? null : i;
+};
+const isSessionDone = (cur, s) => s < highWater(cur) && !skippedOf(cur).includes(s);
+function markSessionDone(cur, s) {
+  const sk = skippedOf(cur), hw = highWater(cur);
+  if (sk.includes(s)) { cur.skipped = sk.filter(x => x !== s); cur.done = (cur.done || 0) + 1; }
+  else if (s >= hw) {
+    const gap = []; for (let i = hw; i < s; i++) gap.push(i);
+    cur.skipped = [...sk, ...gap]; cur.done = (cur.done || 0) + 1;
+  }
+  return normalizeSkipped(cur);
+}
+function unmarkSession(cur, s) {
+  if (!isSessionDone(cur, s)) return cur;
+  const hw = highWater(cur);
+  cur.done = Math.max(0, (cur.done || 0) - 1);
+  if (s < hw - 1) cur.skipped = [...skippedOf(cur), s];
+  return normalizeSkipped(cur);
+}
 const nextSession = cur => {
-  const n = sessionsCount(cur), d = cur.done || 0;
-  return d >= n ? null : { index: d, label: sessionLabel(cur, d) };
+  const i = nextIndex(cur);
+  return i == null ? null : { index: i, label: sessionLabel(cur, i) };
 };
 
 // ── Category class tokens ───────────────────────────────────
@@ -218,6 +257,46 @@ const currentCur = act => (act.chain || []).find(c => (c.done || 0) < sessionsCo
 const actTotal = act => (act.chain || []).reduce((s, c) => s + sessionsCount(c), 0);
 const actDone = act => (act.chain || []).reduce((s, c) => s + Math.min(c.done || 0, sessionsCount(c)), 0);
 const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
+
+// ── Planner slots on the week grid (2026-09-01) ─────────────
+// An active on-grid activity's `slots[]` are recurring weekly blocks, the
+// planner-side twin of `aoifes_schedule.events`. `(actId, idx)` IS a slot's
+// identity everywhere — the grid's data-slot attribute, the gcal sync key
+// `act:<id>:<idx>` — so the index must never be re-packed here: a malformed
+// slot is skipped, not spliced. Same drawing rules as the one-off ghosts: a
+// slot wholly outside 9–17 is dropped, an overhanging one is clamped to the
+// band (`top`/`bottom`) while the label keeps its real `start`/`end`.
+// `weekStart` (a Monday ISO) is optional: pure callers (the gcal sync, which
+// is Python anyway) never pass it and get `skipped: null` on every block. When
+// given, a block whose weekday has a matching {action:'skip', activityId,
+// date} override for THIS week is greyed (red-team M2 — the grid used to show
+// a skipped class as if it were happening, disagreeing with the phone).
+function gridSlots(activities, overrides = [], weekStart = null) {
+  const ov = Array.isArray(overrides) ? overrides : [];
+  const out = [];
+  for (const a of Array.isArray(activities) ? activities : []) {
+    if (!a || a.status !== 'active' || !a.onGrid || !Array.isArray(a.slots)) continue;
+    const cur = a.type === 'paced' ? currentCur(a) : null;
+    const ns = cur ? nextSession(cur) : null;
+    const note = ns ? ns.label : '';
+    a.slots.forEach((s, idx) => {
+      if (!s || !Number.isInteger(s.day) || s.day < 0 || s.day > 6) return;
+      if (typeof s.start !== 'number' || typeof s.end !== 'number') return;
+      if (s.end <= s.start || s.end <= S || s.start >= E) return;
+      let skipped = null;
+      if (weekStart) {
+        const date = addDays(weekStart, s.day);
+        if (ov.some(o => o && o.action === 'skip' && o.activityId === a.id && o.date === date)) skipped = date;
+      }
+      out.push({
+        actId: a.id, idx, day: s.day, start: s.start, end: s.end,
+        top: Math.max(S, s.start), bottom: Math.min(E, s.end),
+        name: a.name || a.id, cls: okCls(a.cls), note, skipped,
+      });
+    });
+  }
+  return out;
+}
 
 // ── Lesson-based totals (Subjects header: "2/60 lessons") ───
 // A session count and a LESSON count differ for tb-wb chains: two sessions
@@ -516,7 +595,7 @@ function sanitizePlan(raw) {
               // never set.
               if ('bandSize' in cc && !(Number.isInteger(cc.bandSize) && cc.bandSize > 0))
                 delete cc.bandSize;
-              return cc;
+              return normalizeSkipped(cc);
             })
           : [] };
       if (o.goal && !isISO(o.goal.finishBy)) delete o.goal;
@@ -567,8 +646,12 @@ function mergePlanWrites(current, incoming) {
     ? `id:${o.id}`
     : `fp:${o?.date}|${o?.action}|${o?.start}|${o?.end}|${o?.name}`);
   // One STATUS per thing per day is the log's own invariant (logTimed replaces
-  // in place), so (date, owner) is a marker's or a timed row's identity.
-  const logKey = e => `${e?.date}|${e?.eventId || e?.activityId || ''}`;
+  // in place), so (date, owner) is a marker's or a timed row's identity. A
+  // timed (attendance) row gets its own `|t` tier — red-team M1: a ✓ on a
+  // paced on-grid class also writes a LESSON row for the SAME (date, owner),
+  // and without the tag both rows shared one key, so a blob holding only one
+  // half suppressed the other writer's half of the pair.
+  const logKey = e => `${e?.date}|${e?.eventId || e?.activityId || ''}${e?.timed ? '|t' : ''}`;
   // A SESSION row is different: a tb-wb lesson is two rows on one date
   // (textbook + workbook) and a double-lesson day is four, so which session it
   // is has to be part of its identity. Keyed on (date, owner) alone, every row
@@ -612,7 +695,11 @@ function mergePlanWrites(current, incoming) {
       if (!act || !Array.isArray(act.chain)) continue;
       if (!act.chain.some(c => c && c.id === row.curriculum)) continue;
       act.chain = act.chain.map(c =>
-        (c && c.id === row.curriculum ? { ...c, done: (c.done || 0) + 1 } : c));
+        (c && c.id === row.curriculum
+          ? (typeof row.session === 'number'
+              ? markSessionDone({ ...c, skipped: [...(c.skipped || [])] }, row.session)
+              : { ...c, done: (c.done || 0) + 1 })
+          : c));
     }
   }
   return out;
@@ -642,6 +729,11 @@ function weekCapacity(act, weekStart, periods, cycle) {
 
 // Walk weeks forward until remaining sessions are covered. null = can't project.
 function projectFinish(act, fromDate, plan, horizon = 300) {
+  // A fixed-calendar class (e.g. a Zoom class run by someone else) ends on the
+  // TEACHER's date, not a pace walk — `finishOn` wins outright, chain/rhythm
+  // notwithstanding (red-team M3). `weeks: null` since none was walked; every
+  // caller reads `.date` and tolerates that.
+  if (isISO(act?.finishOn)) return { date: act.finishOn, weeks: null, fixed: true };
   const remaining = actRemaining(act);
   if (actTotal(act) === 0) return null;              // unknown counts (waiting for books)
   if (remaining === 0) return { date: fromDate, weeks: 0, done: true };
@@ -694,8 +786,12 @@ function cycleBounds(cycle, dateStr) {
   return { start, end: addDays(start, 13) };
 }
 
+// Lesson rows only (`!timed && !eventId`): an on-grid class also carries an
+// attendance row for the same date (logTimed, 2026-09-01). No cycle-rhythm
+// activity is on the grid today; the guard keeps that from ever double counting.
 const countDone = (log, actId, from, to) =>
-  log.filter(e => e.activityId === actId && e.status === 'done' && e.date >= from && e.date <= to).length;
+  log.filter(e => e.activityId === actId && e.status === 'done' && !e.timed && !e.eventId &&
+    e.date >= from && e.date <= to).length;
 
 function cycleStats(act, dateStr, cycle, log) {
   const { start, end } = cycleBounds(cycle, dateStr);
@@ -724,7 +820,13 @@ function targetStats(act, plan, log, dateStr) {
     }
     w = addDays(w, 7);
   }
-  const done = log.filter(e => e.activityId === act.id && e.status === 'done').length;
+  // `!e.curriculum && !e.timed`: the target tally is a plain session count, not
+  // an attendance marker or a paced chain's lesson row — those belong to a
+  // different reader (red-team L5, same "two rows, two meanings" invariant as
+  // historyRows/yesterdayHtml). Currently a no-op in production: jj (the only
+  // `target` activity) is `status:'planned'`/off-grid, so it never yet writes
+  // a `timed` row; this only guards the day it goes active+onGrid.
+  const done = log.filter(e => e.activityId === act.id && e.status === 'done' && !e.curriculum && !e.timed).length;
   const expected = total ? Math.floor((act.target || 0) * (elapsed / total)) : 0;
   return { done, target: act.target || 0, expected, behind: Math.max(0, expected - done) };
 }
@@ -1004,6 +1106,7 @@ function tbWbCard(act, cur, log, dateStr, extraOpen = false) {
   if (!total) return null;                    // counts still pending: nothing to tap
   const paired = Math.max(0, (cur.lessons || 0) * 2);
   const done = Math.min(Math.max(0, cur.done || 0), total);
+  const ni = nextIndex(cur);                  // the lowest OWED slot if any, else the fresh next
   const rows = (Array.isArray(log) ? log : []).filter(e =>
     e && e.activityId === act.id && e.status === 'done' && !e.timed && !e.eventId &&
     e.curriculum && typeof e.session === 'number');
@@ -1018,26 +1121,32 @@ function tbWbCard(act, cur, log, dateStr, extraOpen = false) {
   const dateOf = s => rows.find(e => e.curriculum === cur.id && e.session === s)?.date || null;
   const item = s => {
     const on = dateOf(s);
+    const done_ = isSessionDone(cur, s);
     return { session: s, label: halfLabel(cur, s), fullLabel: sessionLabel(cur, s),
-      done: s < done, loggedOn: on, undoable: !!on && on === dateStr, next: s === done,
-      needs: s > done ? halfLabel(cur, done) : null };
+      done: done_, loggedOn: on, undoable: !!on && on === dateStr, next: s === ni,
+      needs: (!done_ && s !== ni && ni != null) ? halfLabel(cur, ni) : null };
   };
   const base = { chapter: shortChainName(cur), curId: cur.id,
     doneSessions: done, totalSessions: total };
 
-  if (done >= paired) {                       // trailing chapter review(s), self-contained
+  if (ni == null || ni >= paired) {           // trailing chapter review(s), self-contained
     const tests = [];
     for (let s = paired; s < total; s++) tests.push(item(s));
     return { ...base, lessons: [], tests, addLesson: null,
-      currentLabel: done < total ? sessionLabel(cur, done) : null };
+      currentLabel: ni == null ? null : sessionLabel(cur, ni) };
   }
 
-  const current = Math.floor(done / 2) + 1;   // first lesson with a half still owed
-  const inProgress = done % 2 === 1;          // textbook logged, workbook outstanding
+  const current = Math.floor(ni / 2) + 1;     // first lesson with a half still owed
+  const inProgress = ni % 2 === 1;            // textbook logged, workbook outstanding
+  // An OWED lesson (below the high-water mark, from `skipped`) is unfinished
+  // work, never a voluntary new addition — it must show unconditionally, the
+  // same as an in-progress lesson, rather than sit behind the ➕ gate meant
+  // for "start a further lesson today".
+  const owed = Array.isArray(cur.skipped) && cur.skipped.length > 0;
   const lessonsToday = [...new Set(rows
     .filter(e => e.date === dateStr && e.curriculum === cur.id && e.session < paired)
     .map(e => Math.floor(e.session / 2) + 1))];
-  const showCurrent = inProgress || !anyToday || !!extraOpen;
+  const showCurrent = inProgress || !anyToday || !!extraOpen || owed;
   const nums = [...new Set([...lessonsToday, ...(showCurrent ? [current] : [])])]
     .sort((a, b) => a - b);
   return { ...base, tests: [], currentLabel: `L${current}`,
@@ -1073,20 +1182,82 @@ function noteForDaily(cur) {
 const markFor = status => status === 'done' ? '✓' : status === 'half' || status === 'partial' ? '◐' : '✗';
 const statusMark = markFor;
 
+// One receipt line's lesson detail for a paced activity's rows on the day —
+// the tb-wb half/pair folding and the simple-chain label list. Shared by the
+// timed pass (an on-grid class whose ✓ also logged its lesson, 2026-09-01)
+// and the no-slot dailies pass, so both read identically.
+function lessonDetail(act, entries) {
+  const byChain = new Map();
+  for (const e of entries) {
+    if (!byChain.has(e.curriculum)) byChain.set(e.curriculum, []);
+    byChain.get(e.curriculum).push(e);
+  }
+  const details = [];
+  for (const [curId, es] of byChain) {
+    const cur = (act.chain || []).find(c => c && c.id === curId);
+    if (!cur) continue;
+    if (cur.pattern === 'tb-wb') {
+      // Mirror sessionLabel/_tb_wb_paired_sessions' own paired-region
+      // boundary (review 2 fix): a session at or past `lessons*2` is a
+      // trailing, unpaired review/test (the real dm3 shape — a chapter
+      // with an odd `tests` count, e.g. dm3-c4/c7/c11/c15 in production)
+      // and has no lesson number to fold into — the naive floor(session/2)
+      // math used to fabricate one ('L11' for the first test after an
+      // 10-lesson/20-session chapter). It now renders via sessionLabel
+      // itself ('Test 1'), same as the bot. Inside the paired region, a
+      // lesson touched by BOTH halves collapses to 'L6'; a lone half (the
+      // day only got the textbook, or only the workbook — an unfinished
+      // pair, still a real thing to show on a past day even though
+      // dailyStatus itself reads 'half' rather than 'done' for it) stays
+      // 'L6 textbook' / 'L6 workbook' rather than silently dropping which
+      // half actually happened.
+      const paired = (cur.lessons || 0) * 2;
+      const lessonHalves = new Map();      // lesson# -> Set(0=textbook,1=workbook)
+      const trailing = new Set();
+      for (const e of es) {
+        const s = e.session ?? 0;
+        if (s >= paired) { trailing.add(s); continue; }
+        const lesson = Math.floor(s / 2) + 1;
+        if (!lessonHalves.has(lesson)) lessonHalves.set(lesson, new Set());
+        lessonHalves.get(lesson).add(s % 2);
+      }
+      const lessonParts = [...lessonHalves.entries()].sort((a, b) => a[0] - b[0])
+        .map(([n, halves]) => halves.size >= 2 ? `L${n}` : `L${n} ${halves.has(1) ? 'workbook' : 'textbook'}`);
+      const trailingParts = [...trailing].sort((a, b) => a - b).map(s => sessionLabel(cur, s));
+      details.push([...lessonParts, ...trailingParts].join(' + '));
+    } else {
+      const labels = [...new Set(es.map(e => sessionLabel(cur, e.session ?? 0)))];
+      details.push(labels.join(' + '));
+    }
+  }
+  return details.filter(Boolean).join(' · ');
+}
+
 function receipt(dateStr, events, plan, nameForEvent) {
   const out = [];
-  const timed = buildTimed(dateStr, events, plan, nameForEvent);
-  for (const it of timed) {
-    const st = statusOfTimed(plan, dateStr, it);
-    if (st == null) continue;
-    out.push({ emoji: it.emoji, name: widgetName(it), mark: markFor(st), detail: '' });
-  }
-
   const byAct = new Map();
   for (const e of plan?.log || []) {
     if (!e || e.date !== dateStr || e.timed || e.eventId || e.activityId == null) continue;
     if (!byAct.has(e.activityId)) byAct.set(e.activityId, []);
     byAct.get(e.activityId).push(e);
+  }
+  const timed = buildTimed(dateStr, events, plan, nameForEvent);
+  for (const it of timed) {
+    const st = statusOfTimed(plan, dateStr, it);
+    if (st == null) continue;
+    // An on-grid class whose ✓ also logged its lesson (logTimed, 2026-09-01)
+    // leaves two rows for one class: fold the lesson label into this timed
+    // line and take the activity out of the dailies pass below, or the day
+    // would read "Geography ✓" twice.
+    let detail = '';
+    const entries = it.activityId != null ? byAct.get(it.activityId) : null;
+    if (entries) {
+      const act = (plan?.activities || []).find(a => a && a.id === it.activityId);
+      const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
+      if (act && !marker) detail = lessonDetail(act, entries);
+      byAct.delete(it.activityId);
+    }
+    out.push({ emoji: it.emoji, name: widgetName(it), mark: markFor(st), detail });
   }
   for (const [actId, entries] of byAct) {
     const act = (plan?.activities || []).find(a => a && a.id === actId);
@@ -1094,50 +1265,7 @@ function receipt(dateStr, events, plan, nameForEvent) {
     const nick = WIDGET_NICK[actId] || shortName(act.name || act.id);
     const marker = entries.find(e => e.status !== 'done' || !e.curriculum);
     if (marker) { out.push({ emoji: emojiFor(actId), name: nick, mark: markFor(marker.status), detail: '' }); continue; }
-    const byChain = new Map();
-    for (const e of entries) {
-      if (!byChain.has(e.curriculum)) byChain.set(e.curriculum, []);
-      byChain.get(e.curriculum).push(e);
-    }
-    const details = [];
-    for (const [curId, es] of byChain) {
-      const cur = (act.chain || []).find(c => c && c.id === curId);
-      if (!cur) continue;
-      if (cur.pattern === 'tb-wb') {
-        // Mirror sessionLabel/_tb_wb_paired_sessions' own paired-region
-        // boundary (review 2 fix): a session at or past `lessons*2` is a
-        // trailing, unpaired review/test (the real dm3 shape — a chapter
-        // with an odd `tests` count, e.g. dm3-c4/c7/c11/c15 in production)
-        // and has no lesson number to fold into — the naive floor(session/2)
-        // math used to fabricate one ('L11' for the first test after an
-        // 10-lesson/20-session chapter). It now renders via sessionLabel
-        // itself ('Test 1'), same as the bot. Inside the paired region, a
-        // lesson touched by BOTH halves collapses to 'L6'; a lone half (the
-        // day only got the textbook, or only the workbook — an unfinished
-        // pair, still a real thing to show on a past day even though
-        // dailyStatus itself reads 'half' rather than 'done' for it) stays
-        // 'L6 textbook' / 'L6 workbook' rather than silently dropping which
-        // half actually happened.
-        const paired = (cur.lessons || 0) * 2;
-        const lessonHalves = new Map();      // lesson# -> Set(0=textbook,1=workbook)
-        const trailing = new Set();
-        for (const e of es) {
-          const s = e.session ?? 0;
-          if (s >= paired) { trailing.add(s); continue; }
-          const lesson = Math.floor(s / 2) + 1;
-          if (!lessonHalves.has(lesson)) lessonHalves.set(lesson, new Set());
-          lessonHalves.get(lesson).add(s % 2);
-        }
-        const lessonParts = [...lessonHalves.entries()].sort((a, b) => a[0] - b[0])
-          .map(([n, halves]) => halves.size >= 2 ? `L${n}` : `L${n} ${halves.has(1) ? 'workbook' : 'textbook'}`);
-        const trailingParts = [...trailing].sort((a, b) => a - b).map(s => sessionLabel(cur, s));
-        details.push([...lessonParts, ...trailingParts].join(' + '));
-      } else {
-        const labels = [...new Set(es.map(e => sessionLabel(cur, e.session ?? 0)))];
-        details.push(labels.join(' + '));
-      }
-    }
-    out.push({ emoji: emojiFor(actId), name: nick, mark: '✓', detail: details.filter(Boolean).join(' · ') });
+    out.push({ emoji: emojiFor(actId), name: nick, mark: '✓', detail: lessonDetail(act, entries) });
   }
   return out;
 }
@@ -1264,8 +1392,11 @@ function subjectCards(plan, dateStr) {
       }
     }
     const weekStart = mondayOf(dateStr), weekEnd = addDays(weekStart, 6);
+    // Lesson rows only: an on-grid class also carries a `timed` attendance row
+    // for the same date (logTimed, 2026-09-01), and that is not a second session.
     const sessionsThisWeek = (Array.isArray(plan?.log) ? plan.log : []).filter(e =>
-      e && e.activityId === a.id && e.status === 'done' && e.date >= weekStart && e.date <= weekEnd).length;
+      e && e.activityId === a.id && e.status === 'done' && !e.timed && !e.eventId &&
+      e.date >= weekStart && e.date <= weekEnd).length;
     return {
       id: a.id, name: a.name || a.id, color: colorFor(a.id), status: a.status,
       lessonsDone: lt.done, lessonsTotal: lt.total, pct, finish, delta,

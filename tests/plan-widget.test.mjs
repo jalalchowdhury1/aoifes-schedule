@@ -45,6 +45,16 @@ test('deterministic rebuild: the hash changes when a source byte changes', () =>
   assert.notEqual(mutated, hashA);
 });
 
+// m/widget.js is GENERATED — a source edit (js/model.js, js/plan/model.js,
+// js/plan/mday.js, scripts/widget-ui.js) that lands without a rebuild leaves
+// the shipped bundle silently behind every source change (red-team H2: 7
+// commits stale, and nothing caught it). This makes staleness a red test.
+test('m/widget.js is the current build of scripts/build-widget.mjs (never ship it stale)', () => {
+  const { bundle } = buildBundle();
+  assert.equal(readFileSync(new URL('../m/widget.js', import.meta.url), 'utf8'), bundle,
+    'm/widget.js is stale — run: node scripts/build-widget.mjs');
+});
+
 function pathFor(rel) {
   return new URL(`../${rel}`, import.meta.url);
 }
