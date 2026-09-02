@@ -950,3 +950,16 @@ test('receipt: no act: item exists for the activityId — the first item process
   assert.equal(rows.length, 1);
   assert.equal(rows[0].detail, 'Week 1');
 });
+
+test('widgetNext: an ask:false block is on the timeline but never in done/total', () => {
+  const p = sanitizePlan({ version: 2, year: 2026,
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], overrides: [], activities: [], log: [{ date: '2026-09-04', status: 'done', timed: true, eventId: 'q4' }] });
+  const evs = [{ id: 'q4', cat: 'quran', day: 4, start: 10, end: 11 },
+               { id: 'e1013', cat: 'other', day: 4, start: 12, end: 15, name: "Jumu'ah", ask: false }];
+  const r = widgetNext('2026-09-04', evs, p, new Date(2026, 8, 4, 12, 30));
+  assert.equal(r.total, 1);
+  assert.equal(r.doneCount, 1);
+  assert.equal(r.mode, 'now');
+  assert.equal(r.name, "Jumu'ah");                       // still the "now" block on the timeline
+});

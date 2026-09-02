@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build b184635f74 */
+ * build 06fc776e48 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -1571,8 +1571,11 @@ function widgetNext(dateStr, events, plan, now, nameForEvent) {
     key: `act:${a.id}`, kind: 'daily', activityId: a.id, name: a.name || a.id,
     status: dailyStatus(a, plan?.log, dateStr),
   }));
-  const total = timed.length + dailyItems.length;
-  const doneCount = [...timed, ...dailyItems].filter(it => it.status != null).length;
+  // `ask:false` blocks (Jumu'ah) stay on the timeline (now/next/"then …") but
+  // are not tasks: they never get a status, so they leave the done/total count.
+  const countable = [...timed.filter(it => it.ask !== false), ...dailyItems];
+  const total = countable.length;
+  const doneCount = countable.filter(it => it.status != null).length;
   const unloggedDailies = dailyItems.filter(it => it.status == null).map(widgetName);
 
   const current = timed.find(it => hourFloat >= it.start && hourFloat < it.end);

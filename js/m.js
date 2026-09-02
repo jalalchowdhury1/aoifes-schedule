@@ -132,9 +132,12 @@ function wireCompactBar() {
       if (out && plan.data) {
         const today = todayStr();
         const items = dayItems(today, store.events, plan.data, nameForEvent);
-        const done = items.filter(it => it.status === 'done').length;
+        // Count only what can be logged: an `ask:false` block (Jumu'ah) never
+        // gets a status, so it must not sit in the denominator forever.
+        const countable = items.filter(controlsFor);
+        const done = countable.filter(it => it.status === 'done').length;
         const nb = nowBlock(today, items, new Date().getHours() + new Date().getMinutes() / 60);
-        $('top-frac').textContent = `${done}/${items.length} done`;
+        $('top-frac').textContent = `${done}/${countable.length} done`;
         $('top-next').textContent = nb.item ? `· next ${nb.item.name}` : '';
       }
     }, { rootMargin: '-70px 0px 0px 0px' });
@@ -240,9 +243,10 @@ function renderToday() {
   }
   h += `</div>`;
 
-  const doneCount = items.filter(it => it.status === 'done').length;
+  const countable = items.filter(controlsFor);          // `ask:false` rows are not tasks
+  const doneCount = countable.filter(it => it.status === 'done').length;
   h += `<div class="glass">
-    <div class="tiny" style="margin-bottom:4px">The day · ${doneCount} of ${items.length} done</div>`;
+    <div class="tiny" style="margin-bottom:4px">The day · ${doneCount} of ${countable.length} done</div>`;
   for (const it of items) {
     h += itemRowHtml(it, today);
   }
