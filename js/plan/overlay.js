@@ -120,13 +120,14 @@ function applySlots(root, blocks) {
       if (b.day !== day) continue;
       const height = (b.bottom - b.top) * ph;
       const el = document.createElement('div');
-      el.className = `evt ${b.cls} pslot ov-slot`;
+      el.className = `evt ${b.cls} pslot ov-slot${b.skipped ? ' pslot-skip' : ''}`;
       el.setAttribute('data-slot', `${b.actId}:${b.idx}`);
       el.style.top = `${(b.top - S) * ph + 1}px`;
       el.style.height = `${height - 2}px`;
       el.innerHTML = `<div class="et">${esc(b.name)}</div>` +
         `<div class="en">${fmt(b.start)}&ndash;${fmt(b.end)}</div>` +
-        (b.note && height > 46 ? `<div class="en note">${esc(b.note)}</div>` : '');
+        (b.note && height > 46 ? `<div class="en note">${esc(b.note)}</div>` : '') +
+        (b.skipped ? '<span class="ov-tag">skipped</span>' : '');
       ca.appendChild(el);
     }
   }
@@ -154,7 +155,7 @@ export function applyOverlay() {
     const sun = addDays(mon, 6);
     const oneOffs = oneOffsInWeek(mon, sun);
     for (const root of roots) applyOneOffs(root, oneOffs);
-    const slots = gridSlots(plan.data.activities);
+    const slots = gridSlots(plan.data.activities, plan.data.overrides, mon);
     const dayview = document.getElementById('dayview');
     if (dayview) applySlots(dayview, slots);
     for (const e of plan.data.log) {

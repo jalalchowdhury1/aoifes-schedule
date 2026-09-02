@@ -361,3 +361,11 @@ html[data-theme='dark'] {
 /* Print stays the clean template week: every overlay decoration is screen-only.
    (A separate block from the one above so neither existing print rule moves.) */
 @media print { .ov-oneoff { display: none !important; } }
+/* A slot skipped THIS week (red-team M2): the grid used to show it as if the
+   class were happening, disagreeing with the phone, which already hides it.
+   Still drags/prints as the recurring slot it is — only the LOOK changes. */
+.evt.pslot-skip { opacity: .55; border-style: dashed; }
+@media print {
+  .evt.pslot-skip { opacity: 1; border-style: solid; }
+  .evt.pslot-skip .ov-tag { display: none !important; }
+}

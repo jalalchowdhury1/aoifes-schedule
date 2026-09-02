@@ -189,7 +189,13 @@ export const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 // slot is skipped, not spliced. Same drawing rules as the one-off ghosts: a
 // slot wholly outside 9–17 is dropped, an overhanging one is clamped to the
 // band (`top`/`bottom`) while the label keeps its real `start`/`end`.
-export function gridSlots(activities) {
+// `weekStart` (a Monday ISO) is optional: pure callers (the gcal sync, which
+// is Python anyway) never pass it and get `skipped: null` on every block. When
+// given, a block whose weekday has a matching {action:'skip', activityId,
+// date} override for THIS week is greyed (red-team M2 — the grid used to show
+// a skipped class as if it were happening, disagreeing with the phone).
+export function gridSlots(activities, overrides = [], weekStart = null) {
+  const ov = Array.isArray(overrides) ? overrides : [];
   const out = [];
   for (const a of Array.isArray(activities) ? activities : []) {
     if (!a || a.status !== 'active' || !a.onGrid || !Array.isArray(a.slots)) continue;
@@ -200,10 +206,15 @@ export function gridSlots(activities) {
       if (!s || !Number.isInteger(s.day) || s.day < 0 || s.day > 6) return;
       if (typeof s.start !== 'number' || typeof s.end !== 'number') return;
       if (s.end <= s.start || s.end <= S || s.start >= E) return;
+      let skipped = null;
+      if (weekStart) {
+        const date = addDays(weekStart, s.day);
+        if (ov.some(o => o && o.action === 'skip' && o.activityId === a.id && o.date === date)) skipped = date;
+      }
       out.push({
         actId: a.id, idx, day: s.day, start: s.start, end: s.end,
         top: Math.max(S, s.start), bottom: Math.min(E, s.end),
-        name: a.name || a.id, cls: okCls(a.cls), note,
+        name: a.name || a.id, cls: okCls(a.cls), note, skipped,
       });
     });
   }

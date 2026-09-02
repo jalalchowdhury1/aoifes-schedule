@@ -48,3 +48,14 @@ test('slotHTML: escapes the name and the actId', () => {
   assert.match(html, /data-slot="a&lt;b:1"/);
   assert.match(html, /&lt;Sci &amp; Co&gt;/);
 });
+
+test('slotHTML: a skipped block gets the pslot-skip class and the skipped tag; an unskipped one gets neither', () => {
+  const b = { actId: 'geography', idx: 0, day: 2, start: 11, end: 12, top: 11, bottom: 12,
+              name: 'Geography', cls: 'g', note: '', skipped: '2026-08-19' };
+  const html = slotHTML(b, 66);
+  assert.match(html, /class="evt g pslot pslot-skip"/);
+  assert.match(html, /<span class="ov-tag">skipped<\/span>/);
+  const unskipped = slotHTML({ ...b, skipped: null }, 66);
+  assert.doesNotMatch(unskipped, /pslot-skip/);
+  assert.doesNotMatch(unskipped, /ov-tag/);
+});

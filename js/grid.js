@@ -3,7 +3,7 @@
 import { DAYS, S, E, SPH, CATS, fmt, snap, clampStart, clampEnd, todayIndex, esc } from './model.js';
 import { store, evLabel, save, notify } from './state.js';
 import { plan, setSlot } from './plan/state.js';
-import { gridSlots } from './plan/model.js';
+import { gridSlots, mondayOf, todayStr } from './plan/model.js';
 
 let PH = SPH;
 export const setPH = v => { PH = v; };
@@ -34,11 +34,14 @@ export function evtHTML(ev, ph, { handle = false } = {}) {
 export function slotHTML(b, ph, { handle = false } = {}) {
   const top = (b.top - S) * ph;
   const height = (b.bottom - b.top) * ph;
-  return `<div class="evt ${b.cls} pslot" data-slot="${esc(b.actId)}:${b.idx}"
+  // A slot skipped THIS week (b.skipped, from gridSlots) is greyed on screen —
+  // print stays the recurring week (css/plan.css @media print resets it).
+  return `<div class="evt ${b.cls} pslot${b.skipped ? ' pslot-skip' : ''}" data-slot="${esc(b.actId)}:${b.idx}"
     style="top:${top + 1}px;height:${height - 2}px;">
     <div class="et">${esc(b.name)}</div>
     <div class="en">${fmt(b.start)}&ndash;${fmt(b.end)}</div>
     ${b.note && height > 46 ? `<div class="en note">${esc(b.note)}</div>` : ''}
+    ${b.skipped ? '<span class="ov-tag">skipped</span>' : ''}
     ${handle && height > 22 ? '<div class="rh"></div>' : ''}
   </div>`;
 }
@@ -73,7 +76,7 @@ export function renderGrid() {
   const gh = (E - S) * PH;
   const tIdx = todayIndex(new Date().getDay());
   const canDrag = !store.locked && dragOK();
-  const slots = plan.data ? gridSlots(plan.data.activities) : [];
+  const slots = plan.data ? gridSlots(plan.data.activities, plan.data.overrides, mondayOf(todayStr())) : [];
 
   let tc = `<div class="timecol" style="padding-top:30px;">`;
   // Last row (the 5pm label) gets label height only, not a full hour block —

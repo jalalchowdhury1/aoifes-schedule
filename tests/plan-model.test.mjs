@@ -1080,3 +1080,37 @@ test('gridSlots: outside 9–17 is dropped, overhanging is clamped for drawing b
     [2, 16, 17, 16, 18],
   ]);
 });
+
+// ── gridSlots: skipped-this-week greying (red-team M2) ──────────
+// geo().slots[0] is {day: 2 (Wed), start: 11, end: 12}.
+test('gridSlots: without weekStart, skipped is always null (pure callers like gcal-sync unaffected)', () => {
+  const mon = '2026-08-17';
+  const skip = { action: 'skip', activityId: 'geography', date: addDays(mon, 2) };
+  assert.equal(gridSlots([geo()])[0].skipped, null);
+  assert.equal(gridSlots([geo()], [skip])[0].skipped, null);      // overrides alone, still no weekStart
+});
+
+test('gridSlots: with weekStart, a matching skip override greys the block with its date', () => {
+  const mon = '2026-08-17';                                       // Monday
+  const wedDate = addDays(mon, 2);                                 // Wednesday this week
+  const skip = { action: 'skip', activityId: 'geography', date: wedDate };
+  const out = gridSlots([geo()], [skip], mon);
+  assert.equal(out[0].skipped, wedDate);
+});
+
+test('gridSlots: no matching skip -> skipped null; a skip on ANOTHER week never greys this week', () => {
+  const mon = '2026-08-17';
+  const otherWeekMon = '2026-08-24';
+  const skip = { action: 'skip', activityId: 'geography', date: addDays(otherWeekMon, 2) };
+  const out = gridSlots([geo()], [skip], mon);
+  assert.equal(out[0].skipped, null);
+});
+
+test('gridSlots: a skip for a DIFFERENT activity, or a non-skip action, never greys', () => {
+  const mon = '2026-08-17';
+  const wedDate = addDays(mon, 2);
+  const wrongAct = { action: 'skip', activityId: 'science', date: wedDate };
+  const wrongAction = { action: 'add', activityId: 'geography', date: wedDate };
+  assert.equal(gridSlots([geo()], [wrongAct], mon)[0].skipped, null);
+  assert.equal(gridSlots([geo()], [wrongAction], mon)[0].skipped, null);
+});
