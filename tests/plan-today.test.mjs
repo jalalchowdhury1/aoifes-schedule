@@ -110,6 +110,22 @@ test('renderToday: (a) normal day — Mama chip via isWorkDay, timed block + bot
   assert.match(html, /data-act="loe"/);
 });
 
+test('renderToday: an ask:false timed block renders time+name with no ✓/◐/✗ buttons; a normal block still gets them', () => {
+  store.events = [
+    { id: 'e1', cat: 'quran', day: TODAY_DI, start: 10, end: 11, name: 'Quran reading' },
+    { id: 'e2', cat: 'other', day: TODAY_DI, start: 12, end: 15, name: 'Jumuah', ask: false },
+  ];
+  loadPlan([]);
+  renderToday();
+  const html = viewToday.innerHTML;
+  const blocks = html.split('class="tblock');
+  const jumuahBlock = blocks.find(b => b.includes('Jumuah'));
+  assert.ok(jumuahBlock, 'the ask:false block still renders as a row');
+  assert.doesNotMatch(jumuahBlock, /data-st=/);
+  const quranBlock = blocks.find(b => b.includes('Quran reading'));
+  assert.match(quranBlock, /data-st="done"/);
+});
+
 test('renderToday: (b) travel day mid-period — banner shown, timed blocks hidden, reduced daily stays, paused daily hides', () => {
   store.events = [{ id: 'e1', cat: 'quran', day: TODAY_DI, start: 10, end: 11, name: 'Quran reading' }];
   const start = addDays(TODAY, -2), end = addDays(TODAY, 5);      // 8-day trip, today is day 3

@@ -31,10 +31,21 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry, paceCaption, paceSentence } = await import('../js/m.js');
+const { lastDoneEntry, paceCaption, paceSentence, controlsFor } = await import('../js/m.js');
 const { planGapDays, planDeltaChip, paceGap, paceGapLessons, expectedSessions } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
+
+// ── controlsFor (A1, 2026-09-02): the /m Today row's ✓/◐/✗ + chevron/menu
+// predicate. js/m.js has no DOM render-test rig (unlike js/plan/today.js), so
+// this pins the pure gate itemRowHtml reads directly instead.
+test('controlsFor: a timed item with ask:false gets no controls; every other item keeps them', () => {
+  assert.equal(controlsFor({ kind: 'timed', ask: false }), false);
+  assert.equal(controlsFor({ kind: 'timed', ask: true }), true);
+  assert.equal(controlsFor({ kind: 'timed' }), true);              // no ask field -> askable
+  assert.equal(controlsFor({ kind: 'daily', ask: false }), true);  // ask only ever applies to timed items
+  assert.equal(controlsFor({ kind: 'daily' }), true);
+});
 
 test('lastDoneEntry: skips a trailing missed marker, finds the real last DONE row', () => {
   plan.data = { log: [

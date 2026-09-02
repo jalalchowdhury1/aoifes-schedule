@@ -291,27 +291,38 @@ function yesterdayReceiptHtml(dateStr) {
 // user should never be stuck unable to change or undo a selection, even
 // when `logDailyStatus`'s guard will refuse a write (the guard's own toast
 // explains why, rather than the option silently disappearing).
+// An ask:false timed block (Jumu'ah) is real — time, emoji, name, note all
+// render as a normal row — but nobody is ever asked whether it happened, so
+// it gets no ✓/◐/✗ check, no chevron and no long-press menu. Every other row
+// (a daily, or a timed block that doesn't opt out) keeps its full controls.
+// Exported (pure) so it can be pinned directly — this page has no DOM
+// render-test rig the way js/plan/today.js does.
+export const controlsFor = it => it.kind !== 'timed' || it.ask !== false;
+
 function itemRowHtml(it, dateStr) {
   const st = it.status;
   const time = it.kind === 'timed' ? `${fmt(it.start)}` : '—';
-  const isTbWbDaily = it.kind === 'daily' && (() => {
+  const hasControls = controlsFor(it);
+  const isTbWbDaily = hasControls && it.kind === 'daily' && (() => {
     const act = plan.data.activities.find(a => a.id === it.activityId);
     const cur = act ? currentCur(act) : null;
     return cur && cur.pattern === 'tb-wb';
   })();
   const checkCls = st ? ` st-${st}` : '';
   const checkGlyph = st === 'done' ? '✓' : st === 'half' ? '◐' : st === 'partial' ? '◐' : st === 'missed' ? '✗' : '';
-  let check;
-  if (isTbWbDaily) {
-    check = `<button type="button" class="chk${checkCls}" data-tbwbcheck="${esc(it.key)}" aria-label="More options for ${esc(it.name)}">${checkGlyph}</button>`;
-  } else if (it.kind === 'timed') {
-    check = `<button type="button" class="chk${checkCls}" data-check="${esc(it.key)}" aria-pressed="${st === 'done'}" aria-label="Mark ${esc(it.name)} done">${checkGlyph}</button>`;
-  } else {
-    check = `<button type="button" class="chk${checkCls}" data-daily="${esc(it.activityId)}" aria-pressed="${st === 'done'}" aria-label="Toggle ${esc(it.name)}">${checkGlyph}</button>`;
+  let check = '', chev = '';
+  const menuOpen = hasControls && state.statusPickKey === it.key;
+  if (hasControls) {
+    if (isTbWbDaily) {
+      check = `<button type="button" class="chk${checkCls}" data-tbwbcheck="${esc(it.key)}" aria-label="More options for ${esc(it.name)}">${checkGlyph}</button>`;
+    } else if (it.kind === 'timed') {
+      check = `<button type="button" class="chk${checkCls}" data-check="${esc(it.key)}" aria-pressed="${st === 'done'}" aria-label="Mark ${esc(it.name)} done">${checkGlyph}</button>`;
+    } else {
+      check = `<button type="button" class="chk${checkCls}" data-daily="${esc(it.activityId)}" aria-pressed="${st === 'done'}" aria-label="Toggle ${esc(it.name)}">${checkGlyph}</button>`;
+    }
+    chev = `<button type="button" class="hintdot${st ? ' has-status' : ''}" data-chev="${esc(it.key)}"
+      aria-label="Change status" aria-haspopup="true" aria-expanded="${menuOpen}">&#8964;</button>`;
   }
-  const menuOpen = state.statusPickKey === it.key;
-  const chev = `<button type="button" class="hintdot${st ? ' has-status' : ''}" data-chev="${esc(it.key)}"
-    aria-label="Change status" aria-haspopup="true" aria-expanded="${menuOpen}">&#8964;</button>`;
   let row = `<div class="item" data-key="${esc(it.key)}">
     <span class="t mono">${it.kind === 'timed' ? esc(time) : '—'}</span>
     <span class="em" aria-hidden="true">${it.emoji}</span>
@@ -823,7 +834,7 @@ function renderWeek() {
       <span class="t mono">${it.kind === 'timed' ? esc(fmt(it.start)) : '—'}</span>
       <span class="em" aria-hidden="true">${it.emoji}</span>
       <span class="n"><b>${esc(it.name)}</b>${it.note ? `<span>${esc(it.note)}</span>` : ''}</span>
-      ${isToday ? `<span class="rcpt-mk ${it.status ? 'st-' + esc(it.status) : 'st-open'}">${it.status ? statusMark(it.status) : '○'}</span>` : ''}
+      ${isToday && controlsFor(it) ? `<span class="rcpt-mk ${it.status ? 'st-' + esc(it.status) : 'st-open'}">${it.status ? statusMark(it.status) : '○'}</span>` : ''}
     </div>`).join('')}${isToday ? `<div class="wkhint dim">Tap a row to log it on Today</div>` : ''}</div>`;
   }
 

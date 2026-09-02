@@ -99,3 +99,25 @@ test('sanitizeEvents drops malformed records and non-arrays', () => {
   assert.deepEqual(sanitizeEvents(undefined), []);
   assert.deepEqual(sanitizeEvents('junk'), []);
 });
+
+// ── ask:false (A1, 2026-09-02): additive field, untouched by required-key checks ──
+test('sanitizeEvents keeps ask:false — isValidEvent only checks the required keys', () => {
+  const ev = { id: 'e1', cat: 'other', day: 0, start: 12, end: 13, ask: false };
+  assert.deepEqual(sanitizeEvents([ev]), [ev]);
+});
+
+// updateEvent (js/state.js) spreads {...x, ...patch} — commit() reaches for
+// localStorage/fetch/document, so stub those first (same pattern as
+// tests/plan-today.test.mjs) and import dynamically so the stubs land before
+// module load.
+globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
+globalThis.document = { dispatchEvent: () => {} };
+const { store, updateEvent } = await import('../js/state.js');
+
+test('updateEvent preserves ask:false through its patch spread', () => {
+  store.events = [{ id: 'e1', cat: 'other', day: 0, start: 12, end: 13, ask: false }];
+  updateEvent('e1', { start: 14 });
+  assert.equal(store.events[0].ask, false);
+  assert.equal(store.events[0].start, 14);
+});

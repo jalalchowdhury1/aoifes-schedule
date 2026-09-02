@@ -466,6 +466,25 @@ test('dayState: no loggable items at all -> phase "empty", never divides by zero
   assert.equal(fieldClassFor(ds), 'day');
 });
 
+test('dayState: an ask:false timed block still owns now/next but never counts toward total/left', () => {
+  const items = [
+    { key: 'ev:jumuah', kind: 'timed', start: 12, end: 15, name: "Jumu'ah", ask: false, status: null },
+    { key: 'ev:quran', kind: 'timed', start: 10, end: 11, name: 'Quran', ask: true, status: null },
+  ];
+  const before = dayState(items, 9);            // before both -> 'next' picks the earliest regardless of ask
+  assert.equal(before.phase, 'next');
+  assert.equal(before.item.name, 'Quran');
+
+  const during = dayState(items, 12.5);          // inside the ask:false block -> still a real 'now'
+  assert.equal(during.phase, 'now');
+  assert.equal(during.item.name, "Jumu'ah");
+
+  const after = dayState(items, 16);             // after both -> total/left exclude the ask:false block
+  assert.equal(after.phase, 'left');
+  assert.equal(after.total, 1);
+  assert.deepEqual(after.names, ['Quran']);
+});
+
 test('nowBlock stays byte-compatible with dayState after the refactor (back-compat wrapper)', () => {
   const items = dayItems(MON, events, plan);
   assert.deepEqual(nowBlock(MON, items, 11.5), { state: 'now', item: dayState(items, 11.5).item, minutesLeft: 90 });
@@ -568,6 +587,22 @@ test('statusOfTimed: requires a non-null key (no cross-match on keyless rows)', 
   assert.equal(statusOfTimed(withLog, MON, quran), 'missed');
   const ruhama = items.find(it => it.eventId === 'e1007');
   assert.equal(statusOfTimed(withLog, MON, ruhama), undefined);
+});
+
+// ── ask:false (A1, 2026-09-02): a template block nobody is ever asked about ──
+test('buildTimed: an ev: item carries ask (true unless the event opts out); act:/ov: items are always askable', () => {
+  const withAdd = sanitizePlan({ ...rawPlan,
+    overrides: [...rawPlan.overrides, { date: MON, action: 'add', id: 'xAsk', name: 'Extra add', start: 8, end: 8.5 }] });
+  const evsWithAsk = [...events, { id: 'eJumuah', cat: 'other', day: 0, start: 12, end: 13, name: "Jumu'ah", ask: false }];
+  const items = buildTimed(MON, evsWithAsk, withAdd);
+  const jumuah = items.find(it => it.eventId === 'eJumuah');
+  assert.equal(jumuah.ask, false);
+  const quran = items.find(it => it.eventId === 'e1001');    // no ask field on the fixture -> defaults true
+  assert.equal(quran.ask, true);
+  const jj = items.find(it => it.activityId === 'jj');       // act: item -> always askable
+  assert.equal(jj.ask, true);
+  const ov = items.find(it => it.key === 'ov:xAsk');         // ov: item -> always askable
+  assert.equal(ov.ask, true);
 });
 
 // ── tbWbCard: the phone's Singapore lesson card, as a pure model ──
@@ -796,6 +831,27 @@ test('weekGlance: changes = dated one-offs, skips and away runs, clipped to the 
   const withSkip = sanitizePlan({ ...rawPlan, overrides: [...rawPlan.overrides, { date: '2026-08-26', action: 'skip', eventId: 'e1003' }] });
   const c = weekGlance('2026-08-24', events, withSkip, TODAY).changes.find(x => x.kind === 'skip');
   assert.deepEqual([c.dow, c.label, c.time], ['Wed', 'Quran', '10am']);
+});
+
+test('weekGlance: an ask:false block still draws on the hour axis but never counts toward classes done/total or the day dot', () => {
+  const wed = '2026-08-26';                     // Wed of the 2026-08-24 week (WK's own week)
+  const evs = [
+    { id: 'jumuah', cat: 'other', day: 2, start: 12, end: 15, name: "Jumu'ah", ask: false },
+    { id: 'quran', cat: 'quran', day: 2, start: 10, end: 11, name: 'Quran' },
+  ];
+  const p = sanitizePlan({
+    year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], activities: [], overrides: [],
+    log: [{ date: wed, eventId: 'quran', status: 'done', timed: true }],
+    // Jumu'ah deliberately carries no log row — nobody is ever asked about it.
+  });
+  const g = weekGlance('2026-08-24', evs, p, wed);
+  assert.equal(g.timed.total, 1);
+  assert.equal(g.timed.done, 1);
+  const wedDay = g.days.find(d => d.date === wed);
+  assert.equal(wedDay.timed.length, 2, 'the block is still drawn on the hour axis');
+  assert.equal(wedDay.dot, 'grn', "Jumu'ah's missing status never taints the dot");
 });
 
 test('fmtClock / statusMark', () => {

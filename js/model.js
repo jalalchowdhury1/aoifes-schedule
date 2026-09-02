@@ -50,6 +50,10 @@ export function defEvents() {
 export const maxIdNum = events =>
   events.reduce((mx, e) => Math.max(mx, parseInt(String(e.id).replace('e', ''), 10) || 0), 0);
 
+// An event may additionally carry `ask: false` (additive, 2026-09-02): the
+// block is real on the calendar/grid/print, but no ✓/◐/✗ question is ever
+// asked about it (Jumu'ah) — isValidEvent/sanitizeEvents/updateEvent all
+// pass it through untouched since none of them check beyond the keys below.
 export const isValidEvent = e =>
   !!e && typeof e === 'object' && 'id' in e && 'cat' in e &&
   typeof e.day === 'number' && typeof e.start === 'number' && typeof e.end === 'number';

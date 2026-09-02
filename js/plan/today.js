@@ -264,11 +264,15 @@ export function renderToday() {
     items = timedFor(today);
     for (const it of items) {
       const st = statusOf(today, it);
+      // An ask:false block (Jumu'ah) is a real row — time, name, note all
+      // render — but no ✓/◐/✗ buttons: nobody is ever asked whether it
+      // happened.
+      const askable = it.ask !== false;
       h += `<div class="tblock ${it.cls}${st ? ' st-' + st : ''}" data-key="${esc(it.key)}">
         <div class="trow"><span class="tnm">${esc(it.name)}</span><span class="ttm">${fmt(it.start)}–${fmt(it.end)}</span></div>
         ${it.note ? `<div class="tnote">${esc(it.note)}</div>` : ''}
-        <div class="tbtns">${ST.map(([k, lbl]) =>
-          `<button type="button" class="tbtn${st === k ? ' sel' : ''}" data-st="${k}">${lbl}</button>`).join('')}</div>
+        ${askable ? `<div class="tbtns">${ST.map(([k, lbl]) =>
+          `<button type="button" class="tbtn${st === k ? ' sel' : ''}" data-st="${k}">${lbl}</button>`).join('')}</div>` : ''}
       </div>`;
     }
     if (!items.length) h += `<div class="pcard pmeta">No scheduled blocks today.</div>`;

@@ -68,14 +68,18 @@ export function buildTimed(dateStr, events, plan, nameForEvent = ev => ev.name |
   for (const ev of (events || []).filter(e => e && e.day === d))
     items.push({ key: `ev:${ev.id}`, kind: 'timed', eventId: ev.id, activityId: undefined,
       cls: okCls(CATS[ev.cat]?.cls), name: nameForEvent(ev) || catLabelDefault(ev.cat),
-      emoji: emojiFor(ev.cat), start: ev.start, end: ev.end, note: ev.note || '' });
+      emoji: emojiFor(ev.cat), start: ev.start, end: ev.end, note: ev.note || '',
+      // A template event may opt out of ever being asked about (Jumu'ah,
+      // `ask: false`) — the block stays real (grid/print/calendar/"now-next"
+      // untouched) but day-done counts and the ✓/◐/✗ controls skip it.
+      ask: ev.ask !== false });
   for (const a of activities.filter(a => a && a.status === 'active' && a.onGrid))
     for (const s of a.slots || [])
       if (s && s.day === d) {
         const cur = currentCur(a);
         items.push({ key: `act:${a.id}`, kind: 'timed', eventId: undefined, activityId: a.id,
           cls: okCls(a.cls), name: a.name, emoji: emojiFor(a.id), start: s.start, end: s.end,
-          note: cur && nextSession(cur) ? nextSession(cur).label : '' });
+          note: cur && nextSession(cur) ? nextSession(cur).label : '', ask: true });
       }
   for (const [i, o] of overrides.entries())
     if (o && o.date === dateStr && o.action === 'add') {
@@ -83,7 +87,7 @@ export function buildTimed(dateStr, events, plan, nameForEvent = ev => ev.name |
       items.push({ key: `ov:${o.id || i}`, kind: 'timed', eventId: o.id || undefined,
         activityId: o.activityId, cls: okCls(a?.cls),
         name: o.name || (a?.name || 'Extra') + ' · makeup', emoji: emojiFor(a?.id),
-        start: o.start, end: o.end, note: o.note && o.note !== o.name ? o.note : '' });
+        start: o.start, end: o.end, note: o.note && o.note !== o.name ? o.note : '', ask: true });
     }
   const skips = new Set(overrides
     .filter(o => o && o.date === dateStr && o.action === 'skip')
@@ -388,7 +392,10 @@ export function dayState(items, hourFloat) {
   const next = timed.filter(it => it.start > hourFloat).sort((a, b) => a.start - b.start)[0];
   if (next) return { phase: 'next', item: next,
     minutesUntil: Math.max(0, Math.round((next.start - hourFloat) * 60)) };
-  const all = items || [];
+  // An ask:false block (Jumu'ah) is real — the current/next phases above see
+  // it like any other timed block — but nobody is ever asked whether it
+  // happened, so it drops out of total/unlogged/left/names from here down.
+  const all = (items || []).filter(it => it.ask !== false);
   const total = all.length;
   if (!total) return { phase: 'empty', left: 0, total: 0 };
   const unlogged = all.filter(it => it.status == null);
@@ -676,6 +683,7 @@ export function weekGlance(weekStart, events, plan, today, nameForEvent) {
     const timed = items.filter(it => it.kind === 'timed').map(it => ({
       key: it.key, start: it.start, end: it.end, cls: it.cls, name: it.name,
       emoji: it.emoji, status: it.status ?? null, oneOff: it.key.startsWith('ov:'),
+      ask: it.ask !== false,
     }));
     for (const t of timed) { hourMin = Math.min(hourMin, t.start); hourMax = Math.max(hourMax, t.end); }
     const cells = dailies.map(a => {
@@ -683,11 +691,15 @@ export function weekGlance(weekStart, events, plan, today, nameForEvent) {
       return { id: a.id, color: colorFor(a.id), visible,
         status: visible ? (dailyStatus(a, plan?.log, date) ?? null) : null };
     });
+    // The block still draws on the hour axis (it's real) but an ask:false
+    // item (Jumu'ah) never counts toward the day's dot — nobody is ever asked
+    // about it, so it must never read as "amber"/"missed" for having no status.
+    const countable = items.filter(it => it.ask !== false);
     days.push({
       date, idx: i, dow: DOW3[i], dNum: Number(date.slice(-2)),
       isToday: date === today, isPast: date < today,
       away: st.away ? { type: st.type, label: awayLabelFor(st), dayN: st.dayN, total: st.total } : null,
-      timed, dailies: cells, dot: st.away ? null : dayDot(items, date, today),
+      timed, dailies: cells, dot: st.away ? null : dayDot(countable, date, today),
     });
   }
   if (!Number.isFinite(hourMin)) { hourMin = null; hourMax = null; }
@@ -700,7 +712,7 @@ export function weekGlance(weekStart, events, plan, today, nameForEvent) {
   // (an away day contributes none — dayItems already empties it); `elapsed`
   // is the part of that already behind us, so a current week can say "5
   // left" honestly.
-  const all = days.flatMap(d => d.timed.map(t => ({ ...t, date: d.date })));
+  const all = days.flatMap(d => d.timed.filter(t => t.ask).map(t => ({ ...t, date: d.date })));
   const timedSum = {
     total: all.length,
     done: all.filter(t => t.status === 'done').length,
