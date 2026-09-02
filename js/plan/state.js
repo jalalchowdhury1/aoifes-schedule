@@ -131,8 +131,11 @@ export const getActivity = id => plan.data.activities.find(a => a.id === id);
 export function togglePaced(actId, date = todayStr()) {
   const act = getActivity(actId);
   if (!act) return;
+  // `!e.timed`: an on-grid class carries an attendance row beside its lesson
+  // row (logTimed, 2026-09-01); the toggle must find the LESSON, or the
+  // phone's "Oops" would splice the attendance and leave `done` unrolled.
   const i = plan.data.log.findIndex(e =>
-    e.activityId === actId && e.date === date && e.status === 'done' && !e.eventId);
+    e.activityId === actId && e.date === date && e.status === 'done' && !e.eventId && !e.timed);
   if (i >= 0) {
     const entry = plan.data.log[i];
     plan.data.log.splice(i, 1);

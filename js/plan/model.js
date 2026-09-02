@@ -689,8 +689,12 @@ export function cycleBounds(cycle, dateStr) {
   return { start, end: addDays(start, 13) };
 }
 
+// Lesson rows only (`!timed && !eventId`): an on-grid class also carries an
+// attendance row for the same date (logTimed, 2026-09-01). No cycle-rhythm
+// activity is on the grid today; the guard keeps that from ever double counting.
 const countDone = (log, actId, from, to) =>
-  log.filter(e => e.activityId === actId && e.status === 'done' && e.date >= from && e.date <= to).length;
+  log.filter(e => e.activityId === actId && e.status === 'done' && !e.timed && !e.eventId &&
+    e.date >= from && e.date <= to).length;
 
 export function cycleStats(act, dateStr, cycle, log) {
   const { start, end } = cycleBounds(cycle, dateStr);

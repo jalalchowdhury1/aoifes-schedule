@@ -573,3 +573,12 @@ test('logTimed: a template event and a target activity are untouched by the less
     { date: D, status: 'done', timed: true, activityId: 'jj' },
   ]);
 });
+
+test('togglePaced after a ✓ on an on-grid class (the phone\'s Oops) removes the LESSON row, never the attendance row', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'done', D);
+  assert.equal(geo.chain[0].done, 1);
+  togglePaced('geography', D);
+  assert.deepEqual(geoRows(), [{ date: D, status: 'done', timed: true, activityId: 'geography' }]);
+  assert.equal(geo.chain[0].done, 0);
+});
