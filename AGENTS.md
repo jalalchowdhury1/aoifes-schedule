@@ -335,6 +335,28 @@ Google Calendar via `buildTimed`/`activity_slot_events` but never the grid.
   branch does the same with `src:'tg'`, appends `· <lesson label>` to its
   confirmation, and `compose.tally_summary` shadows the attendance row.
   Spec: docs/superpowers/specs/2026-09-01-class-tick-advances-lesson-design.md.
+- **Red-team round (2026-09-02, plan docs/superpowers/plans/2026-09-01-redteam-fixes.md):**
+  (1) the ✓-written lesson row carries `viaTimed: true`; `logTimed` appends it
+  ONLY when no lesson row for that (activity, date) exists from any writer, and
+  the untick removes ONLY `viaTimed` rows — a lesson logged by logSession/the
+  API/the bot's log_progress is never the tick's to delete; the bot writes the
+  same camelCase flag. (2) `mergePlanWrites.logKey` tags timed rows `|t`, so an
+  incoming blob holding only the lesson half can no longer suppress another
+  writer's attendance row. (3) `yesterdayHtml` (desktop Today) folds attendance
+  + lesson and a tb-wb pair into one line. (4) `gridSlots(activities, overrides,
+  weekStart)` marks a slot skipped THIS week; `slotHTML`/`applySlots` add
+  `.pslot-skip` (dashed, dim, "skipped" tag) on screen — print resets it (the
+  printed week stays the recurring week). (5) `projectFinish` returns
+  `{date: act.finishOn, weeks: null, fixed: true}` for a fixed-calendar class
+  (Science carries `finishOn: 2027-01-13`, the teacher's last class). (6) a click
+  on a `.pslot` when unlocked deselects (`toggleSelect(null)`) instead of leaving
+  the previous template block's editor open; a drop that nets to `ptr.orig` does
+  not save; `ptr.sel` goes through `cssEsc`; `historyRows` shadows only a `done`
+  attendance row; `targetStats` counts `timed` attendance rows (Jiu Jitsu's ONLY
+  write path — a `!e.timed` guard there zeroes its trial counter) and excludes
+  only `curriculum` rows. (7) `m/widget.js` was 7 commits stale — rebuilt, and
+  `tests/plan-widget.test.mjs` now fails whenever the checked-in bundle differs
+  from `buildBundle()`. (8) scripts/gcal-sync emits `EXDATE`s for skip overrides.
 
 ## Subjects/Today/Year: v2.8 family feedback batch (2026-08-19 night)
 Spec: docs/superpowers/specs/2026-08-19-v2.8-family-feedback-batch.md — every
