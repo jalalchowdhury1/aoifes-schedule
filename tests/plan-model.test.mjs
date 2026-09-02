@@ -375,15 +375,15 @@ test('targetStats: JJ 3 done at ~week 11 of 48 teaching weeks, target 20 -> behi
   assert.ok(st.behind >= 1);
 });
 
-test('targetStats: only a bare session marker counts — a timed attendance row or a curriculum row is a different reader\'s (red-team L5)', () => {
+test('targetStats: bare markers AND timed attendance rows count (a target activity is logged on its slot); a curriculum row is a different reader\'s', () => {
   const jj = { id: 'jj', type: 'target', status: 'active', target: 20 };
   const plan = { year: { start: '2026-09-01', end: '2027-08-31' }, periods: [], parentCycle: CYC };
   const log = [
     { date: '2026-09-05', activityId: 'jj', status: 'done' },                       // bare marker: counts
-    { date: '2026-09-12', activityId: 'jj', status: 'done', timed: true },          // attendance: excluded
+    { date: '2026-09-12', activityId: 'jj', status: 'done', timed: true },          // attendance on the slot: counts
     { date: '2026-09-19', activityId: 'jj', status: 'done', curriculum: 'x', session: 0 }, // lesson-shaped: excluded
   ];
-  assert.equal(targetStats(jj, plan, log, '2026-11-10').done, 1);
+  assert.equal(targetStats(jj, plan, log, '2026-11-10').done, 2);
 });
 
 test('targetStats: a teaching week needs >=4 plain school days', () => {
@@ -1134,4 +1134,20 @@ test('gridSlots: a skip for a DIFFERENT activity, or a non-skip action, never gr
   const wrongAction = { action: 'add', activityId: 'geography', date: wedDate };
   assert.equal(gridSlots([geo()], [wrongAct], mon)[0].skipped, null);
   assert.equal(gridSlots([geo()], [wrongAction], mon)[0].skipped, null);
+});
+
+// A `target` activity (Jiu Jitsu) is logged ONLY through its on-grid slot, so
+// its done rows are `timed` attendance rows — targetStats must count them.
+// (A red-team-suggested `!e.timed` guard would have zeroed the live trial
+// counter; only `!e.curriculum` is defensive here, since a target activity
+// never has lesson rows.)
+test('targetStats: timed attendance rows on the slot ARE the target activity\'s sessions', () => {
+  const jj = { id: 'jj', type: 'target', status: 'active', onGrid: true, target: 10, slots: [{ day: 0, start: 16, end: 17 }], chain: [] };
+  const p = sanitizePlan({ year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true }, periods: [], overrides: [],
+    activities: [jj],
+    log: [{ date: '2026-08-17', status: 'done', timed: true, activityId: 'jj' },
+          { date: '2026-08-24', status: 'done', timed: true, activityId: 'jj' },
+          { date: '2026-08-31', status: 'missed', timed: true, activityId: 'jj' }] });
+  assert.equal(targetStats(jj, p, p.log, '2026-09-01').done, 2);
 });

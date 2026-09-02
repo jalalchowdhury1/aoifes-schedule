@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build c68440444c */
+ * build d1ff7f326c */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -820,13 +820,13 @@ function targetStats(act, plan, log, dateStr) {
     }
     w = addDays(w, 7);
   }
-  // `!e.curriculum && !e.timed`: the target tally is a plain session count, not
-  // an attendance marker or a paced chain's lesson row — those belong to a
-  // different reader (red-team L5, same "two rows, two meanings" invariant as
-  // historyRows/yesterdayHtml). Currently a no-op in production: jj (the only
-  // `target` activity) is `status:'planned'`/off-grid, so it never yet writes
-  // a `timed` row; this only guards the day it goes active+onGrid.
-  const done = log.filter(e => e.activityId === act.id && e.status === 'done' && !e.curriculum && !e.timed).length;
+  // `!e.curriculum`: the target tally counts sessions — bare markers AND the
+  // `timed` attendance rows written on the activity's own grid slot, which is
+  // the ONLY way a target activity (Jiu Jitsu) ever gets logged. A curriculum
+  // row belongs to a paced chain's reader, never to a target tally (a
+  // red-team-suggested `!e.timed` guard here would have zeroed the live trial
+  // counter, 2026-09-02).
+  const done = log.filter(e => e.activityId === act.id && e.status === 'done' && !e.curriculum).length;
   const expected = total ? Math.floor((act.target || 0) * (elapsed / total)) : 0;
   return { done, target: act.target || 0, expected, behind: Math.max(0, expected - done) };
 }
