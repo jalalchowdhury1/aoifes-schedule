@@ -558,8 +558,12 @@ export function mergePlanWrites(current, incoming) {
     ? `id:${o.id}`
     : `fp:${o?.date}|${o?.action}|${o?.start}|${o?.end}|${o?.name}`);
   // One STATUS per thing per day is the log's own invariant (logTimed replaces
-  // in place), so (date, owner) is a marker's or a timed row's identity.
-  const logKey = e => `${e?.date}|${e?.eventId || e?.activityId || ''}`;
+  // in place), so (date, owner) is a marker's or a timed row's identity. A
+  // timed (attendance) row gets its own `|t` tier — red-team M1: a ✓ on a
+  // paced on-grid class also writes a LESSON row for the SAME (date, owner),
+  // and without the tag both rows shared one key, so a blob holding only one
+  // half suppressed the other writer's half of the pair.
+  const logKey = e => `${e?.date}|${e?.eventId || e?.activityId || ''}${e?.timed ? '|t' : ''}`;
   // A SESSION row is different: a tb-wb lesson is two rows on one date
   // (textbook + workbook) and a double-lesson day is four, so which session it
   // is has to be part of its identity. Keyed on (date, owner) alone, every row

@@ -254,20 +254,28 @@ export function logTimed(eventId, activityId, status, date = todayStr()) {
   if (!eventId && activityId) {
     const act = getActivity(activityId);
     if (act && act.type === 'paced' && (act.chain || []).length) {
+      // A lesson row for THIS day, from ANY writer (logSession, togglePaced, the
+      // API, the bot) — provenance doesn't matter here, only whether the class
+      // is already counted (red-team H1: a second ✓ must never double-log it).
+      const isLesson = e => e && e.date === date && e.activityId === activityId &&
+        !e.timed && !e.eventId && e.curriculum && typeof e.session === 'number';
       if (nowDone && !wasDone) {
-        const cur = currentCur(act);
-        const s = cur ? nextIndex(cur) : null;
-        if (cur && s != null) {
-          plan.data.log.push({ date, activityId, status: 'done', curriculum: cur.id, session: s });
-          markSessionDone(cur, s);
+        if (!plan.data.log.some(isLesson)) {
+          const cur = currentCur(act);
+          const s = cur ? nextIndex(cur) : null;
+          if (cur && s != null) {
+            plan.data.log.push({ date, activityId, status: 'done', curriculum: cur.id, session: s, viaTimed: true });
+            markSessionDone(cur, s);
+          }
         }
       } else if (wasDone && !nowDone) {
-        // Only rows dated `date` — an earlier day's lesson belongs to that day
-        // (the Subjects sheet's "Oops" is where history gets taken back).
+        // Only rows THIS tick wrote (`viaTimed`) — a lesson logged some other
+        // way (Subjects sheet, bot log_progress) is never touched by an untick,
+        // and only rows dated `date` — an earlier day's lesson belongs to that
+        // day (the Subjects sheet's "Oops" is where history gets taken back).
         for (let k = plan.data.log.length - 1; k >= 0; k--) {
           const e = plan.data.log[k];
-          if (!e || e.date !== date || e.activityId !== activityId || e.status !== 'done') continue;
-          if (e.timed || e.eventId || !e.curriculum || typeof e.session !== 'number') continue;
+          if (!e || !e.viaTimed || !isLesson(e)) continue;
           const cur = (act.chain || []).find(c => c && c.id === e.curriculum);
           if (cur) unmarkSession(cur, e.session);
           plan.data.log.splice(k, 1);

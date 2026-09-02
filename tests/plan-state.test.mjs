@@ -12,7 +12,7 @@ globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 globalThis.fetch = () => Promise.resolve({ json: async () => ({}) });
 globalThis.document = { dispatchEvent: () => {} };
 const S = await import('../js/plan/state.js');
-const { plan, initPlan, togglePaced, logTimed, logDailyStatus, addPeriod, updatePeriod, deletePeriod,
+const { plan, initPlan, togglePaced, logTimed, logSession, logDailyStatus, addPeriod, updatePeriod, deletePeriod,
         setSlot, onPlanChange } = S;
 
 const curOf = (p, actId, curId) =>
@@ -514,9 +514,46 @@ test('logTimed: ✓ on a paced on-grid class writes attendance AND its next less
   logTimed(null, 'geography', 'done', D);
   assert.deepEqual(geoRows(), [
     { date: D, status: 'done', timed: true, activityId: 'geography' },
-    { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+    { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0, viaTimed: true },
   ]);
   assert.equal(geo.chain[0].done, 1);
+});
+
+// ── logTimed: viaTimed provenance closes the ✓ loop (red-team H1) ──────────
+test('logTimed: ✓ when a lesson row for that day already exists writes attendance only, no double-count', () => {
+  const geo = armGeography();
+  logSession('geography', D);                              // e.g. logged via the Subjects sheet first
+  assert.equal(geo.chain[0].done, 1);
+  logTimed(null, 'geography', 'done', D);
+  assert.deepEqual(geoRows(), [
+    { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+    { date: D, status: 'done', timed: true, activityId: 'geography' },
+  ]);
+  assert.equal(geo.chain[0].done, 1);                       // unchanged: no second lesson appended
+});
+
+test('logTimed: untick after a second, foreign lesson row removes only the viaTimed row', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'done', D);                   // writes attendance + viaTimed lesson (session 0)
+  logSession('geography', D);                                // a second, foreign lesson the same day (session 1)
+  assert.equal(geo.chain[0].done, 2);
+  logTimed(null, 'geography', 'done', D);                   // untick
+  assert.deepEqual(geoRows(), [
+    { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 1 },
+  ]);
+  assert.equal(geo.chain[0].done, 1);                        // only the viaTimed session rolled back
+});
+
+test('logTimed: untick when the only lesson row that day is not viaTimed touches nothing', () => {
+  const geo = armGeography();
+  logSession('geography', D);                                // seed a foreign lesson row first
+  logTimed(null, 'geography', 'done', D);                    // per the guard above: attendance only, no new lesson
+  assert.equal(geo.chain[0].done, 1);
+  logTimed(null, 'geography', 'done', D);                    // untick the attendance row
+  assert.deepEqual(geoRows(), [
+    { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+  ]);
+  assert.equal(geo.chain[0].done, 1);                        // the non-viaTimed lesson is never touched
 });
 
 test('logTimed: tapping ✓ again (toggle off) removes the lesson and restores done', () => {

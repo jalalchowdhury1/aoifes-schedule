@@ -282,3 +282,34 @@ test('merge replays a carried-over OUT-OF-ORDER session row through markSessionD
   assert.deepEqual(out.activities[0].chain[0].done, 13);
   assert.deepEqual(out.activities[0].chain[0].skipped, [12]);
 });
+
+// ── attendance rows get their own merge tier (red-team M1) ─────────────────
+// A ✓-on-timed row (`{timed:true, activityId}`) and its lesson row
+// (`{activityId, curriculum, session}`) share `date|activityId` under the OLD
+// logKey, so a blob holding only one half suppressed the other writer's half.
+test('an incoming blob holding only the LESSON half never suppresses the attendance row', () => {
+  const geo = () => ({ id: 'geography', type: 'paced',
+    chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1 }] });
+  const attendance = { date: D, status: 'done', timed: true, activityId: 'geography', src: 'tg' };
+  const lesson = { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0, viaTimed: true };
+  const current = base({ activities: [geo()], log: [attendance, lesson] });
+  const incoming = base({ activities: [geo()], log: [lesson], savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.deepEqual(out.log, [lesson, attendance], 'the attendance row is carried, not dropped');
+});
+
+test('an incoming blob holding only the ATTENDANCE half still carries the lesson row and bumps done once', () => {
+  const geo = (done) => ({ id: 'geography', type: 'paced',
+    chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done }] });
+  const attendance = { date: D, status: 'done', timed: true, activityId: 'geography', src: 'tg' };
+  const lesson = { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0, viaTimed: true };
+  const current = base({ activities: [geo(1)], log: [attendance, lesson] });
+  const incoming = base({ activities: [geo(0)], log: [attendance], savedAt: '2026-08-18T10:05:00.000Z' });
+
+  const out = mergePlanWrites(current, incoming);
+
+  assert.deepEqual(out.log, [attendance, lesson], 'the lesson row is carried');
+  assert.equal(out.activities[0].chain[0].done, 1, 'the carried lesson replays its bump exactly once');
+});
