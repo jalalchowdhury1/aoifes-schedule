@@ -233,10 +233,45 @@ export function logTimed(eventId, activityId, status, date = todayStr()) {
   const match = e => e.date === date &&
     (eventId ? e.eventId === eventId : e.activityId === activityId && e.timed);
   const i = plan.data.log.findIndex(match);
+  // Read both transitions BEFORE mutating: a toggle-off splices the row out
+  // from under `i`, so nothing below may look at log[i] afterwards.
+  const wasDone = i >= 0 && plan.data.log[i].status === 'done';
+  const nowDone = status === 'done' && !(i >= 0 && plan.data.log[i].status === status);
   if (i >= 0 && plan.data.log[i].status === status) plan.data.log.splice(i, 1);
   else if (i >= 0) plan.data.log[i].status = status;
   else plan.data.log.push({ date, status, timed: true,
     ...(eventId ? { eventId } : {}), ...(activityId ? { activityId } : {}) });
+  // A ✓ on a paced on-grid class IS its next lesson (2026-09-01): the class
+  // runs the curriculum in order and the parents are not in the room, so
+  // attendance is the only signal there is. Two rows, two meanings — the timed
+  // row above is attendance, the curriculum row below is the lesson — which is
+  // exactly the "one log row = one session" invariant every reader already
+  // separates on (`e.timed` vs `e.curriculum`). Template events (eventId) and
+  // one-offs carry no chain; a `target` activity has none either.
+  if (!eventId && activityId) {
+    const act = getActivity(activityId);
+    if (act && act.type === 'paced' && (act.chain || []).length) {
+      if (nowDone && !wasDone) {
+        const cur = currentCur(act);
+        const s = cur ? nextIndex(cur) : null;
+        if (cur && s != null) {
+          plan.data.log.push({ date, activityId, status: 'done', curriculum: cur.id, session: s });
+          markSessionDone(cur, s);
+        }
+      } else if (wasDone && !nowDone) {
+        // Only rows dated `date` — an earlier day's lesson belongs to that day
+        // (the Subjects sheet's "Oops" is where history gets taken back).
+        for (let k = plan.data.log.length - 1; k >= 0; k--) {
+          const e = plan.data.log[k];
+          if (!e || e.date !== date || e.activityId !== activityId || e.status !== 'done') continue;
+          if (e.timed || e.eventId || !e.curriculum || typeof e.session !== 'number') continue;
+          const cur = (act.chain || []).find(c => c && c.id === e.curriculum);
+          if (cur) unmarkSession(cur, e.session);
+          plan.data.log.splice(k, 1);
+        }
+      }
+    }
+  }
   commit();
 }
 

@@ -496,3 +496,80 @@ test('setSlot: unknown activity / index → false, no commit; non-numeric values
   assert.deepEqual(snap(plan.data), before);
   assert.equal(fired, 1);                                   // the third call still commits (a no-op patch is not an error)
 });
+
+// ── logTimed on a paced on-grid class: attendance ⇒ next lesson (2026-09-01) ──
+function armGeography() {
+  initPlan();
+  const geo = plan.data.activities.find(a => a.id === 'geography');
+  geo.status = 'active'; geo.onGrid = true; geo.type = 'paced';
+  geo.slots = [{ day: 1, start: 11, end: 12 }];
+  geo.chain = [{ id: 'geo-1', name: 'Year 1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 0,
+                 unitWord: 'Week', titles: { '1': 'Introduction to Geography' } }];
+  return geo;
+}
+const geoRows = () => plan.data.log.filter(e => e.date === D && e.activityId === 'geography');
+
+test('logTimed: ✓ on a paced on-grid class writes attendance AND its next lesson', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'done', D);
+  assert.deepEqual(geoRows(), [
+    { date: D, status: 'done', timed: true, activityId: 'geography' },
+    { date: D, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+  ]);
+  assert.equal(geo.chain[0].done, 1);
+});
+
+test('logTimed: tapping ✓ again (toggle off) removes the lesson and restores done', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'done', D);
+  logTimed(null, 'geography', 'done', D);
+  assert.deepEqual(geoRows(), []);
+  assert.equal(geo.chain[0].done, 0);
+});
+
+test('logTimed: done → missed rolls the lesson back; missed → done advances again', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'done', D);
+  logTimed(null, 'geography', 'missed', D);
+  assert.deepEqual(geoRows(), [{ date: D, status: 'missed', timed: true, activityId: 'geography' }]);
+  assert.equal(geo.chain[0].done, 0);
+  logTimed(null, 'geography', 'done', D);
+  assert.equal(geo.chain[0].done, 1);
+  assert.equal(geoRows().length, 2);
+});
+
+test('logTimed: partial never advances; an exhausted chain writes attendance only', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'partial', D);
+  assert.equal(geo.chain[0].done, 0);
+  assert.equal(geoRows().length, 1);
+  initPlan();
+  const g2 = armGeography();
+  g2.chain[0].done = 30;                                   // every session done
+  logTimed(null, 'geography', 'done', D);
+  assert.deepEqual(geoRows(), [{ date: D, status: 'done', timed: true, activityId: 'geography' }]);
+  assert.equal(g2.chain[0].done, 30);
+});
+
+test('logTimed: untick only takes back THAT day\'s lesson, never an earlier day\'s', () => {
+  const geo = armGeography();
+  logTimed(null, 'geography', 'done', '2026-08-25');       // last week's class
+  logTimed(null, 'geography', 'done', D);
+  assert.equal(geo.chain[0].done, 2);
+  logTimed(null, 'geography', 'done', D);                  // untick today
+  assert.equal(geo.chain[0].done, 1);
+  assert.equal(plan.data.log.filter(e => e.activityId === 'geography' && e.curriculum).length, 1);
+  assert.equal(plan.data.log.find(e => e.activityId === 'geography' && e.curriculum).date, '2026-08-25');
+});
+
+test('logTimed: a template event and a target activity are untouched by the lesson rule', () => {
+  armGeography();
+  const jj = plan.data.activities.find(a => a.id === 'jj');
+  jj.status = 'active'; jj.onGrid = true; jj.slots = [{ day: 0, start: 16, end: 17 }];
+  logTimed('e1003', null, 'done', D);
+  logTimed(null, 'jj', 'done', D);
+  assert.deepEqual(plan.data.log.filter(e => e.date === D), [
+    { date: D, status: 'done', timed: true, eventId: 'e1003' },
+    { date: D, status: 'done', timed: true, activityId: 'jj' },
+  ]);
+});

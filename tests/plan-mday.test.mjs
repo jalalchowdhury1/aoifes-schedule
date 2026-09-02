@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { sanitizePlan } from '../js/plan/model.js';
+import { sanitizePlan, mondayOf } from '../js/plan/model.js';
 import {
   dayItems, dayHeader, nowBlock, subjectCards, widgetModel, widgetNext, fmtHM,
   dailyStatus, dailyVisible, buildTimed, statusOfTimed, emojiFor, colorFor,
@@ -801,4 +801,22 @@ test('weekGlance: changes = dated one-offs, skips and away runs, clipped to the 
 test('fmtClock / statusMark', () => {
   assert.deepEqual([fmtClock(10), fmtClock(12), fmtClock(15.5), fmtClock(0)], ['10am', '12pm', '3:30pm', '12am']);
   assert.deepEqual(['done', 'half', 'partial', 'missed'].map(statusMark), ['✓', '◐', '◐', '✗']);
+});
+
+test('subjectCards: sessionsThisWeek counts lesson rows, not the attendance row of the same class', () => {
+  const mon = mondayOf('2026-09-01');
+  const p = sanitizePlan({
+    year: { label: 'y', start: '2026-08-17', end: '2027-08-31' },
+    parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
+    periods: [], overrides: [],
+    activities: [{ id: 'geography', name: 'Geography', type: 'paced', status: 'active', cls: 'g', onGrid: true,
+      slots: [{ day: 0, start: 11, end: 12 }], rhythm: { kind: 'weekly', perWeek: 1 }, travel: { mode: 'pause' },
+      chain: [{ id: 'geo-1', pattern: 'simple', firstUnit: 1, lastUnit: 30, done: 1, unitWord: 'Week', titles: {} }] }],
+    log: [
+      { date: mon, status: 'done', timed: true, activityId: 'geography' },
+      { date: mon, activityId: 'geography', status: 'done', curriculum: 'geo-1', session: 0 },
+    ],
+  });
+  const card = subjectCards(p, '2026-09-01').find(c => c.id === 'geography');
+  assert.equal(card.sessionsThisWeek, 1);
 });

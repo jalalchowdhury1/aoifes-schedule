@@ -430,8 +430,11 @@ export function subjectCards(plan, dateStr) {
       }
     }
     const weekStart = mondayOf(dateStr), weekEnd = addDays(weekStart, 6);
+    // Lesson rows only: an on-grid class also carries a `timed` attendance row
+    // for the same date (logTimed, 2026-09-01), and that is not a second session.
     const sessionsThisWeek = (Array.isArray(plan?.log) ? plan.log : []).filter(e =>
-      e && e.activityId === a.id && e.status === 'done' && e.date >= weekStart && e.date <= weekEnd).length;
+      e && e.activityId === a.id && e.status === 'done' && !e.timed && !e.eventId &&
+      e.date >= weekStart && e.date <= weekEnd).length;
     return {
       id: a.id, name: a.name || a.id, color: colorFor(a.id), status: a.status,
       lessonsDone: lt.done, lessonsTotal: lt.total, pct, finish, delta,
