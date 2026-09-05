@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build 004b21adad */
+ * build fcade38ff5 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -390,7 +390,8 @@ function timelineRows(act) {
   return rows;
 }
 
-// Per-row projected finish dates from the SAME week-walk as projectFinish.
+// Per-row projected finish dates from the SAME day-walk as projectFinish
+// (capacityDays; day-precise since 2026-09-05).
 // INVARIANT (precise): the last unfinished row WITH SESSIONS DEFINED
 // (sessions > 0) lands on exactly projectFinish's date (unit-pinned) — the
 // breakdown can never contradict the card's headline. 0-session placeholder
@@ -398,8 +399,9 @@ function timelineRows(act) {
 // are EXCLUDED from that contract, so a consumer must scan with
 // `reverse().find(r => !r.complete && r.sessions > 0)`, never a bare
 // `!r.complete` — the bare form can land on a trailing placeholder instead
-// of the real last row. A row's finish (when set) is the Sunday of the week
-// its cumulative remaining sessions are covered.
+// of the real last row. A row's finish (when set) is the exact DAY its
+// cumulative remaining sessions are covered (before 2026-09-05 it was the
+// Sunday of that week).
 function chainTimeline(act, fromDate, plan, horizon = 300) {
   const rows = timelineRows(act).map(r =>
     ({ ...r, complete: r.sessions > 0 && r.done >= r.sessions, finish: null }));
@@ -407,19 +409,22 @@ function chainTimeline(act, fromDate, plan, horizon = 300) {
   let cum = 0;
   for (const r of rows) { cum += Math.max(0, r.sessions - r.done); targets.push(cum); }
   if (!cum) return rows;              // nothing left anywhere
-  let acc = 0, w = mondayOf(fromDate), i = 0;
-  for (let wk = 0; wk < horizon && i < rows.length; wk++) {
-    acc += weekCapacity(act, w, plan.periods, plan.parentCycle, plan.overrides);
+  // The SAME day walk as projectFinish (capacityDays), so the invariant above
+  // holds by construction: a row's finish is the exact day its cumulative
+  // remaining sessions are covered.
+  let acc = 0, i = 0;
+  for (const [d, cap] of capacityDays(act, fromDate, plan, horizon * 7)) {
+    if (i >= rows.length) break;
+    acc += cap;
     // A zero-session row (a chapter waiting for its counts, a first-class
     // state in this app) contributes nothing to `targets`, so it shares its
     // target with whichever row precedes it and would otherwise be popped
     // and stamped with THAT row's date. Pass it through untouched instead —
     // finish stays null, the UI shows "—".
-    while (i < rows.length && (rows[i].complete || rows[i].sessions === 0 || acc >= targets[i])) {
-      if (!rows[i].complete && rows[i].sessions > 0) rows[i].finish = addDays(w, 6);
+    while (i < rows.length && (rows[i].complete || rows[i].sessions === 0 || acc >= targets[i] - EPS)) {
+      if (!rows[i].complete && rows[i].sessions > 0) rows[i].finish = d;
       i++;
     }
-    w = addDays(w, 7);
   }
   return rows;
 }
@@ -458,11 +463,13 @@ function actualFinishes(act, log) {
 // either date is missing (no baseline set yet, or an unprojectable row).
 // ── Pace vs plan: the HONEST ahead/behind ───────────────────
 // "Is she keeping up?" must NOT be answered by differencing two projected
-// finish dates. `projectFinish`/`chainTimeline` walk in WHOLE WEEKS anchored
-// on `mondayOf(fromDate)` and return the SUNDAY of the finishing week, so a
-// projection carries up to 7 days of pure quantisation, and a baseline frozen
-// on one weekday compared against a walk run on another moves in 7-day steps
-// for no reason at all.
+// finish dates. Until 2026-09-05 `projectFinish`/`chainTimeline` walked in
+// WHOLE WEEKS anchored on `mondayOf(fromDate)` and returned the SUNDAY of the
+// finishing week, so a projection carried up to 7 days of pure quantisation,
+// and a baseline frozen on one weekday compared against a walk run on another
+// moved in 7-day steps for no reason at all. The walk is day-precise now
+// (capacityDays), but the rule stands: pace is measured in sessions, below —
+// a date difference still mixes in travel placement and a frozen plan's age.
 //
 // That is not theoretical. Live on 2026-08-31: Singapore's baseline was frozen
 // Fri 2026-08-28 (anchor Monday Aug 24, 251 sessions, 17.93 weeks charged as
@@ -481,30 +488,62 @@ function actualFinishes(act, log) {
 // INCLUSIVE, charged a day at a time (weekCapacity already prices away-days
 // and the parent cycle, so a day is worth its week's capacity / 7). Bounded by
 // WALK_CAP weeks like every other walk in this file.
+// What ONE calendar day is worth to this activity, in sessions — the single
+// per-day price shared by the pace-gap (expectedSessions) and, since
+// 2026-09-05, by the finish-date walk (projectFinish / chainTimeline), so the
+// two can never disagree about what the plan expects of a given day.
+// A DAILY rhythm is pinned to actual days, so an away day — and a skip
+// override (A2, 2026-09-02) — is priced on the day itself. A weekly/cycle
+// rhythm is not tied to any particular weekday, so its week's capacity (skip
+// already folded in by weekCapacity) is spread evenly across that week.
+function dayCapacity(act, d, plan) {
+  const r = act?.rhythm || {};
+  const overrides = plan?.overrides;
+  if (r.kind === 'daily') {
+    const perDay = Number(r.sessionsPerDay);
+    const mult = Number.isFinite(perDay) && perDay > 0 ? perDay : 1;
+    const skipped = Array.isArray(overrides) && overrides.some(o =>
+      o && o.action === 'skip' && o.activityId === act.id && o.date === d);
+    return skipped ? 0 : mult * dayWeight(act, d, plan?.periods);
+  }
+  return weekCapacity(act, mondayOf(d), plan?.periods, plan?.parentCycle, overrides) / 7;
+}
+
 function expectedSessions(act, fromDate, toDate, plan) {
   if (!isISO(fromDate) || !isISO(toDate) || fromDate > toDate) return 0;
-  const r = act?.rhythm || {};
-  const perDay = Number(r.sessionsPerDay);
-  const mult = Number.isFinite(perDay) && perDay > 0 ? perDay : 1;
-  const overrides = plan?.overrides;
   let n = 0, d = fromDate;
   for (let i = 0; i < WALK_CAP * 7 && d <= toDate; i++) {
-    // A DAILY rhythm is pinned to actual days, so an away day — and now a
-    // skip override (A2, 2026-09-02) — is priced on the day itself. A
-    // weekly/cycle rhythm is not tied to any particular weekday, so its
-    // week's capacity (skip already folded in by weekCapacity) is spread
-    // evenly across that week instead.
-    if (r.kind === 'daily') {
-      const skipped = Array.isArray(overrides) && overrides.some(o =>
-        o && o.action === 'skip' && o.activityId === act.id && o.date === d);
-      n += skipped ? 0 : mult * dayWeight(act, d, plan?.periods);
-    } else {
-      n += weekCapacity(act, mondayOf(d), plan?.periods, plan?.parentCycle, overrides) / 7;
-    }
+    n += dayCapacity(act, d, plan);
     d = addDays(d, 1);
   }
   return n;
 }
+
+// Curriculum-bearing sessions already logged on ONE day — paceGap's own
+// predicate, for a single date.
+const loggedOn = (act, plan, d) => (Array.isArray(plan?.log) ? plan.log : []).filter(e =>
+  e && e.activityId === act?.id && e.status === 'done' && !e.timed && !e.eventId &&
+  e.curriculum && e.date === d).length;
+
+// The day walk behind projectFinish and chainTimeline (2026-09-05, "make it
+// day precise"). Yields [date, capacity] from `fromDate` INCLUSIVE — remaining
+// work can start today — with day 0 reduced by what was already logged that
+// day: those sessions have left `remaining` already, so counting today's full
+// capacity on top would finish a day early, and the date would then slide
+// back overnight for no reason. Before this, the walk went week by week from
+// mondayOf(fromDate) and reported the finishing week's SUNDAY: every date
+// moved in 7-day steps, a Saturday start was credited the whole week behind
+// it, and a one-lesson change could not move the date at all.
+function* capacityDays(act, fromDate, plan, maxDays) {
+  let d = fromDate;
+  for (let i = 0; i < maxDays; i++) {
+    let cap = dayCapacity(act, d, plan);
+    if (i === 0) cap = Math.max(0, cap - loggedOn(act, plan, d));
+    yield [d, cap];
+    d = addDays(d, 1);
+  }
+}
+const EPS = 1e-9;   // a weekly 1/7 summed seven times is 0.9999999999999998
 
 // How far ahead of (+) or behind (-) its own frozen plan an activity really
 // is, in SESSIONS, plus the two numbers it came from so a view can show its
@@ -791,11 +830,12 @@ function projectFinish(act, fromDate, plan, horizon = 300) {
   const remaining = actRemaining(act);
   if (actTotal(act) === 0) return null;              // unknown counts (waiting for books)
   if (remaining === 0) return { date: fromDate, weeks: 0, done: true };
-  let acc = 0, w = mondayOf(fromDate);
-  for (let i = 0; i < horizon; i++) {
-    acc += weekCapacity(act, w, plan.periods, plan.parentCycle, plan.overrides);
-    if (acc >= remaining) return { date: addDays(w, 6), weeks: i + 1 };
-    w = addDays(w, 7);
+  // Day-precise since 2026-09-05 (see capacityDays). `horizon` is still in
+  // weeks for callers; `weeks` is kept (ceil of days) for anything reading it.
+  let acc = 0, days = 0;
+  for (const [d, cap] of capacityDays(act, fromDate, plan, horizon * 7)) {
+    acc += cap; days++;
+    if (acc >= remaining - EPS) return { date: d, days, weeks: Math.ceil(days / 7) };
   }
   return null;
 }
@@ -1511,8 +1551,8 @@ function subjectCards(plan, dateStr) {
     return {
       id: a.id, name: a.name || a.id, color: colorFor(a.id), status: a.status,
       lessonsDone: lt.done, lessonsTotal: lt.total, pct, finish, delta,
-      // `delta` is week-level and derived from two projected DATES, which the
-      // walk quantises to whole weeks — fine as a coarse chip, useless as a
+      // `delta` is derived from two projected DATES (exact days since
+      // 2026-09-05, Sundays before) — fine as a coarse chip, useless as a
       // precise claim. `pace` is the honest one: sessions logged against
       // sessions this subject's own plan expected (paceGap in model.js).
       pace: paceGapLessons(a, plan, dateStr),

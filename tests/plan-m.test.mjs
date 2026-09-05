@@ -219,9 +219,12 @@ test('paceSentence: says AHEAD and shows its working on the live numbers', () =>
 test('paceSentence: explains the dates ONLY when they point the other way', () => {
   const g = paceGapLessons(SM_ACT, SM_PLAN, '2026-08-31');
   // Ahead, yet the projected finish is later than the plan: the 7-day step.
-  assert.match(paceSentence(g, '2027-01-03', '2026-12-27'), /jump 7 days at a time/);
+  // 2026-09-05: dates are exact days now, so the explanation names the real
+  // causes (a trip in between / a plan frozen before a trip) instead of 7-day steps.
+  assert.match(paceSentence(g, '2027-01-03', '2026-12-27'), /exact days/);
+  assert.doesNotMatch(paceSentence(g, '2027-01-03', '2026-12-27'), /jump 7 days/);
   // Ahead and the dates agree: no explanation needed.
-  assert.equal(/jump 7 days/.test(paceSentence(g, '2026-12-20', '2026-12-27')), false);
+  assert.equal(/exact days/.test(paceSentence(g, '2026-12-20', '2026-12-27')), false);
 });
 
 test('paceCaption: the Now tile says the same thing, shorter', () => {

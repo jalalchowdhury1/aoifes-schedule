@@ -514,8 +514,8 @@ export function subjectCards(plan, dateStr) {
     return {
       id: a.id, name: a.name || a.id, color: colorFor(a.id), status: a.status,
       lessonsDone: lt.done, lessonsTotal: lt.total, pct, finish, delta,
-      // `delta` is week-level and derived from two projected DATES, which the
-      // walk quantises to whole weeks — fine as a coarse chip, useless as a
+      // `delta` is derived from two projected DATES (exact days since
+      // 2026-09-05, Sundays before) — fine as a coarse chip, useless as a
       // precise claim. `pace` is the honest one: sessions logged against
       // sessions this subject's own plan expected (paceGap in model.js).
       pace: paceGapLessons(a, plan, dateStr),

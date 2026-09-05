@@ -174,12 +174,15 @@ test('subjectCards: order is SUBJECT_ORDER (paced only) — Singapore, LoE, Geog
   assert.deepEqual(cards.map(c => c.id), ['singapore', 'loe', 'geography', 'history']);
 });
 
-test('subjectCards: Singapore as of 2026-08-30 — 5/123 lessons, 4%, finish Dec 27, on-plan delta, 3-day streak', () => {
+// finish: 241 sessions left at 2/day; Aug 30's own sessions are already logged
+// so day 0 adds nothing → 121 days from Aug 31 = Tue Dec 29 (the old week-walk
+// rounded this to Sun Dec 27).
+test('subjectCards: Singapore as of 2026-08-30 — 5/123 lessons, 4%, finish Dec 29, on-plan delta, 3-day streak', () => {
   const sm = subjectCards(plan, TODAY).find(c => c.id === 'singapore');
   assert.equal(sm.lessonsDone, 5);
   assert.equal(sm.lessonsTotal, 123);
   assert.equal(sm.pct, 4);
-  assert.equal(sm.finish, '2026-12-27');
+  assert.equal(sm.finish, '2026-12-29');
   assert.deepEqual(sm.delta, { state: 'on', weeks: 0 });
   assert.equal(sm.streak, 3);
   assert.equal(sm.isTbWb, true);

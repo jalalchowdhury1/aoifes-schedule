@@ -768,12 +768,15 @@ the parts worth keeping.
     takes today's halves ABOVE it with it, because a session only comes off
     the top of the chain.
 - **AHEAD/BEHIND IS PACE, NEVER A DIFFERENCE OF TWO PROJECTED DATES.**
-  `projectFinish`/`chainTimeline` walk in WHOLE WEEKS anchored on
-  `mondayOf(fromDate)` and return the SUNDAY of the finishing week, so any
-  projected date carries up to 7 days of pure quantisation AND the walk credits
-  the entire current week including days already gone. Differencing a live
-  projection against a baseline frozen on a different weekday therefore moves
-  in 7-day steps for no reason at all.
+  Until 2026-09-05 `projectFinish`/`chainTimeline` walked in WHOLE WEEKS
+  anchored on `mondayOf(fromDate)` and returned the SUNDAY of the finishing
+  week, so any projected date carried up to 7 days of pure quantisation AND the
+  walk credited the entire current week including days already gone.
+  Differencing a live projection against a baseline frozen on a different
+  weekday therefore moved in 7-day steps for no reason at all. **The walk is
+  DAY-PRECISE since 2026-09-05** (user: "make it day precise") — see the last
+  sub-bullet — but the rule stands: the ahead/behind number is still the pace
+  measure below, never a date difference.
   - **What it cost (2026-08-31).** Singapore's baseline was frozen Fri
     2026-08-28: anchor Monday Aug 24, 251 sessions, 17.93 weeks charged as 18
     → Dec 27. Three days later the walk ran on Mon 2026-08-31: anchor Monday
@@ -791,16 +794,46 @@ the parts worth keeping.
     weekday. All three /m surfaces (Today lesson card, This-week card, Subjects
     cards + sheet) render the SAME `paceChipHtml`, and the sheet's sentence
     shows its working ("12 sessions logged since Aug 28, where the plan's own
-    pace expected 8") plus a line explaining the 7-day date steps, but ONLY
-    when the dates point the other way.
+    pace expected 8") plus one explanatory line, but ONLY when the dates point
+    the other way (since 2026-09-05 it names the real causes — a trip between
+    now and the finish, or a plan frozen before a trip was added — not 7-day
+    steps, which no longer exist).
   - `planDeltaChip`/`planGapDays` still exist and are still correct (+ = ahead)
     — they are the coarse, ±7-day-tolerant week chip the Year rows use to
     compare a chapter's own plan and now. Do not use them for a precise claim.
-  - **Still open**: the walk itself should be day-precise and should not credit
-    the elapsed part of the current week. That is a `projectFinish`/
-    `chainTimeline` change, so it needs a matching change in
-    aoife-school-bot/lib/compose.py (whose parity tests pin exact dates) and a
-    re-freeze of every baseline. Not done.
+  - **DONE 2026-09-05 — the walk is day-precise.** `projectFinish` and
+    `chainTimeline` share one generator, `capacityDays(act, fromDate, plan,
+    maxDays)`, which prices every calendar day with **`dayCapacity(act, d,
+    plan)`** — the per-day price extracted from `expectedSessions`, so the
+    pace-gap and the finish date can never disagree about a day (daily: skip →
+    0 else sessionsPerDay × dayWeight; weekly/cycle: that week's weekCapacity
+    / 7, still smeared). The walk starts ON `fromDate` (remaining work can
+    start today) and **day 0 is reduced by `loggedOn(act, plan, fromDate)`** —
+    paceGap's curriculum-row predicate for one date — because those sessions
+    already left `remaining`, and counting today's full capacity on top would
+    finish a day early and then slide back overnight. A row's `finish` /
+    the projection's `date` is the exact day the cumulative remaining sessions
+    are covered (`acc >= target - 1e-9`; a weekly 1/7 summed seven times is
+    0.9999999999999998). `projectFinish` returns `{date, days, weeks}` with
+    `weeks = ceil(days/7)` kept for old readers; `horizon` stays in weeks
+    (walk cap = horizon × 7 days). Callers unchanged (they read `.date`).
+    Mirrored line-for-line in aoife-school-bot `compose.day_capacity` /
+    `logged_on` / `project_finish`; the bot's pinned dates were re-derived from
+    `node` on the same fixtures (Jan 24 → Jan 21, Feb 28 → Feb 23, Nov 8 →
+    Nov 3, Jan 17 → Jan 11, Nov 8 → Nov 5) and every move is ≤ 6 days earlier
+    than the old Sunday — the sanity check for any future re-pin, with two
+    legitimate exceptions that move a date LATER: (a) day-0 subtraction (a
+    fixture with sessions logged on fromDate — tests/plan-mday.test.mjs Dec 27
+    → Dec 29), and (b) a fromDate that is not a Monday: the old walk credited
+    the whole anchor week from the Monday BEFORE fromDate, so its early rows
+    were too early by up to 6 days (Singapore's Aug 28 freeze: Ch 1 Sep 6 →
+    Sep 7, Ch 11 Nov 29 → Dec 2 when re-expressed day-precise).
+    tests/plan-day-precise.test.mjs ↔ tests/test_day_precise.py share hand-
+    worked fixtures. **Baselines frozen before this date hold Sundays**; a
+    faithful re-express is `setBaseline` semantics on a copy with the done
+    state AS OF `setOn` (Singapore/Geography: done 0, pass a log-free plan copy
+    so day 0 is not reduced) — re-targeting with today's done is a different
+    act and is Jalal's call.
 - **The top bar names the visible tab.** `#top-title` is set from
   `state.tab`; only Today gets the date + "Mama: work" caption beside it. It
   used to be the literal word "Today" in the markup, so Week/Subjects/Year all

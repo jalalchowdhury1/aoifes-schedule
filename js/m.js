@@ -1041,13 +1041,15 @@ export function paceSentence(gap, nowDate, baseDate) {
     : n > 0
       ? `She's <b>${n} lesson${n === 1 ? '' : 's'} ahead</b> of the plan: ${evidence}.`
       : `She's <b>${-n} lesson${n === -1 ? '' : 's'} behind</b> the plan: ${evidence}.`;
-  // Only explain the dates when they actually point the other way, which
-  // happens because a finish date lands on the END of a week and therefore
-  // moves in 7-day steps. Silence the rest of the time.
+  // Only explain the dates when they actually point the other way. Since
+  // 2026-09-05 the dates are exact days (no more 7-day steps), so this is now
+  // rare — it happens when a trip or off week sits between now and the finish
+  // and prices the remaining days differently for the two walks, or when a
+  // frozen plan predates a trip. Silence the rest of the time.
   const datesLater = nowDate && baseDate && nowDate > baseDate;
   const datesEarlier = nowDate && baseDate && nowDate < baseDate;
   if ((n >= 0 && datesLater) || (n < 0 && datesEarlier))
-    out += ` The finish dates above land on the end of a week, so they jump 7 days at a time and can point the other way.`;
+    out += ` The finish dates above are exact days; a trip between now and then, or a plan frozen before a trip was added, can still make them point the other way.`;
   return out;
 }
 
