@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build fcade38ff5 */
+ * build c61f8d99ee */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -100,8 +100,14 @@ const weeksBetween = (a, b) =>
 const daysBetween = (a, b) => Math.round((s2d(b) - s2d(a)) / 86400000);
 
 // Monday parity of the 2-week parent cycle (which weeks are "work weeks").
-const isOnWeek = (cycle, dateStr) =>
-  ((weeksBetween(cycle.anchorMonday, dateStr) % 2) + 2) % 2 === 0;
+// A plan straight from the API may lack `parentCycle` (sanitizePlan supplies
+// this same default; the bot's is_on_week guards identically) — never throw.
+const DEFAULT_ANCHOR_MONDAY = '2026-08-17';
+const isOnWeek = (cycle, dateStr) => {
+  const a = cycle?.anchorMonday;
+  const anchor = typeof a === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a) ? a : DEFAULT_ANCHOR_MONDAY;
+  return ((weeksBetween(anchor, dateStr) % 2) + 2) % 2 === 0;
+};
 
 // Day-precise duty: a Charlton work stretch runs Tue → Mon (7 days on, 7 off)
 // from `dutyStart`. Dates before dutyStart must keep the same parity, hence the
@@ -178,7 +184,13 @@ function dayWeight(act, dateStr, periods) {
   if (f != null) return f;
   const t = act?.travel || { mode: 'pause' };
   if (t.mode === 'continue') return 1;
-  if (t.mode === 'reduced') return (t.factor ?? 0.5);
+  if (t.mode === 'reduced') {
+    // Same validity rule as a period factor: a finite number in (0, 1], else
+    // the default ½ — never negative, so a script-written typo cannot make
+    // the walk run backwards (red-team M1, 2026-09-05).
+    const f = t.factor;
+    return typeof f === 'number' && Number.isFinite(f) && f > 0 && f <= 1 ? f : 0.5;
+  }
   return 0;                                                   // pause
 }
 
@@ -592,13 +604,20 @@ function paceGapLessons(act, plan, today) {
 const planGapDays = (finishDate, baselineDate) =>
   (finishDate && baselineDate) ? daysBetween(finishDate, baselineDate) : null;
 
-function planDeltaChip(finishDate, baselineDate) {
+// `toleranceDays` (default 7): a weekly/cycle rhythm prices each day at a 1/7
+// smear, so two day-precise walks anchored on different weekdays can drift a
+// whole week band-to-band while the pace is steady — callers pass 14 for
+// those rhythms' per-row chips (red-team 2026-09-05). Daily rhythms keep 7.
+function planDeltaChip(finishDate, baselineDate, toleranceDays = 7) {
   if (!finishDate || !baselineDate) return null;
   const dd = planGapDays(finishDate, baselineDate);        // + = ahead of plan
   const weeks = Math.round(Math.abs(dd) / 7);
-  if (Math.abs(dd) <= 7) return { state: 'on', weeks: 0 };
+  if (Math.abs(dd) <= toleranceDays) return { state: 'on', weeks: 0 };
   return { state: dd > 0 ? 'ahead' : 'behind', weeks };
 }
+// "1 wk" / "2 wks" — the one pluraliser every chip should use (year.js had a
+// private copy; subjects.js hard-coded "wks").
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // ── Sanitize (mirror of sanitizeEvents philosophy) ──────────
 // Every date that a week-walk loop compares against MUST be a real ISO date,

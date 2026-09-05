@@ -107,6 +107,17 @@ via MutationObserver.
   trips — `travelCaption(act, periods)` in js/m.js (exported, tested in
   tests/plan-m.test.mjs): "half speed on trips · DC trip: 67%"; a reduced
   factor other than ½ is spelled as a percentage.
+- **Hardening after the 2026-09-05 red team (5 blind reviewers):** `travel.factor`
+  is validated in `dayWeight` exactly like a period factor (finite, in (0, 1],
+  else the default ½) so a script-written typo can never make the walk run
+  backwards; `isOnWeek` tolerates a plan with no/garbage `parentCycle`
+  (`DEFAULT_ANCHOR_MONDAY` 2026-08-17, the same default sanitizePlan writes and
+  the bot's `is_on_week` uses); `planDeltaChip(finish, base, toleranceDays=7)`
+  gained a tolerance and subjects.js passes **14 for weekly/cycle rhythms**
+  (`chipTolerance`) because their 1/7 smear lets two day-precise walks drift a
+  week band-to-band (LoE rows read "1 wk late" beside "≈ on plan"); `plural()`
+  is exported and used for every "wk(s)" chip. tests/plan-hardening.test.mjs +
+  tests/plan-chip-tolerance.test.mjs ↔ bot tests/test_hardening.py.
 - `rhythm.sessionsPerDay` (optional, default 1): sessions a teaching day
   covers. Singapore Math = 2 (textbook + workbook are done the SAME day, one
   lesson/day). weekCapacity multiplies its base by it; garbage values read as
@@ -472,7 +483,8 @@ docs/superpowers/specs/2026-08-19-subjects-chapter-timeline-design.md.
   tb-wb chain (Singapore chapter); `simple` chains split into `BAND_SIZE`(10)-unit
   DISPLAY bands (`loe-c:81-90` keys, band size can change with no migration);
   total rows capped at WALK_CAP. `chainTimeline(act, from, plan)` — same
-  week-walk as projectFinish; **invariant: the last unfinished row WITH
+  day-walk (`capacityDays`, day-precise since 2026-09-05; a week-walk before)
+  as projectFinish; **invariant: the last unfinished row WITH
   sessions>0 lands exactly on projectFinish's date** (0-session placeholder
   rows pass through `finish:null` — never scan with bare `!r.complete`).
   `actualFinishes(act, log)` — real dates replayed from the log; bulk `done`

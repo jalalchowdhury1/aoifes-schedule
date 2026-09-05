@@ -1021,10 +1021,13 @@ const speedWord = f => (Math.abs(f - 0.5) < 1e-9 ? 'half' : `${Math.round(f * 10
 // The caption under the Now tile, and the sentence under both tiles. Both
 // answer "is she keeping up?", which is a question about PACE — sessions
 // logged against sessions the plan's pace expected — and never about the gap
-// between two projected finish dates. Those dates are walked in whole weeks
-// from `mondayOf(today)`, so two snapshots taken on different weekdays differ
-// by 7 days for no reason; differencing them is what told the family "7
-// lessons behind" on the day their child was 2 lessons ahead (2026-08-31).
+// between two projected finish dates. Until 2026-09-05 those dates were
+// walked in whole weeks from `mondayOf(today)`, so two snapshots taken on
+// different weekdays differed by 7 days for no reason; differencing them is
+// what told the family "7 lessons behind" on the day their child was 2
+// lessons ahead (2026-08-31). The walk is day-precise now, but a date
+// difference still mixes in travel placement and a frozen plan's age — pace
+// stays the honest measure.
 export function paceCaption(gap) {
   if (!gap) return 'no plan frozen yet';
   const n = Math.round(gap.lessons);

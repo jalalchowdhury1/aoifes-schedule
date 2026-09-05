@@ -9,8 +9,15 @@ import {
   todayStr, actTotal, currentCur, nextSession,
   projectFinish, requiredPerCycle, targetStats, okCls,
   chainTimeline, actualFinishes, compareSubjects,
-  lessonTotals, timelineRows, planDeltaChip, mondayOf, addDays, dailyStreak,
+  lessonTotals, timelineRows, planDeltaChip, mondayOf, addDays, dailyStreak, plural,
 } from './model.js';
+
+// Per-row plan-vs-now chips: a weekly/cycle rhythm smears its capacity over
+// the week, so two day-precise walks anchored on different weekdays can drift
+// a whole band by a week while the pace is steady (LoE, 2026-09-05: four rows
+// read "1 wk late" beside "≈ on plan"). One rhythm period of tolerance for
+// those; daily rhythms keep the 7-day default.
+const chipTolerance = a => (a.rhythm?.kind === 'daily' ? 7 : 14);
 import { plan, setActivityStatus, setTravelMode, setBaseline, getActivity } from './state.js';
 
 // Full year — "May 9, 2027" (owner choice 2026-08-23 after trying "May 9 ’27";
@@ -45,8 +52,8 @@ function paceLine(a) {
   if (a.goal?.finishBy) {
     const slackW = Math.round((new Date(a.goal.finishBy) - new Date(fin.date)) / 604800000);
     out += slackW >= 0
-      ? `<span class="pchip ok">${slackW} wks ahead of goal</span>`
-      : `<span class="pchip warn">${-slackW} wks past goal</span>`;
+      ? `<span class="pchip ok">${plural(slackW, 'wk')} ahead of goal</span>`
+      : `<span class="pchip warn">${plural(-slackW, 'wk')} past goal</span>`;
     const need = requiredPerCycle(a, today, p);
     if (need != null) out += `<span class="pchip">need ${need.toFixed(1)}/cycle</span>`;
   }
@@ -75,11 +82,11 @@ function timelineHtml(a) {
       if (!curSeen && r.sessions > 0) { curSeen = true; cls += ' cur'; }
       const b = base ? base[r.key] : null;
       let chip = '';
-      const delta = planDeltaChip(r.finish, b);
+      const delta = planDeltaChip(r.finish, b, chipTolerance(a));
       if (delta) {
         chip = delta.state === 'on' ? `<span class="pchip">≈ on plan</span>`
-          : delta.state === 'ahead' ? `<span class="pchip ok">${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} early</span>`
-          : `<span class="pchip warn">${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} late</span>`;
+          : delta.state === 'ahead' ? `<span class="pchip ok">${plural(delta.weeks, 'wk')} early</span>`
+          : `<span class="pchip warn">${plural(delta.weeks, 'wk')} late</span>`;
       }
       // Each plan/now pair is one no-wrap segment so a narrow phone wraps
       // between segments, never inside a date.
@@ -167,11 +174,11 @@ function pacedNoteLine(a) {
   const rows = chainTimeline(a, today, p);
   const cur = [...rows].reverse().find(r => !r.complete && r.sessions > 0);
   const base = a.baseline?.rows;
-  const delta = cur ? planDeltaChip(cur.finish, base ? base[cur.key] : null) : null;
+  const delta = cur ? planDeltaChip(cur.finish, base ? base[cur.key] : null, chipTolerance(a)) : null;
   if (delta) {
     parts.push(delta.state === 'on' ? 'on plan'
-      : delta.state === 'ahead' ? `▲ ${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} ahead of plan`
-      : `▼ ${delta.weeks} wk${delta.weeks > 1 ? 's' : ''} behind`);
+      : delta.state === 'ahead' ? `▲ ${plural(delta.weeks, 'wk')} ahead of plan`
+      : `▼ ${plural(delta.weeks, 'wk')} behind`);
   }
   // (b) sessions logged this week, Mon..Sun.
   const weekStart = mondayOf(today), weekEnd = addDays(weekStart, 6);
