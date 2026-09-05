@@ -31,7 +31,7 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph, pillHtml, pillsHtml } = await import('../js/m.js');
+const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph, pillHtml, pillsHtml, travelCaption } = await import('../js/m.js');
 const { planGapDays, planDeltaChip, paceGap, paceGapLessons, expectedSessions } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
@@ -255,4 +255,49 @@ test('pillHtml: three shapes by state; the current one carries dots, reviews and
   assert.match(cur, /<i class="pd full"><\/i><i class="pd half"><\/i><i class="pd empty"><\/i><i class="prv">◆<\/i><b>1.5\/3<\/b><\/span>$/);
   assert.equal(pillsHtml({ pills: [] }), '');
   assert.match(pillsHtml({ pills: [{ kind: 'done', short: 'Ch 1' }] }), /^<div class="pills">.*<\/div>$/);
+});
+
+// ── Subjects sheet subtitle: the travel clause describes the REAL pace ──────
+// 2026-09-05: it used to hard-code " · half speed on trips" for any `reduced`
+// mode. The DC trip now prices Singapore at 0.67 via periods[].factors while
+// the winter trip stays 0.5, so the clause names such trips explicitly.
+const SM_T = { id: 'singapore', travel: { mode: 'reduced', factor: 0.5 } };
+const DC_T = { id: 'p2', start: '2026-09-30', end: '2026-10-05', type: 'travel',
+  label: "DC trip — staying at Raisa Khalamoni's", factors: { singapore: 0.67 } };
+const WINTER_T = { id: 'p1', start: '2027-01-04', end: '2027-02-07', type: 'travel',
+  label: 'Winter trip: IST/Dhaka/Bangkok/Singapore (est. — book ~Sept)' };
+
+test('travelCaption: reduced at ½ with no per-trip factors reads exactly as before', () => {
+  assert.equal(travelCaption(SM_T, [WINTER_T]), ' · half speed on trips');
+  assert.equal(travelCaption(SM_T, []), ' · half speed on trips');
+  assert.equal(travelCaption(SM_T, undefined), ' · half speed on trips');
+});
+
+test('travelCaption: a per-trip factor for this activity is appended, named by the label\'s first clause', () => {
+  assert.equal(travelCaption(SM_T, [DC_T, WINTER_T]), ' · half speed on trips · DC trip: 67%');
+});
+
+test('travelCaption: a per-trip factor for ANOTHER activity is not mentioned', () => {
+  assert.equal(travelCaption({ id: 'geography', travel: { mode: 'pause' } }, [DC_T]), ' · pauses on trips');
+});
+
+test('travelCaption: a per-trip factor overrides even a pause mode, and says so', () => {
+  const dc = { ...DC_T, factors: { geography: 1 } };
+  assert.equal(travelCaption({ id: 'geography', travel: { mode: 'pause' } }, [dc]), ' · pauses on trips · DC trip: 100%');
+});
+
+test('travelCaption: a reduced factor other than ½ is spelled as a percentage; missing factor = ½', () => {
+  assert.equal(travelCaption({ id: 'x', travel: { mode: 'reduced', factor: 0.25 } }, []), ' · 25% speed on trips');
+  assert.equal(travelCaption({ id: 'x', travel: { mode: 'reduced' } }, []), ' · half speed on trips');
+});
+
+test('travelCaption: continue and pause modes are unchanged', () => {
+  assert.equal(travelCaption({ id: 'x', travel: { mode: 'continue' } }, []), ' · keeps going on trips');
+  assert.equal(travelCaption({ id: 'x' }, []), ' · pauses on trips');
+});
+
+test('travelCaption: an unlabelled period falls back to its id; off periods never appear', () => {
+  const bare = { id: 'p9', start: '2026-11-01', end: '2026-11-02', type: 'travel', factors: { singapore: 0.8 } };
+  const off = { id: 'o1', start: '2026-11-03', end: '2026-11-03', type: 'off', factors: { singapore: 1 } };
+  assert.equal(travelCaption(SM_T, [bare, off]), ' · half speed on trips · p9: 80%');
 });

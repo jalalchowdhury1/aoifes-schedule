@@ -103,7 +103,10 @@ via MutationObserver.
   across the 35-day winter trip, but the family wants ≥ 4 lessons over the
   6-day DC trip (Sep 30 – Oct 5) — live value `p2.factors = { singapore: 0.67 }`
   → 6 × 0.67 × 2 sessions/day ≈ 8 sessions = 4 lessons. `m/widget.js` carries
-  the same function (rebuild it).
+  the same function (rebuild it). The /m Subjects sheet subtitle names such
+  trips — `travelCaption(act, periods)` in js/m.js (exported, tested in
+  tests/plan-m.test.mjs): "half speed on trips · DC trip: 67%"; a reduced
+  factor other than ½ is spelled as a percentage.
 - `rhythm.sessionsPerDay` (optional, default 1): sessions a teaching day
   covers. Singapore Math = 2 (textbook + workbook are done the SAME day, one
   lesson/day). weekCapacity multiplies its base by it; garbage values read as

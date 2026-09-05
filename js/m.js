@@ -12,7 +12,7 @@ import {
 import {
   todayStr, addDays, mondayOf, dayStatus, currentCur, nextSession,
   chainTimeline, planDeltaChip, paceGapLessons, actTotal, daysBetween, dayIdx, isWorkDay,
-  actualFinishes,
+  actualFinishes, periodFactor,
 } from './plan/model.js';
 import { dayItems, dayHeader, nowBlock, dayState, fieldClassFor, subjectCards, receipt,
          tbWbCard, weekGlance, statusMark } from './plan/mday.js';
@@ -991,11 +991,32 @@ function openSubjectSheet(id) {
 function subtitleFor(act) {
   const r = act.rhythm || {};
   const spd = Number(r.sessionsPerDay) > 1 ? `${r.sessionsPerDay} sessions a day` : '1 lesson a day';
-  const travel = act.travel?.mode === 'reduced' ? ' · half speed on trips'
-    : act.travel?.mode === 'continue' ? ' · keeps going on trips' : ' · pauses on trips';
   const hasTbWb = (act.chain || []).some(c => c.pattern === 'tb-wb');
-  return `${spd}${hasTbWb ? ' · textbook + workbook' : ''}${travel}`;
+  return `${spd}${hasTbWb ? ' · textbook + workbook' : ''}${travelCaption(act, plan.data.periods)}`;
 }
+
+// The travel clause of the sheet subtitle, from the REAL pace: the activity's
+// own mode (a reduced factor other than ½ is spelled as a percentage), then
+// one " · <trip>: NN%" per travel period that prices THIS activity on its own
+// (periods[].factors, 2026-09-05) — named by the first clause of its label
+// ("DC trip — staying at…" → "DC trip"), falling back to the period id.
+// Pure and exported for tests; `off` periods never carry a pace, so they
+// never appear.
+export function travelCaption(act, periods) {
+  const mode = act?.travel?.mode;
+  let s = mode === 'continue' ? ' · keeps going on trips'
+    : mode === 'reduced' ? ` · ${speedWord(act.travel.factor ?? 0.5)} speed on trips`
+    : ' · pauses on trips';
+  for (const p of Array.isArray(periods) ? periods : []) {
+    if (!p || p.type !== 'travel') continue;
+    const f = periodFactor(p, act?.id);
+    if (f == null) continue;
+    const name = String(p.label || p.id || '').split(/\s+[—–-]\s+|:\s/)[0].trim() || String(p.id);
+    s += ` · ${name}: ${Math.round(f * 100)}%`;
+  }
+  return s;
+}
+const speedWord = f => (Math.abs(f - 0.5) < 1e-9 ? 'half' : `${Math.round(f * 100)}%`);
 
 // The caption under the Now tile, and the sentence under both tiles. Both
 // answer "is she keeping up?", which is a question about PACE — sessions
