@@ -84,10 +84,26 @@ via MutationObserver.
 - KV key `aoife_plan` (+ `aoife_plan_prev` one-step undo, written by plan-save);
   localStorage `aoife_plan_v1`; same double-wrap POST convention as /api/save.
 - Shape: {version, year, parentCycle{anchorMonday,dutyStart,confirmed},
-  periods[{id:"p<n>",start,end,type:'travel'|'off',label}],
+  periods[{id:"p<n>",start,end,type:'travel'|'off',label,factors?{<activityId>:0..1}}],
   activities[{id,type,status,cls,onGrid,slots,rhythm,travel,goal,target,note,chain[
   {id,name,pattern:'simple'|'tb-wb',firstUnit,lastUnit,lessons,tests,done,titles}]}],
   overrides[{date,action,...}], log[{date,activityId|eventId,status,...}]}
+- `periods[].factors` (optional, 2026-09-05): `{ <activityId>: number in (0, 1] }`
+  — what ONE day of THAT trip is worth to THAT activity, for that trip only.
+  Precedence in `dayWeight`: an `off` day is 0 for everyone → a period factor
+  naming this activity → the activity's own `travel` mode (unchanged
+  behaviour when the map is absent or does not name the activity). It is the
+  more specific claim, so it beats a `pause` mode too. `cleanPeriod` keeps only
+  entries that are finite numbers in (0, 1] and omits the key when none
+  survive; `updatePeriod` patches fields in place so a label/date edit never
+  drops it; `addPeriod` never sets it (Claude/API only, like `startFrom`).
+  Mirrored line-for-line in aoife-school-bot `compose.period_factor` /
+  `day_weight` (tests/plan-period-factors.test.mjs ↔ tests/test_period_factors.py
+  share fixtures and numbers). Why: Singapore Math runs every-other-day (0.5)
+  across the 35-day winter trip, but the family wants ≥ 4 lessons over the
+  6-day DC trip (Sep 30 – Oct 5) — live value `p2.factors = { singapore: 0.67 }`
+  → 6 × 0.67 × 2 sessions/day ≈ 8 sessions = 4 lessons. `m/widget.js` carries
+  the same function (rebuild it).
 - `rhythm.sessionsPerDay` (optional, default 1): sessions a teaching day
   covers. Singapore Math = 2 (textbook + workbook are done the SAME day, one
   lesson/day). weekCapacity multiplies its base by it; garbage values read as

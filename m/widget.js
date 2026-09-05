@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build effabe609a */
+ * build 004b21adad */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -158,10 +158,24 @@ const awayDaysInWeek = (periods, weekStart) => {
 // average across it — over a 4-day span that all falls inside a trip, the
 // week-average said the plan expected 6.6 sessions where the trip's own half
 // speed expects 4.
+// A period may name its own per-activity factor — `factors: { singapore: 0.67 }`
+// — for THAT trip only (2026-09-05: 4+ Singapore lessons over the 6-day DC
+// trip while the winter trip stays every-other-day). It is the more specific
+// claim, so it beats the activity's travel mode; `off` still beats everything.
+// Only a finite number in (0, 1] counts — anything else reads as "not set".
+const periodFactor = (period, actId) => {
+  const map = period?.factors;
+  if (!map || typeof map !== 'object' || Array.isArray(map) || actId == null) return null;
+  const v = map[actId];
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 1 ? v : null;
+};
+
 function dayWeight(act, dateStr, periods) {
   const away = dayAway(periods, dateStr);
   if (!away) return 1;
   if (away.type === 'off') return 0;                          // everything pauses
+  const f = periodFactor(away, act?.id);
+  if (f != null) return f;
   const t = act?.travel || { mode: 'pause' };
   if (t.mode === 'continue') return 1;
   if (t.mode === 'reduced') return (t.factor ?? 0.5);
@@ -560,8 +574,21 @@ const cleanPeriod = p => {
   const id = p.id == null ? '' : String(p.id);
   if (!id || !isISO(p.start) || !isISO(p.end) || p.start > p.end) return null;
   if (!PERIOD_TYPES.includes(p.type)) return null;
+  const factors = cleanFactors(p.factors);
   return { id, start: p.start, end: p.end, type: p.type,
-    ...(p.label ? { label: String(p.label) } : {}) };
+    ...(p.label ? { label: String(p.label) } : {}),
+    ...(factors ? { factors } : {}) };
+};
+
+// `factors` survives a round trip only as { <activityId>: number in (0, 1] };
+// every other entry is dropped, and an empty/invalid map is omitted outright.
+const cleanFactors = raw => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (periodFactor({ factors: { [k]: v } }, k) != null) out[String(k)] = v;
+  }
+  return Object.keys(out).length ? out : null;
 };
 
 // v1 → v2: every marked week becomes a 7-day period (Mon..Sun). `light` is gone
