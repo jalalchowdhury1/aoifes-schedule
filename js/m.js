@@ -814,20 +814,17 @@ function renderWeek() {
   const isCurWeek = weekStart === curMon;
   const g = weekGlance(weekStart, store.events, plan.data, today, nameForEvent);
 
-  let h = `<div class="wknav">
+  const nav = `<div class="wknav">
     <button type="button" class="wkstep glass" data-wk="-1" aria-label="Previous week">‹</button>
     <div class="wklabel"><b>${esc(weekRangeLabel(weekStart, weekEnd))}</b>${g.mamaLabel ? `<span class="dim">${esc(g.mamaLabel)}</span>` : ''}</div>
     <button type="button" class="wkstep glass" data-wk="1" aria-label="Next week">›</button>
   </div>`;
-  if (!isCurWeek) h += `<button type="button" id="wk-today" class="cap vio wk-today-cap">This week</button>`;
-  h += weekSummaryHtml(g, today);
-  h += weekGridHtml(g, today);
-  h += weekChangesHtml(g);
+  const thisWeek = isCurWeek ? '' : `<button type="button" id="wk-today" class="cap vio wk-today-cap">This week</button>`;
 
   const sel = state.weekDate;
   const status = dayStatus(plan.data.periods, sel);
   const hd = dayHeader(sel, plan.data);
-  h += `<div class="psec">${esc(hd.dateLabel)}${sel === today ? ' · Today' : sel === addDays(today, 1) ? ' · Tomorrow' : sel === addDays(today, -1) ? ' · Yesterday' : ''}</div>`;
+  const dayHead = `<div class="psec">${esc(hd.dateLabel)}${sel === today ? ' · Today' : sel === addDays(today, 1) ? ' · Tomorrow' : sel === addDays(today, -1) ? ' · Yesterday' : ''}</div>`;
   let body;
   if (status.away) {
     body = `<div class="glass away-banner">${status.type === 'off' ? '⏸' : '✈'} ${esc((status.label || '').replace(/[✈⏸]/g, '').trim() || (status.type === 'off' ? 'Off' : 'Time away'))} · day ${status.dayN} of ${status.total}</div>`;
@@ -851,8 +848,18 @@ function renderWeek() {
     </div>`).join('')}${isToday ? `<div class="wkhint dim">Tap a row to log it on Today</div>` : ''}</div>`;
   }
 
-  el.innerHTML = h + body;
+  el.innerHTML = assembleWeekTab({ nav, thisWeek, summary: weekSummaryHtml(g, today),
+    grid: weekGridHtml(g, today), changes: weekChangesHtml(g), dayHead, dayBody: body });
   wireWeekNav(el);
+}
+
+// Week tab, top to bottom. User directive 2026-09-06 ("put the today on top
+// and the changes this week below it, the other stuff stays where it is"):
+// the selected day's card comes first under the week nav, then "Changes this
+// week", then the glance (summary card, grid) in their old relative order.
+// Pure so tests can pin the order (tests/plan-m.test.mjs).
+export function assembleWeekTab({ nav, thisWeek, summary, grid, changes, dayHead, dayBody }) {
+  return nav + (thisWeek || '') + dayHead + dayBody + changes + summary + grid;
 }
 
 function shiftWeek(nWeeks) {

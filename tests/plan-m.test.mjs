@@ -31,7 +31,7 @@ globalThis.document = {
 };
 
 const { plan } = await import('../js/plan/state.js');
-const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph, pillHtml, pillsHtml, travelCaption } = await import('../js/m.js');
+const { lastDoneEntry, paceCaption, paceSentence, controlsFor, blockGlyph, pillHtml, pillsHtml, travelCaption, assembleWeekTab } = await import('../js/m.js');
 const { planGapDays, planDeltaChip, paceGap, paceGapLessons, expectedSessions } = await import('../js/plan/model.js');
 
 const ACT = { id: 'singapore' };
@@ -303,4 +303,25 @@ test('travelCaption: an unlabelled period falls back to its id; off periods neve
   const bare = { id: 'p9', start: '2026-11-01', end: '2026-11-02', type: 'travel', factors: { singapore: 0.8 } };
   const off = { id: 'o1', start: '2026-11-03', end: '2026-11-03', type: 'off', factors: { singapore: 1 } };
   assert.equal(travelCaption(SM_T, [bare, off]), ' · half speed on trips · p9: 80%');
+});
+
+// ── Week tab section order (user, 2026-09-06: "put the today on top and the
+// changes this week below it, the other stuff stays where it is") ──────────
+// Was: nav · summary · grid · changes · selected day. Now the selected-day
+// card comes first under the nav, then Changes, then the glance (summary +
+// grid) in their old relative order. assembleWeekTab is the pure assembly
+// renderWeek feeds; pinning it here keeps the order from silently reverting.
+test('assembleWeekTab: nav, then the selected day, then changes, then summary + grid', () => {
+  const parts = { nav: '<NAV>', thisWeek: '<THISWEEK>', summary: '<SUMMARY>', grid: '<GRID>',
+    changes: '<CHANGES>', dayHead: '<DAYHEAD>', dayBody: '<DAYBODY>' };
+  const html = assembleWeekTab(parts);
+  const at = s => html.indexOf(s);
+  for (const s of Object.values(parts)) assert.ok(at(s) >= 0, `${s} missing`);
+  assert.ok(at('<NAV>') < at('<THISWEEK>'), 'nav before This-week button');
+  assert.ok(at('<THISWEEK>') < at('<DAYHEAD>'), 'This-week button before the day card');
+  assert.ok(at('<DAYHEAD>') < at('<DAYBODY>'), 'day heading before its body');
+  assert.ok(at('<DAYBODY>') < at('<CHANGES>'), 'day card before Changes this week');
+  assert.ok(at('<CHANGES>') < at('<SUMMARY>'), 'Changes before the week summary');
+  assert.ok(at('<SUMMARY>') < at('<GRID>'), 'summary before the grid (unchanged relative order)');
+  assert.equal(assembleWeekTab({ ...parts, thisWeek: '' }).includes('<THISWEEK>'), false);
 });

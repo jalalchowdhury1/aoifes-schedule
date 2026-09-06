@@ -913,8 +913,13 @@ the parts worth keeping.
 - **Week tab = the week at a glance (2026-08-31, spec docs/superpowers/specs/
   2026-08-31-m-week-glance-design.md).** One pure model, `weekGlance(weekStart,
   events, plan, today, nameForEvent)` in js/plan/mday.js (tests pin it on the
-  fixture's real Aug 24–30 week), drawn by `renderWeek` in js/m.js. Top to
-  bottom: ‹ › nav with an HONEST Mama caption (`mamaRuns` — runs of `isWorkDay`
+  fixture's real Aug 24–30 week), drawn by `renderWeek` in js/m.js.
+  **Order since 2026-09-06 (user: "put the today on top and the changes this
+  week below it, the other stuff stays where it is"): nav · the selected day's
+  card · "Changes this week" · the week card · the grid card** — assembled by
+  the pure, tested `assembleWeekTab` (tests/plan-m.test.mjs pins the order).
+  The parts, described in their ORIGINAL 2026-08-31 top-to-bottom order:
+  ‹ › nav with an HONEST Mama caption (`mamaRuns` — runs of `isWorkDay`
   across Mon..Sun, e.g. "Mama: work Mon · home Tue–Sun"; the old caption read
   Monday alone, and a Tue→Mon duty stretch makes Monday the odd one out six
   days in seven, so it was wrong for most of every week) · the week card
