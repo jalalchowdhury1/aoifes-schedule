@@ -853,13 +853,12 @@ function renderWeek() {
   wireWeekNav(el);
 }
 
-// Week tab, top to bottom. User directive 2026-09-06 ("put the today on top
-// and the changes this week below it, the other stuff stays where it is"):
-// the selected day's card comes first under the week nav, then "Changes this
-// week", then the glance (summary card, grid) in their old relative order.
-// Pure so tests can pin the order (tests/plan-m.test.mjs).
+// Week tab, top to bottom. User directive 2026-09-06 (second pass, from a
+// screenshot): the grid "on top", then the "10 of 13 classes" week card, then
+// the selected day's card, then "Changes this week" last. Pure so tests can
+// pin the order (tests/plan-m.test.mjs).
 export function assembleWeekTab({ nav, thisWeek, summary, grid, changes, dayHead, dayBody }) {
-  return nav + (thisWeek || '') + dayHead + dayBody + changes + summary + grid;
+  return nav + (thisWeek || '') + grid + summary + dayHead + dayBody + changes;
 }
 
 function shiftWeek(nWeeks) {
