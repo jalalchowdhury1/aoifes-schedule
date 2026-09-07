@@ -411,7 +411,9 @@ Google Calendar via `buildTimed`/`activity_slot_events` but never the grid.
 Spec: docs/superpowers/specs/2026-08-19-v2.8-family-feedback-batch.md — every
 item was explicitly confirmed that evening. All additive on top of v2.7.
 - **Subjects order.** `compareSubjects(a, b)` (js/plan/model.js) sorts by a
-  fixed `SUBJECT_ORDER` array (singapore, loe, geography, then the core
+  fixed `SUBJECT_ORDER` array (singapore, loe, dunavant — BYL Geography was
+  cancelled 2026-09-06 on the user's word and left the array, so its record
+  sorts last — then the core
   categories, then science/jj/history/core-mama); an id not in the list sorts
   after every known one, stable among themselves by the OLD status order
   (active/planned/parked/done/cancelled). Replaces the pure status sort.

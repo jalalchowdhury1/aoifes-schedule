@@ -169,9 +169,12 @@ test('nowBlock: after the last timed block -> state "after" with a count of unlo
 });
 
 // ── subjectCards ──────────────────────────────────────────────
-test('subjectCards: order is SUBJECT_ORDER (paced only) — Singapore, LoE, Geography, History', () => {
+// 2026-09-06: 'geography' left SUBJECT_ORDER (BYL Geography cancelled, Dunavant
+// took its slot). This fixture predates Dunavant and still has geography ACTIVE,
+// so it now sorts after every known id — last here, behind History.
+test('subjectCards: order is SUBJECT_ORDER (paced only) — Singapore, LoE, History, then the unlisted Geography', () => {
   const cards = subjectCards(plan, TODAY);
-  assert.deepEqual(cards.map(c => c.id), ['singapore', 'loe', 'geography', 'history']);
+  assert.deepEqual(cards.map(c => c.id), ['singapore', 'loe', 'history', 'geography']);
 });
 
 // finish: 241 sessions left at 2/day; Aug 30's own sessions are already logged
@@ -392,7 +395,7 @@ test('emojiFor: known keys map to the bot\'s EMOJI_MAP, unknown keys fall back',
   assert.equal(emojiFor('loe'), '📚');
   assert.equal(emojiFor('nonsense'), EMOJI_FALLBACK);
   assert.equal(emojiFor(undefined), EMOJI_FALLBACK);
-  assert.equal(Object.keys(EMOJI_MAP).length, 10);
+  assert.equal(Object.keys(EMOJI_MAP).length, 11);
 });
 
 test('colorFor: the three named subjects get their dot color, everything else neutral', () => {
@@ -1019,4 +1022,17 @@ test('subjectCards: an active paced subject carries its pills; a planned one car
   const cards = subjectCards(p, '2026-09-02');
   assert.deepEqual(cards.find(c => c.id === 'singapore').pills.map(g => g.kind), ['cur']);
   assert.deepEqual(cards.find(c => c.id === 'geography').pills, []);
+});
+
+// 2026-09-06 (user): BYL Geography cancelled, Dunavant takes its place. A
+// cancelled paced subject must drop off the /m Subjects list (its record stays
+// on the desktop, sorted last); parked ones still show as "not started".
+test('subjectCards: a cancelled paced subject is not listed; a parked one still is', () => {
+  const plan = sanitizePlan({ ...rawPlan, activities: rawPlan.activities.map(a =>
+    a.id === 'geography' ? { ...a, status: 'cancelled' } : a) });
+  const ids = subjectCards(plan, '2026-09-06').map(c => c.id);
+  assert.equal(ids.includes('geography'), false, 'cancelled geography must be hidden');
+  assert.ok(ids.includes('singapore') && ids.includes('loe'), 'active subjects stay');
+  const parked = rawPlan.activities.find(a => a.status === 'parked');
+  if (parked) assert.ok(ids.includes(parked.id), 'a parked subject still shows as not started');
 });

@@ -23,13 +23,13 @@ import {
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
 export const EMOJI_MAP = {
   quran: '📖', ruhamah: '✏️', hala: '🕌', art: '🎨', barakot: '🏠',
-  geography: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
+  geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
 };
 export const EMOJI_FALLBACK = '📌';
 export const emojiFor = key => (key != null && EMOJI_MAP[key]) || EMOJI_FALLBACK;
 
 // ── Subject color dots (Subjects tab + Year) ────────────────
-export const SUBJECT_COLORS = { singapore: '#e8834a', loe: '#5ea3f2', geography: '#4cc9b0', science: '#378add' };
+export const SUBJECT_COLORS = { singapore: '#e8834a', loe: '#5ea3f2', geography: '#4cc9b0', dunavant: '#4cc9b0', science: '#378add' };
 export const SUBJECT_COLOR_NEUTRAL = '#9aa0b4';
 export const colorFor = id => SUBJECT_COLORS[id] || SUBJECT_COLOR_NEUTRAL;
 
@@ -479,7 +479,9 @@ export function chapterPills(act) {
 // finish/delta — projecting a date for a subject that hasn't started yet
 // would be fiction (same rule subjects.js's paceLine already applies).
 export function subjectCards(plan, dateStr) {
-  const acts = (plan?.activities || []).filter(a => a && a.type === 'paced');
+  // A cancelled subject drops off the phone list (2026-09-06: BYL Geography
+  // replaced by Dunavant); parked ones still show as "not started".
+  const acts = (plan?.activities || []).filter(a => a && a.type === 'paced' && a.status !== 'cancelled');
   return [...acts].sort(compareSubjects).map(a => {
     const lt = lessonTotals(a);
     const pct = lt.total ? Math.round((lt.done / lt.total) * 100) : 0;

@@ -190,7 +190,9 @@ export const okCls = x => (CLS.has(x) ? x : 'ot');
 // this list (a future activity) sorts after every known one, stable among
 // THEMSELVES by the OLD status order (active/planned/parked/done/cancelled)
 // — the rule this list replaces for everything it names.
-export const SUBJECT_ORDER = ['singapore', 'loe', 'geography', 'core-ruhamah',
+// 2026-09-06 (user): BYL "Geography" is cancelled — Dunavant Geography takes
+// its slot right after Logic of English; the cancelled record sorts last.
+export const SUBJECT_ORDER = ['singapore', 'loe', 'dunavant', 'core-ruhamah',
   'core-hala', 'core-quran', 'core-art', 'science', 'jj', 'history', 'core-mama'];
 const SUBJECT_STATUS_ORDER = { active: 0, planned: 1, parked: 2, done: 3, cancelled: 4 };
 export function compareSubjects(a, b) {

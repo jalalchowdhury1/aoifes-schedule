@@ -1023,15 +1023,18 @@ test('planDeltaChip: null when either date is missing', () => {
 
 // ── compareSubjects (planner-v2.8: fixed Subjects tab order) ─
 test('compareSubjects: known ids follow the fixed order regardless of input order', () => {
-  assert.deepEqual(SUBJECT_ORDER, ['singapore', 'loe', 'geography', 'core-ruhamah',
+  // 2026-09-06: dunavant took geography's slot (BYL Geography cancelled); the
+  // cancelled geography record is no longer in the list and sorts last.
+  assert.deepEqual(SUBJECT_ORDER, ['singapore', 'loe', 'dunavant', 'core-ruhamah',
     'core-hala', 'core-quran', 'core-art', 'science', 'jj', 'history', 'core-mama']);
   const acts = [
     { id: 'core-mama', status: 'active' }, { id: 'history', status: 'active' },
     { id: 'singapore', status: 'planned' }, { id: 'loe', status: 'active' },
-    { id: 'geography', status: 'planned' }, { id: 'core-ruhamah', status: 'active' },
+    { id: 'dunavant', status: 'active' }, { id: 'core-ruhamah', status: 'active' },
+    { id: 'geography', status: 'cancelled' },
   ];
   const sorted = [...acts].sort(compareSubjects).map(a => a.id);
-  assert.deepEqual(sorted, ['singapore', 'loe', 'geography', 'core-ruhamah', 'history', 'core-mama']);
+  assert.deepEqual(sorted, ['singapore', 'loe', 'dunavant', 'core-ruhamah', 'history', 'core-mama', 'geography']);
 });
 
 test('compareSubjects: unknown ids sort after every known one, by the old status order among themselves', () => {

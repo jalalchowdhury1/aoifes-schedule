@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build c61f8d99ee */
+ * build a3633f3da3 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -273,7 +273,9 @@ const okCls = x => (CLS.has(x) ? x : 'ot');
 // this list (a future activity) sorts after every known one, stable among
 // THEMSELVES by the OLD status order (active/planned/parked/done/cancelled)
 // — the rule this list replaces for everything it names.
-const SUBJECT_ORDER = ['singapore', 'loe', 'geography', 'core-ruhamah',
+// 2026-09-06 (user): BYL "Geography" is cancelled — Dunavant Geography takes
+// its slot right after Logic of English; the cancelled record sorts last.
+const SUBJECT_ORDER = ['singapore', 'loe', 'dunavant', 'core-ruhamah',
   'core-hala', 'core-quran', 'core-art', 'science', 'jj', 'history', 'core-mama'];
 const SUBJECT_STATUS_ORDER = { active: 0, planned: 1, parked: 2, done: 3, cancelled: 4 };
 function compareSubjects(a, b) {
@@ -1079,13 +1081,13 @@ const doneOn = (log, actId, dateStr) =>
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
 const EMOJI_MAP = {
   quran: '📖', ruhamah: '✏️', hala: '🕌', art: '🎨', barakot: '🏠',
-  geography: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
+  geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
 };
 const EMOJI_FALLBACK = '📌';
 const emojiFor = key => (key != null && EMOJI_MAP[key]) || EMOJI_FALLBACK;
 
 // ── Subject color dots (Subjects tab + Year) ────────────────
-const SUBJECT_COLORS = { singapore: '#e8834a', loe: '#5ea3f2', geography: '#4cc9b0', science: '#378add' };
+const SUBJECT_COLORS = { singapore: '#e8834a', loe: '#5ea3f2', geography: '#4cc9b0', dunavant: '#4cc9b0', science: '#378add' };
 const SUBJECT_COLOR_NEUTRAL = '#9aa0b4';
 const colorFor = id => SUBJECT_COLORS[id] || SUBJECT_COLOR_NEUTRAL;
 
@@ -1535,7 +1537,9 @@ function chapterPills(act) {
 // finish/delta — projecting a date for a subject that hasn't started yet
 // would be fiction (same rule subjects.js's paceLine already applies).
 function subjectCards(plan, dateStr) {
-  const acts = (plan?.activities || []).filter(a => a && a.type === 'paced');
+  // A cancelled subject drops off the phone list (2026-09-06: BYL Geography
+  // replaced by Dunavant); parked ones still show as "not started".
+  const acts = (plan?.activities || []).filter(a => a && a.type === 'paced' && a.status !== 'cancelled');
   return [...acts].sort(compareSubjects).map(a => {
     const lt = lessonTotals(a);
     const pct = lt.total ? Math.round((lt.done / lt.total) * 100) : 0;
