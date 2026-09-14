@@ -88,6 +88,12 @@ via MutationObserver.
   activities[{id,type,status,cls,onGrid,slots,rhythm,travel,goal,target,note,chain[
   {id,name,pattern:'simple'|'tb-wb',firstUnit,lastUnit,lessons,tests,done,titles}]}],
   overrides[{date,action,...}], log[{date,activityId|eventId,status,...}]}
+- `activities[].subtitle` (optional string, 2026-09-14): when non-blank it REPLACES
+  the next-lesson line under the class name on the phone day card (`buildTimed`)
+  and the week grid block (`gridSlots`), via `subtitleOf` in js/plan/model.js.
+  Live: `dunavant` = name "Geography", subtitle "Dunavant Academy" (user: show
+  the subject, then the school, not "Lesson 3"). Claude/API only, no editor UI.
+  The bot (compose.py) and gcal-sync do not read it.
 - `periods[].factors` (optional, 2026-09-05): `{ <activityId>: number in (0, 1] }`
   — what ONE day of THAT trip is worth to THAT activity, for that trip only.
   Precedence in `dayWeight`: an `off` day is 0 for everyone → a period factor

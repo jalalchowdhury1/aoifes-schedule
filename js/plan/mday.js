@@ -17,7 +17,7 @@ import {
   dayIdx, dayStatus, isWorkDay, currentCur, nextSession, okCls, sessionsCount,
   actTotal, lessonTotals, chainTimeline, projectFinish, planDeltaChip, paceGapLessons,
   dailyStreak, mondayOf, addDays, compareSubjects, s2d, sessionLabel,
-  expectedSessions, dayAway, nextIndex, isSessionDone, timelineRows,
+  expectedSessions, dayAway, nextIndex, isSessionDone, timelineRows, subtitleOf,
 } from './model.js';
 
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
@@ -79,7 +79,7 @@ export function buildTimed(dateStr, events, plan, nameForEvent = ev => ev.name |
         const cur = currentCur(a);
         items.push({ key: `act:${a.id}`, kind: 'timed', eventId: undefined, activityId: a.id,
           cls: okCls(a.cls), name: a.name, emoji: emojiFor(a.id), start: s.start, end: s.end,
-          note: cur && nextSession(cur) ? nextSession(cur).label : '', ask: true });
+          note: subtitleOf(a) || (cur && nextSession(cur) ? nextSession(cur).label : ''), ask: true });
       }
   for (const [i, o] of overrides.entries())
     if (o && o.date === dateStr && o.action === 'add') {

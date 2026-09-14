@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build a3633f3da3 */
+ * build f0c9097225 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -305,6 +305,11 @@ const actRemaining = act => Math.max(0, actTotal(act) - actDone(act));
 // given, a block whose weekday has a matching {action:'skip', activityId,
 // date} override for THIS week is greyed (red-team M2 — the grid used to show
 // a skipped class as if it were happening, disagreeing with the phone).
+// An activity may carry an optional `subtitle` (2026-09-14: Dunavant Academy
+// under "Geography"). When set it replaces the next-lesson line wherever a
+// class block shows one (phone day card, week grid). Blank = old behaviour.
+const subtitleOf = a => (a && typeof a.subtitle === "string" && a.subtitle.trim()) || "";
+
 function gridSlots(activities, overrides = [], weekStart = null) {
   const ov = Array.isArray(overrides) ? overrides : [];
   const out = [];
@@ -312,7 +317,7 @@ function gridSlots(activities, overrides = [], weekStart = null) {
     if (!a || a.status !== 'active' || !a.onGrid || !Array.isArray(a.slots)) continue;
     const cur = a.type === 'paced' ? currentCur(a) : null;
     const ns = cur ? nextSession(cur) : null;
-    const note = ns ? ns.label : '';
+    const note = subtitleOf(a) || (ns ? ns.label : '');
     a.slots.forEach((s, idx) => {
       if (!s || !Number.isInteger(s.day) || s.day < 0 || s.day > 6) return;
       if (typeof s.start !== 'number' || typeof s.end !== 'number') return;
@@ -1137,7 +1142,7 @@ function buildTimed(dateStr, events, plan, nameForEvent = ev => ev.name || catLa
         const cur = currentCur(a);
         items.push({ key: `act:${a.id}`, kind: 'timed', eventId: undefined, activityId: a.id,
           cls: okCls(a.cls), name: a.name, emoji: emojiFor(a.id), start: s.start, end: s.end,
-          note: cur && nextSession(cur) ? nextSession(cur).label : '', ask: true });
+          note: subtitleOf(a) || (cur && nextSession(cur) ? nextSession(cur).label : ''), ask: true });
       }
   for (const [i, o] of overrides.entries())
     if (o && o.date === dateStr && o.action === 'add') {
