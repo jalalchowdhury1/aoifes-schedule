@@ -23,7 +23,7 @@ import {
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
 export const EMOJI_MAP = {
   quran: '📖', ruhamah: '📚', hala: '🌙', art: '🎨', barakot: '🏠',
-  geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
+  geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📖', singapore: '➗',
 };
 export const EMOJI_FALLBACK = '📌';
 export const emojiFor = key => (key != null && EMOJI_MAP[key]) || EMOJI_FALLBACK;

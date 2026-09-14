@@ -56,7 +56,7 @@ test('dayItems: Mon Aug 31 — 5 items, timed first (Quran, Ruhama, Jiu Jitsu) t
 
   assert.equal(loe.activityId, 'loe');
   assert.equal(loe.note, 'Lesson 105');
-  assert.equal(loe.emoji, '📚');
+  assert.equal(loe.emoji, '📖');
   assert.equal(loe.status, undefined);
 });
 
@@ -392,7 +392,7 @@ test('dailyVisible: normal day always visible; travel-day respects travel.mode; 
 test('emojiFor: known keys map to the bot\'s EMOJI_MAP, unknown keys fall back', () => {
   assert.equal(emojiFor('quran'), '📖');
   assert.equal(emojiFor('singapore'), '➗');
-  assert.equal(emojiFor('loe'), '📚');
+  assert.equal(emojiFor('loe'), '📖');
   assert.equal(emojiFor('nonsense'), EMOJI_FALLBACK);
   assert.equal(emojiFor(undefined), EMOJI_FALLBACK);
   assert.equal(Object.keys(EMOJI_MAP).length, 11);

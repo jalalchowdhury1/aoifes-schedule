@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build a78cba6171 */
+ * build 84ee28eeda */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -1086,7 +1086,7 @@ const doneOn = (log, actId, dateStr) =>
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
 const EMOJI_MAP = {
   quran: '📖', ruhamah: '📚', hala: '🌙', art: '🎨', barakot: '🏠',
-  geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
+  geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📖', singapore: '➗',
 };
 const EMOJI_FALLBACK = '📌';
 const emojiFor = key => (key != null && EMOJI_MAP[key]) || EMOJI_FALLBACK;
