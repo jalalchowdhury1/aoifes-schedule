@@ -2,7 +2,7 @@
  * scripts/build-widget.mjs from js/model.js + js/plan/model.js +
  * js/plan/mday.js + scripts/widget-ui.js. NEVER edit this file by hand —
  * edit the sources and rebuild: node scripts/build-widget.mjs
- * build f0c9097225 */
+ * build a78cba6171 */
 (async () => {
 /* ── js/model.js ── */
 // Pure data model — no DOM, no storage. Imported by the app and by Node tests.
@@ -59,7 +59,7 @@ const maxIdNum = events =>
 
 // An event may additionally carry `ask: false` (additive, 2026-09-02): the
 // Optional `emoji` on an event: shown in the phone's Week grid / Today rows instead
-// of the category's default (Jumu'ah 🤲; cat 'other' would otherwise fall back to 📌).
+// of the category's default (Jumu'ah 🕌; cat 'other' would otherwise fall back to 📌).
 // block is real on the calendar/grid/print, but no ✓/◐/✗ question is ever
 // asked about it (Jumu'ah) — isValidEvent/sanitizeEvents/updateEvent all
 // pass it through untouched since none of them check beyond the keys below.
@@ -1085,7 +1085,7 @@ const doneOn = (log, actId, dateStr) =>
 
 // ── Emoji map (port of the bot's EMOJI_MAP) ─────────────────
 const EMOJI_MAP = {
-  quran: '📖', ruhamah: '✏️', hala: '🕌', art: '🎨', barakot: '🏠',
+  quran: '📖', ruhamah: '📚', hala: '🌙', art: '🎨', barakot: '🏠',
   geography: '🌍', dunavant: '🌍', science: '🔬', jj: '🥋', loe: '📚', singapore: '➗',
 };
 const EMOJI_FALLBACK = '📌';

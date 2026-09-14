@@ -42,7 +42,7 @@ test('dayItems: Mon Aug 31 — 5 items, timed first (Quran, Ruhama, Jiu Jitsu) t
   assert.match(ruhama.name, /Ruhama/);
   assert.equal(ruhama.start, 11);
   assert.equal(ruhama.end, 13);
-  assert.equal(ruhama.emoji, '✏️');
+  assert.equal(ruhama.emoji, '📚');
 
   assert.equal(jj.activityId, 'jj');
   assert.equal(jj.start, 16);
@@ -526,7 +526,7 @@ test('receipt: a day with nothing logged -> empty array (no empty line to render
 test('receipt: emoji/order — timed rows first (schedule order), then dailies', () => {
   const rows = receipt('2026-08-30', events, plan);
   assert.equal(rows[0].name, 'Ruhama');
-  assert.equal(rows[0].emoji, '✏️');
+  assert.equal(rows[0].emoji, '📚');
 });
 
 // review 2 fix: the paired-region boundary was ignored, so a trailing
@@ -975,9 +975,9 @@ test('buildTimed: a template event may carry its own emoji; otherwise the catego
   const p = sanitizePlan({ version: 2, year: 2026, parentCycle: { anchorMonday: '2026-08-17', dutyStart: '2026-08-11', confirmed: true },
     periods: [], overrides: [], activities: [], log: [] });
   const evs = [{ id: 'q4', cat: 'quran', day: 4, start: 10, end: 11 },
-               { id: 'e1013', cat: 'other', day: 4, start: 12, end: 15, name: "Jumu'ah", emoji: '🤲' }];
+               { id: 'e1013', cat: 'other', day: 4, start: 12, end: 15, name: "Jumu'ah", emoji: '🕌' }];
   const items = buildTimed('2026-09-04', evs, p);
-  assert.deepEqual(items.map(it => it.emoji), ['📖', '🤲']);
+  assert.deepEqual(items.map(it => it.emoji), ['📖', '🕌']);
 });
 
 // ── chapterPills (Subjects card capsules, style C) ──

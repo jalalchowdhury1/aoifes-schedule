@@ -66,6 +66,10 @@ via MutationObserver.
   `weekGlance`, the phone's N-of-M counters, `widgetNext`'s done/total and the
   bot's check-in/`unlogged_items` all skip it; now/next timers, the preview
   and `last_class_end` still see it. Missing/other values = askable.
+- Optional `emoji` on an event (2026-09-14): overrides the category emoji on the
+  phone (Week grid, Today rows, widget) and in the bot's messages (compose.py
+  `Item.emoji_own`). Live: Jumu'ah e1013 = 🕌. Category map (`EMOJI_MAP`,
+  js/plan/mday.js ↔ bot compose.py, keep both in step): hala 🌙, ruhamah 📚.
 - Extra localStorage keys (additive, safe): aoife_theme, aoife_mobile_view
 - Load-time sanitization: events missing id/cat or with non-numeric day/start/end
   are dropped by sanitizeEvents (the live KV blob once contained a corrupt stray
